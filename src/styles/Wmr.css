@@ -1,0 +1,113 @@
+.wmr-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.wmr-toolbar {
+  margin-top: 4px;
+}
+
+.wmr-search-wrapper {
+  width: 280px;
+}
+
+.badge-status-pending {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.badge-status-disposal {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.badge-status-repair {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.badge-status-repaired {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.wmr-remarks-button {
+  border: none;
+  background: transparent;
+  color: #059669;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 3px 10px;
+  border-radius: 8px;
+}
+
+.wmr-remarks-button:hover {
+  background: transparent;
+  text-decoration: underline;
+}
+
+.wmr-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.wmr-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+  padding: 20px 24px 18px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.wmr-modal-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.wmr-modal-text {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.wmr-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.wmr-modal-button-secondary {
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.wmr-modal-button-save {
+  border-radius: 8px;
+  border: none;
+  background: #059669;
+  color: #ffffff;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.wmr-modal-button-save:disabled {
+  opacity: 0.7;
+  cursor: default;
+}

@@ -1,0 +1,60 @@
+/* Shared logout modal styles (used by sidebar sign-out and other confirmations) */
+
+.logout-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.logout-modal {
+  background: #ffffff;
+  border-radius: 16px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+  padding: 20px 24px 18px;
+  width: 100%;
+  max-width: 360px;
+}
+
+.logout-modal-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.logout-modal-text {
+  margin: 0 0 18px;
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.logout-modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.logout-modal-button-secondary {
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.logout-modal-button-primary {
+  border-radius: 8px;
+  border: none;
+  background: #dc2626;
+  color: #ffffff;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}

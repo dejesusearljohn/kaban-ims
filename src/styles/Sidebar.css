@@ -1,0 +1,143 @@
+.sidebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 260px;
+  background: #fffef2;
+  color: #111827;
+  display: flex;
+  flex-direction: column;
+  padding: 20px 0 16px;
+  gap: 0;
+  border-right: 1px solid #e4e4d6;
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 0 16px 12px;
+  border-bottom: 1px solid #e4e4d6;
+}
+
+.sidebar-logo {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: #16a34a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  margin-top: 2px;
+}
+
+.sidebar-logo img {
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.sidebar-title h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  color: #0b5e3b;
+}
+
+.sidebar-title p {
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.sidebar-user {
+  font-size: 12px;
+  padding: 8px 20px;
+  background: transparent;
+  color: #111827;
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e4e4d6;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  padding-top: 4px;
+}
+
+.sidebar-link {
+  border: none;
+  background: transparent;
+  color: #111827;
+  text-align: left;
+  padding: 10px 20px;
+  border-radius: 0;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-link:hover {
+  background: rgba(0, 153, 102, 0.08);
+}
+
+.sidebar-link-active {
+  background: rgba(0, 153, 102, 0.2);
+  color: #00b37a;
+  border-right: 1.6px solid #3d997d;
+  font-weight: 600;
+}
+
+.sidebar-link.sidebar-link-active:hover {
+  background: rgba(0, 153, 102, 0.2);
+}
+
+.sidebar-signout {
+  margin-top: auto;
+  border: none;
+  background: transparent;
+  color: #b91c1c;
+  text-align: left;
+  padding: 10px 20px;
+  border-radius: 0;
+  font-size: 13px;
+  cursor: pointer;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid #e4e4d6;
+}
+
+.sidebar-signout:hover {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+.sidebar-link-icon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sidebar-link-icon img {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.sidebar-link-icon svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
