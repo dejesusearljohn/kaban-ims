@@ -111,3 +111,39 @@
   opacity: 0.7;
   cursor: default;
 }
+
+.vehicle-status-action {
+  font-weight: 600;
+}
+
+.vehicle-status-serviceable {
+  color: #15803d;
+}
+
+.vehicle-status-unserviceable {
+  color: #b91c1c;
+}
+
+.vehicle-edit-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.vehicle-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  margin-top: 6px;
+}
+
+.vehicle-edit-actions .wmr-modal-button-secondary {
+  flex: 0 0 auto;
+}
+
+.vehicle-edit-actions .wmr-modal-button-save {
+  flex: 0 0 auto;
+}

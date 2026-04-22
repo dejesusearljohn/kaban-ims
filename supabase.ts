@@ -112,9 +112,12 @@ export type Database = {
           item_name: string
           item_type: string
           photo_path: string | null
+          property_no: string | null
           qr_code: string | null
           quantity: number | null
           status: string | null
+          unit_cost: number | null
+          unit_of_measure: string | null
         }
         Insert: {
           acquisition_mode?: string | null
@@ -126,9 +129,12 @@ export type Database = {
           item_name: string
           item_type: string
           photo_path?: string | null
+          property_no?: string | null
           qr_code?: string | null
           quantity?: number | null
           status?: string | null
+          unit_cost?: number | null
+          unit_of_measure?: string | null
         }
         Update: {
           acquisition_mode?: string | null
@@ -140,9 +146,12 @@ export type Database = {
           item_name?: string
           item_type?: string
           photo_path?: string | null
+          property_no?: string | null
           qr_code?: string | null
           quantity?: number | null
           status?: string | null
+          unit_cost?: number | null
+          unit_of_measure?: string | null
         }
         Relationships: [
           {
@@ -154,30 +163,74 @@ export type Database = {
           },
         ]
       }
+      inventory_photos: {
+        Row: {
+          created_at: string | null
+          item_id: number | null
+          photo_id: number
+          photo_url: string
+        }
+        Insert: {
+          created_at?: string | null
+          item_id?: number | null
+          photo_id?: number
+          photo_url: string
+        }
+        Update: {
+          created_at?: string | null
+          item_id?: number | null
+          photo_id?: number
+          photo_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_photos_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory"
+            referencedColumns: ["item_id"]
+          },
+        ]
+      }
       par_records: {
         Row: {
           contact_snapshot: string | null
+          cost_snapshot: number | null
+          date_acquired_snapshot: string | null
+          description_snapshot: string | null
           issue_date: string | null
           issued_to_id: string | null
           item_id: number | null
           par_id: number
+          property_no_snapshot: string | null
           quantity_issued: number
+          unit_snapshot: string | null
         }
         Insert: {
           contact_snapshot?: string | null
+          cost_snapshot?: number | null
+          date_acquired_snapshot?: string | null
+          description_snapshot?: string | null
           issue_date?: string | null
           issued_to_id?: string | null
           item_id?: number | null
           par_id?: number
+          property_no_snapshot?: string | null
           quantity_issued: number
+          unit_snapshot?: string | null
         }
         Update: {
           contact_snapshot?: string | null
+          cost_snapshot?: number | null
+          date_acquired_snapshot?: string | null
+          description_snapshot?: string | null
           issue_date?: string | null
           issued_to_id?: string | null
           item_id?: number | null
           par_id?: number
+          property_no_snapshot?: string | null
           quantity_issued?: number
+          unit_snapshot?: string | null
         }
         Relationships: [
           {

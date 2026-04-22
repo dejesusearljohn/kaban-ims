@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { FormEvent } from 'react'
 import '../styles/App.css'
 import { supabase } from '../supabaseClient'
@@ -11,19 +11,14 @@ type SignInPageProps = {
 }
 
 function SignInPage({ onSignInSuccess }: SignInPageProps) {
-  const [username, setUsername] = useState('')
+  const rememberedUsername =
+    typeof window !== 'undefined' ? window.localStorage.getItem('kabanRememberedUsername') ?? '' : ''
+
+  const [username, setUsername] = useState(rememberedUsername)
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [rememberMe, setRememberMe] = useState(false)
-
-  useEffect(() => {
-		const savedUsername = window.localStorage.getItem('kabanRememberedUsername')
-		if (savedUsername) {
-			setUsername(savedUsername)
-			setRememberMe(true)
-		}
-	}, [])
+  const [rememberMe, setRememberMe] = useState(Boolean(rememberedUsername))
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()

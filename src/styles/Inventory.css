@@ -121,6 +121,10 @@
   padding: 8px 0;
 }
 
+.inventory-table-title {
+  padding: 8px 18px 10px;
+}
+
 .inventory-table {
   width: 100%;
   border-collapse: collapse;
@@ -183,7 +187,7 @@
   border: none;
   background: transparent;
   cursor: pointer;
-  padding: 2px;
+  padding: 4px;
   border-radius: 999px;
   display: inline-flex;
   align-items: center;
@@ -191,8 +195,8 @@
 }
 
 .inventory-icon-button svg {
-  width: 16px;
-  height: 16px;
+  width: 20px;
+  height: 20px;
 }
 
 .inventory-icon-button:hover:not(:disabled) {
@@ -263,16 +267,134 @@
 }
 
 .inventory-photo-drop {
+  width: 100%;
   border-radius: 12px;
   border: 1px dashed #d1d5db;
   background: #fafafa;
   padding: 20px 12px;
   text-align: center;
+  cursor: pointer;
+}
+
+.inventory-photo-drop:hover {
+  border-color: #00b37a;
 }
 
 .inventory-photo-text {
   font-size: 12px;
   color: #6b7280;
+}
+
+.inventory-photo-list {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inventory-photo-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+  padding: 3px 9px;
+  font-size: 11px;
+}
+
+.inventory-gallery-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.inventory-gallery-thumb {
+  width: 64px;
+  height: 64px;
+  border-radius: 10px;
+  border: 1px solid #d1d5db;
+  overflow: hidden;
+  padding: 0;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.inventory-gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.inventory-gallery-thumb-active {
+  border-color: #059669;
+  box-shadow: 0 0 0 1px rgba(5, 150, 105, 0.2);
+}
+
+.inventory-delete-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.42);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.inventory-delete-modal {
+  width: min(420px, calc(100vw - 28px));
+  background: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #fecaca;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.2);
+  padding: 18px 20px 16px;
+}
+
+.inventory-delete-modal-title {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: #991b1b;
+}
+
+.inventory-delete-modal-text {
+  margin: 0;
+  font-size: 13px;
+  color: #374151;
+}
+
+.inventory-delete-modal-subtext {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.inventory-delete-modal-actions {
+  margin-top: 14px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.inventory-delete-button-cancel {
+  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  background: #f9fafb;
+  color: #374151;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.inventory-delete-button-confirm {
+  border-radius: 8px;
+  border: none;
+  background: #dc2626;
+  color: #ffffff;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
 }
 
 .inventory-add-actions {

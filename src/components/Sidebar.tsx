@@ -3,7 +3,7 @@ import { BANICAIN_LOGO_URL } from './SignInPage'
 import { supabase } from '../supabaseClient'
 import '../styles/Sidebar.css'
 
-export type SidebarSection = 'dashboard' | 'inventory' | 'wmr'
+export type SidebarSection = 'dashboard' | 'inventory' | 'stockpile' | 'wmr' | 'par' | 'vehicles'
 
 type SidebarProps = {
   activeSection: SidebarSection
@@ -56,6 +56,19 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
           <span className="sidebar-link-text">Inventory</span>
         </button>
         <button
+          className={`sidebar-link ${activeSection === 'stockpile' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('stockpile')}
+        >
+          <span className="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <rect x="3" y="5" width="18" height="14" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M3 9h18M7 5v14M17 5v14" fill="none" stroke="currentColor" strokeWidth="1.6" />
+            </svg>
+          </span>
+          <span className="sidebar-link-text">Stockpile</span>
+        </button>
+        <button
           className={`sidebar-link ${activeSection === 'wmr' ? 'sidebar-link-active' : ''}`}
           type="button"
           onClick={() => onChangeSection('wmr')}
@@ -69,7 +82,11 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
           </span>
           <span className="sidebar-link-text">Waste Materials Report</span>
         </button>
-        <button className="sidebar-link" type="button">
+        <button
+          className={`sidebar-link ${activeSection === 'par' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('par')}
+        >
           <span className="sidebar-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <rect x="7" y="3" width="10" height="18" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -78,7 +95,11 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
           </span>
           <span className="sidebar-link-text">PAR</span>
         </button>
-        <button className="sidebar-link" type="button">
+        <button
+          className={`sidebar-link ${activeSection === 'vehicles' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('vehicles')}
+        >
           <span className="sidebar-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <rect x="3" y="9" width="18" height="7" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -88,15 +109,6 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
             </svg>
           </span>
           <span className="sidebar-link-text">Vehicles</span>
-        </button>
-        <button className="sidebar-link" type="button">
-          <span className="sidebar-link-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M12 3l8 4.5-8 4.5L4 7.5 12 3z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M4 12l8 4.5 8-4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-            </svg>
-          </span>
-          <span className="sidebar-link-text">Stockpile</span>
         </button>
         <button className="sidebar-link" type="button">
           <span className="sidebar-link-icon" aria-hidden="true">

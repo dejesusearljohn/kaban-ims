@@ -1,0 +1,82 @@
+.par-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.par-form-card {
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 2px 4px 6px rgba(0, 0, 0, 0.08);
+  padding: 18px 20px;
+}
+
+.par-form-title {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #111827;
+}
+
+.par-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+}
+
+.par-form-grid .inventory-field-full {
+  grid-column: 1 / -1;
+}
+
+.par-table-toolbar {
+  margin-top: 2px;
+}
+
+.par-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
+}
+
+.par-modal {
+  width: min(920px, calc(100vw - 32px));
+  max-height: calc(100vh - 40px);
+  overflow: auto;
+  background: #ffffff;
+  border-radius: 16px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+  padding: 18px 20px 16px;
+}
+
+.par-view-table-wrap {
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.par-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2px 16px;
+  margin-bottom: 10px;
+}
+
+.par-view-table tbody td {
+  white-space: nowrap;
+}
+
+@media (max-width: 960px) {
+  .par-form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .par-meta-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
