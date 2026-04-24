@@ -129,3 +129,27 @@
     grid-template-columns: 1fr;
   }
 }
+
+@media (max-width: 960px) {
+  .reports-period {
+    width: 100%;
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .reports-period > div,
+  .reports-date-group {
+    width: 100%;
+  }
+
+  .reports-period-select,
+  .reports-date-input,
+  .reports-date-group input {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .reports-card {
+    padding: 12px;
+  }
+}

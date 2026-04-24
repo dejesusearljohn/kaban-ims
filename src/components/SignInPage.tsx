@@ -25,7 +25,7 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
     setError(null)
     setLoading(true)
 
-    const { error: signInError } = await supabase.auth.signInWithPassword({
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
       email: username,
       password,
     })
@@ -33,6 +33,30 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
     if (signInError) {
       setError(signInError.message)
     } else {
+      const userId = signInData.user?.id
+
+      if (!userId) {
+        await supabase.auth.signOut()
+        setError('Unable to validate account access. Please try again.')
+        setLoading(false)
+        return
+      }
+
+      const { data: userRow, error: roleError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', userId)
+        .maybeSingle()
+
+      const isSuperAdmin = !roleError && !!userRow && (userRow.role ?? '').trim().toLowerCase() === 'super admin'
+
+      if (!isSuperAdmin) {
+        await supabase.auth.signOut()
+        setError('Access denied. Only the Super Admin account can access this system.')
+        setLoading(false)
+        return
+      }
+
       if (rememberMe) {
         window.localStorage.setItem('kabanRememberedUsername', username)
       } else {

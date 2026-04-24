@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { supabase } from '../supabaseClient'
+import { createTransientSupabaseClient, supabase } from '../supabaseClient'
 import type { Tables } from '../../supabase'
 import Sidebar from './Sidebar'
 import InventorySection from './InventorySection'
@@ -119,6 +119,8 @@ const STOCKPILE_STATUS_COLORS: Record<string, string> = {
   Expired: '#6b7280',
 }
 
+const DEFAULT_STAFF_INITIAL_PASSWORD = '123456'
+
 function DashboardPage() {
   // [STATE] Navigation and dashboard overview
   const [activeSection, setActiveSection] = useState<SidebarSection>('dashboard')
@@ -133,6 +135,15 @@ function DashboardPage() {
   const [departments, setDepartments] = useState<DepartmentOverview[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [newDepartmentName, setNewDepartmentName] = useState('')
+  const [newDepartmentCode, setNewDepartmentCode] = useState('')
+  const [addingDepartment, setAddingDepartment] = useState(false)
+  const [departmentFormMode, setDepartmentFormMode] = useState<'add' | 'edit'>('add')
+  const [departmentFormTargetId, setDepartmentFormTargetId] = useState<number | null>(null)
+  const [departmentUpdatingId, setDepartmentUpdatingId] = useState<number | null>(null)
+  const [departmentError, setDepartmentError] = useState<string | null>(null)
+  const [departmentSuccess, setDepartmentSuccess] = useState<string | null>(null)
+  const [currentAdminName, setCurrentAdminName] = useState('Super Admin')
   const [settingsProfileLoading, setSettingsProfileLoading] = useState(false)
   const [settingsUserId, setSettingsUserId] = useState<string | null>(null)
   const [settingsEmail, setSettingsEmail] = useState('')
@@ -146,6 +157,9 @@ function DashboardPage() {
   const [settingsSuccessMessage, setSettingsSuccessMessage] = useState<string | null>(null)
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null)
   const [staffDepartmentFilter, setStaffDepartmentFilter] = useState('all')
+  const [departmentStaffMode, setDepartmentStaffMode] = useState<
+    'add-staff' | 'add-department' | 'manage-staff' | 'manage-department'
+  >('manage-staff')
   const [staffFormMode, setStaffFormMode] = useState<'add' | 'edit'>('add')
   const [staffFormTargetId, setStaffFormTargetId] = useState<string | null>(null)
   const [staffFormDepartmentId, setStaffFormDepartmentId] = useState('')
@@ -202,12 +216,24 @@ function DashboardPage() {
     return `${departmentCode}${String(nextNumber).padStart(3, '0')}`
   }
 
+  const buildDepartmentCode = (departmentName: string) =>
+    departmentName
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9 ]/g, '')
+      .split(/\s+/)
+      .filter((part) => part.length > 0)
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 8)
+
   // [STATE] Inventory section
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
   const [inventoryLoading, setInventoryLoading] = useState(false)
   const [inventoryError, setInventoryError] = useState<string | null>(null)
   const [newItemName, setNewItemName] = useState('')
   const [newItemType, setNewItemType] = useState('')
+  const [newItemDepartmentId, setNewItemDepartmentId] = useState('')
   const [newQuantity, setNewQuantity] = useState('')
   const [newUnitOfMeasure, setNewUnitOfMeasure] = useState('')
   const [newUnitCost, setNewUnitCost] = useState('')
@@ -227,6 +253,7 @@ function DashboardPage() {
   const [editingItem, setEditingItem] = useState<InventoryRow | null>(null)
   const [editItemName, setEditItemName] = useState('')
   const [editItemType, setEditItemType] = useState('')
+  const [editDepartmentId, setEditDepartmentId] = useState('')
   const [editQuantity, setEditQuantity] = useState('')
   const [editUnitOfMeasure, setEditUnitOfMeasure] = useState('')
   const [editUnitCost, setEditUnitCost] = useState('')
@@ -329,6 +356,150 @@ function DashboardPage() {
   const [releaseIssuedToInput, setReleaseIssuedToInput] = useState('')
   const [releaseReasonInput, setReleaseReasonInput] = useState('')
   const [releasingStockpile, setReleasingStockpile] = useState(false)
+
+  const resetDepartmentForm = () => {
+    setDepartmentFormMode('add')
+    setDepartmentFormTargetId(null)
+    setNewDepartmentName('')
+    setNewDepartmentCode('')
+  }
+
+  const startEditDepartment = (department: DepartmentOverview) => {
+    setDepartmentFormMode('edit')
+    setDepartmentFormTargetId(department.id)
+    setNewDepartmentName(department.name)
+    setNewDepartmentCode(department.code)
+    setDepartmentError(null)
+    setDepartmentSuccess(null)
+  }
+
+  const handleSaveDepartment = async () => {
+    const trimmedName = newDepartmentName.trim()
+    const trimmedCodeInput = newDepartmentCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, '')
+    const deptCode = trimmedCodeInput || buildDepartmentCode(trimmedName)
+
+    if (!trimmedName) {
+      setDepartmentError('Department name is required.')
+      return
+    }
+
+    if (!deptCode) {
+      setDepartmentError('Department code could not be generated. Please enter a code manually.')
+      return
+    }
+
+    setAddingDepartment(true)
+    setDepartmentError(null)
+    setDepartmentSuccess(null)
+
+    if (departmentFormMode === 'edit' && departmentFormTargetId != null) {
+      setDepartmentUpdatingId(departmentFormTargetId)
+
+      const { data, error: updateError } = await supabase
+        .from('departments')
+        .update({
+          dept_name: trimmedName,
+          dept_code: deptCode,
+        })
+        .eq('id', departmentFormTargetId)
+        .select('id, dept_name, dept_code')
+        .single()
+
+      if (updateError) {
+        setDepartmentError(updateError.message)
+        setDepartmentUpdatingId(null)
+        setAddingDepartment(false)
+        return
+      }
+
+      if (data) {
+        setDepartments((prev) =>
+          prev
+            .map((dept) =>
+              dept.id === data.id
+                ? {
+                    ...dept,
+                    name: data.dept_name,
+                    code: data.dept_code,
+                  }
+                : dept,
+            )
+            .sort((a, b) => a.id - b.id),
+        )
+      }
+
+      setDepartmentSuccess('Department updated successfully.')
+      resetDepartmentForm()
+      setDepartmentUpdatingId(null)
+      setAddingDepartment(false)
+      return
+    }
+
+    const { data, error: insertError } = await supabase
+      .from('departments')
+      .insert([
+        {
+          dept_name: trimmedName,
+          dept_code: deptCode,
+        },
+      ])
+      .select('id, dept_name, dept_code')
+      .single()
+
+    if (insertError) {
+      setDepartmentError(insertError.message)
+      setAddingDepartment(false)
+      return
+    }
+
+    if (data) {
+      setDepartments((prev) =>
+        [...prev, { id: data.id, name: data.dept_name, code: data.dept_code, totalItems: 0, serviceable: 0, unserviceable: 0, staffCount: 0, onlineCount: 0 }].sort((a, b) => a.id - b.id),
+      )
+    }
+
+    resetDepartmentForm()
+    setDepartmentSuccess('Department added successfully.')
+    setAddingDepartment(false)
+  }
+
+  const handleDeleteDepartment = async (department: DepartmentOverview) => {
+    if (typeof window !== 'undefined') {
+      const proceed = window.confirm(
+        `Delete ${department.name}? This only works if no staff or inventory items are linked to this department.`,
+      )
+      if (!proceed) return
+    }
+
+    setDepartmentUpdatingId(department.id)
+    setDepartmentError(null)
+    setDepartmentSuccess(null)
+
+    const { error: deleteError } = await supabase.from('departments').delete().eq('id', department.id)
+
+    if (deleteError) {
+      if (deleteError.code === '23503') {
+        setDepartmentError('Cannot delete this department because it is still assigned to staff or inventory items.')
+      } else {
+        setDepartmentError(deleteError.message)
+      }
+      setDepartmentUpdatingId(null)
+      return
+    }
+
+    setDepartments((prev) => prev.filter((dept) => dept.id !== department.id))
+
+    if (staffDepartmentFilter === String(department.id)) {
+      setStaffDepartmentFilter('all')
+    }
+
+    if (departmentFormTargetId === department.id) {
+      resetDepartmentForm()
+    }
+
+    setDepartmentSuccess('Department deleted successfully.')
+    setDepartmentUpdatingId(null)
+  }
 
   // [EFFECTS] Initial data loading
   useEffect(() => {
@@ -574,6 +745,7 @@ function DashboardPage() {
         setSettingsEmail(userRow?.email ?? user.email ?? '')
         setSettingsStaffId(userRow?.staff_id ?? '')
         setSettingsPositionInput(userRow?.position ?? '')
+        setCurrentAdminName(userRow?.full_name?.trim() || 'Super Admin')
       }
 
       setSettingsProfileLoading(false)
@@ -999,6 +1171,14 @@ function DashboardPage() {
       return user.department_id != null && String(user.department_id) === staffDepartmentFilter
     })
     .sort((a, b) => (a.full_name ?? '').localeCompare(b.full_name ?? ''))
+
+  const departmentStaffCountMap = parUsers
+    .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
+    .reduce((acc, user) => {
+      if (user.department_id == null) return acc
+      acc.set(user.department_id, (acc.get(user.department_id) ?? 0) + 1)
+      return acc
+    }, new Map<number, number>())
 
   const today = new Date()
   const stockpileStatusCountMap = stockpileItems.reduce((acc, item) => {
@@ -1757,6 +1937,7 @@ function DashboardPage() {
     setEditingItem(item)
     setEditItemName(item.item_name)
     setEditItemType(item.item_type)
+    setEditDepartmentId(item.department_id != null ? String(item.department_id) : '')
     setEditQuantity(item.quantity != null ? item.quantity.toString() : '')
     setEditUnitOfMeasure(item.unit_of_measure ?? '')
     setEditUnitCost(item.unit_cost != null ? item.unit_cost.toString() : '')
@@ -1769,8 +1950,8 @@ function DashboardPage() {
   const handleSaveEdit = async () => {
     if (!editingItem) return
 
-    if (!editItemName || !editItemType || !editDateAcquired) {
-      setInventoryError('Item name, type, and date acquired are required.')
+    if (!editItemName || !editItemType || !editDateAcquired || !editDepartmentId) {
+      setInventoryError('Item name, type, department, and date acquired are required.')
       return
     }
 
@@ -1797,6 +1978,7 @@ function DashboardPage() {
       .update({
         item_name: editItemName,
         item_type: editItemType,
+        department_id: Number(editDepartmentId),
         quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
         unit_of_measure: editUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
@@ -1898,6 +2080,7 @@ function DashboardPage() {
           : user,
       ),
     )
+    setCurrentAdminName(trimmedName)
     setSettingsSuccessMessage('Profile updated successfully.')
     setSettingsNameSaving(false)
   }
@@ -2058,10 +2241,37 @@ function DashboardPage() {
       return
     }
 
+    const transientAuthClient = createTransientSupabaseClient()
+    const { data: signUpData, error: signUpError } = await transientAuthClient.auth.signUp({
+      email: derivedEmail,
+      password: DEFAULT_STAFF_INITIAL_PASSWORD,
+      options: {
+        data: {
+          full_name: trimmedName,
+          staff_id: trimmedStaffId,
+          role: trimmedRole,
+        },
+      },
+    })
+
+    if (signUpError) {
+      setStaffError(signUpError.message)
+      setStaffSaving(false)
+      return
+    }
+
+    const authUserId = signUpData.user?.id
+    if (!authUserId) {
+      setStaffError('Auth account was not created. Please check authentication settings and try again.')
+      setStaffSaving(false)
+      return
+    }
+
     const { data: createdUser, error: createError } = await supabase
       .from('users')
       .insert([
         {
+          id: authUserId,
           department_id: deptId,
           full_name: trimmedName,
           email: derivedEmail,
@@ -2078,13 +2288,15 @@ function DashboardPage() {
       .single()
 
     if (createError) {
-      setStaffError(createError.message)
+      setStaffError(
+        `${createError.message} Auth account may already exist. If needed, remove the auth user in Supabase and retry.`,
+      )
       setStaffSaving(false)
       return
     }
 
     setParUsers((prev) => [createdUser, ...prev])
-    setStaffSuccess('Staff added successfully.')
+    setStaffSuccess('Staff added successfully. Authentication account was created.')
     resetStaffForm()
     setStaffSaving(false)
   }
@@ -2170,8 +2382,8 @@ function DashboardPage() {
   }
 
   const handleAddItem = async () => {
-    if (!newItemName || !newItemType || !newDateAcquired) {
-      setInventoryError('Item name, type, and date acquired are required.')
+    if (!newItemName || !newItemType || !newDateAcquired || !newItemDepartmentId) {
+      setInventoryError('Item name, type, department, and date acquired are required.')
       return
     }
 
@@ -2184,6 +2396,7 @@ function DashboardPage() {
       {
         item_name: newItemName,
         item_type: newItemType,
+        department_id: Number(newItemDepartmentId),
         quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
         unit_of_measure: newUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
@@ -2268,6 +2481,7 @@ function DashboardPage() {
     // Clear form
     setNewItemName('')
     setNewItemType('')
+    setNewItemDepartmentId('')
     setNewQuantity('')
     setNewUnitOfMeasure('')
     setNewUnitCost('')
@@ -2891,6 +3105,7 @@ function DashboardPage() {
         onChangeSection={setActiveSection}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        displayName={currentAdminName}
       />
 
       <main className="dashboard-main">
@@ -2899,7 +3114,7 @@ function DashboardPage() {
             <header className="dashboard-header">
               <div>
                 <h2>Dashboard</h2>
-                <p>Welcome back, Super Admin</p>
+                <p>Welcome back, {currentAdminName}</p>
               </div>
             </header>
 
@@ -3155,6 +3370,8 @@ function DashboardPage() {
             setNewItemName={setNewItemName}
             newItemType={newItemType}
             setNewItemType={setNewItemType}
+            newItemDepartmentId={newItemDepartmentId}
+            setNewItemDepartmentId={setNewItemDepartmentId}
             newQuantity={newQuantity}
             setNewQuantity={setNewQuantity}
             newUnitOfMeasure={newUnitOfMeasure}
@@ -3333,151 +3550,402 @@ function DashboardPage() {
                 <h3>Departments &amp; Staff</h3>
               </header>
               <div className="panel-body" style={{ display: 'grid', gap: 16 }}>
-                <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                  <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
-                    {staffFormMode === 'edit' ? 'Edit Staff' : 'Add Staff'}
-                  </h4>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department</label>
+                <section className="inventory-toolbar" aria-label="Departments and staff actions">
+                  <button
+                    type="button"
+                    className={departmentStaffMode === 'add-staff' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                    onClick={() => {
+                      setDepartmentStaffMode('add-staff')
+                      setStaffFormMode('add')
+                    }}
+                  >
+                    Add Staff
+                  </button>
+                  <button
+                    type="button"
+                    className={departmentStaffMode === 'add-department' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                    onClick={() => {
+                      setDepartmentStaffMode('add-department')
+                      resetDepartmentForm()
+                    }}
+                  >
+                    Add Department
+                  </button>
+                  <button
+                    type="button"
+                    className={departmentStaffMode === 'manage-staff' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                    onClick={() => setDepartmentStaffMode('manage-staff')}
+                  >
+                    Manage Staff
+                  </button>
+                  <button
+                    type="button"
+                    className={departmentStaffMode === 'manage-department' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                    onClick={() => setDepartmentStaffMode('manage-department')}
+                  >
+                    Manage Department
+                  </button>
+                </section>
+
+                {departmentStaffMode === 'add-department' && (
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
+                      {departmentFormMode === 'edit' ? 'Edit Department' : 'Add Department'}
+                    </h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 240px))', gap: 10, justifyContent: 'start' }}>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department Name</label>
+                        <input
+                          className="inventory-input"
+                          value={newDepartmentName}
+                          onChange={(e) => setNewDepartmentName(e.target.value)}
+                          placeholder="e.g. Rescue Department"
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department Code</label>
+                        <input
+                          className="inventory-input"
+                          value={newDepartmentCode}
+                          onChange={(e) => setNewDepartmentCode(e.target.value)}
+                          placeholder="Auto-generated if blank"
+                        />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        className="wmr-modal-button-save"
+                        onClick={() => {
+                          void handleSaveDepartment()
+                        }}
+                        disabled={addingDepartment}
+                      >
+                        {addingDepartment
+                          ? departmentFormMode === 'edit'
+                            ? 'Saving…'
+                            : 'Adding…'
+                          : departmentFormMode === 'edit'
+                            ? 'Save Department'
+                            : 'Add Department'}
+                      </button>
+                      {departmentFormMode === 'edit' && (
+                        <button
+                          type="button"
+                          className="wmr-modal-button-secondary"
+                          onClick={resetDepartmentForm}
+                          disabled={addingDepartment}
+                        >
+                          Cancel
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {departmentStaffMode === 'add-staff' && (
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
+                      {staffFormMode === 'edit' ? 'Edit Staff' : 'Add Staff'}
+                    </h4>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 240px))',
+                        gap: 10,
+                        justifyContent: 'start',
+                      }}
+                    >
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department</label>
+                        <select
+                          className="inventory-input"
+                          value={staffFormDepartmentId}
+                          onChange={(e) => handleAddStaffDepartmentChange(e.target.value)}
+                        >
+                          <option value="">Select department</option>
+                          {departments.map((dept) => (
+                            <option key={`staff-dept-${dept.id}`} value={String(dept.id)}>
+                              {dept.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Full Name</label>
+                        <input className="inventory-input" value={staffFormName} onChange={(e) => setStaffFormName(e.target.value)} />
+                      </div>
+                      {staffFormMode === 'edit' && (
+                        <>
+                          <div>
+                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Email</label>
+                            <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
+                              {buildStaffEmail(staffFormStaffId) || '—'}
+                            </div>
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Staff ID</label>
+                            <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
+                              {staffFormStaffId || '—'}
+                            </div>
+                          </div>
+                        </>
+                      )}
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Position</label>
+                        <input className="inventory-input" value={staffFormPosition} onChange={(e) => setStaffFormPosition(e.target.value)} />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Role</label>
+                        <select
+                          className="inventory-input"
+                          value={staffFormRole}
+                          onChange={(e) => setStaffFormRole(e.target.value)}
+                        >
+                          <option value="Staff">Staff</option>
+                          <option value="Admin">Admin</option>
+                        </select>
+                      </div>
+                      {staffFormMode === 'add' && (
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+                            Default Password
+                          </label>
+                          <input
+                            className="inventory-input"
+                            value={DEFAULT_STAFF_INITIAL_PASSWORD}
+                            readOnly
+                            style={{ maxWidth: 180, fontWeight: 500, background: '#f8fafc' }}
+                          />
+                        </div>
+                      )}
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Contact Info</label>
+                        <input className="inventory-input" value={staffFormContact} onChange={(e) => setStaffFormContact(e.target.value)} />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                      <button
+                        type="button"
+                        className="wmr-modal-button-save"
+                        onClick={() => {
+                          void handleSaveStaff()
+                        }}
+                        disabled={staffSaving}
+                      >
+                        {staffSaving ? 'Saving…' : staffFormMode === 'edit' ? 'Save Changes' : 'Add Staff'}
+                      </button>
+                      {staffFormMode === 'edit' && (
+                        <button
+                          type="button"
+                          className="wmr-modal-button-secondary"
+                          onClick={resetStaffForm}
+                          disabled={staffSaving}
+                        >
+                          Cancel Edit
+                        </button>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {departmentStaffMode === 'manage-staff' && (
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 12, alignItems: 'center' }}>
+                      <h4 style={{ margin: 0, fontSize: 15, color: '#111827' }}>Manage Staff</h4>
                       <select
                         className="inventory-input"
-                        value={staffFormDepartmentId}
-                        onChange={(e) => handleAddStaffDepartmentChange(e.target.value)}
+                        value={staffDepartmentFilter}
+                        onChange={(e) => setStaffDepartmentFilter(e.target.value)}
+                        style={{ maxWidth: 260 }}
                       >
-                        <option value="">Select department</option>
+                        <option value="all">All Departments</option>
                         {departments.map((dept) => (
-                          <option key={`staff-dept-${dept.id}`} value={String(dept.id)}>
+                          <option key={`staff-filter-${dept.id}`} value={String(dept.id)}>
                             {dept.name}
                           </option>
                         ))}
                       </select>
                     </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Full Name</label>
-                      <input className="inventory-input" value={staffFormName} onChange={(e) => setStaffFormName(e.target.value)} />
-                    </div>
-                    {staffFormMode === 'edit' && (
-                      <>
-                        <div>
-                          <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Email</label>
-                          <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
-                            {buildStaffEmail(staffFormStaffId) || '—'}
-                          </div>
-                        </div>
-                        <div>
-                          <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Staff ID</label>
-                          <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
-                            {staffFormStaffId || '—'}
-                          </div>
-                        </div>
-                      </>
-                    )}
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Position</label>
-                      <input className="inventory-input" value={staffFormPosition} onChange={(e) => setStaffFormPosition(e.target.value)} />
-                    </div>
-                    <div>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Role</label>
-                      <select
-                        className="inventory-input"
-                        value={staffFormRole}
-                        onChange={(e) => setStaffFormRole(e.target.value)}
-                      >
-                        <option value="Staff">Staff</option>
-                        <option value="Admin">Admin</option>
-                      </select>
-                    </div>
-                    <div style={{ gridColumn: '1 / -1' }}>
-                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Contact Info</label>
-                      <input className="inventory-input" value={staffFormContact} onChange={(e) => setStaffFormContact(e.target.value)} />
-                    </div>
-                  </div>
-                  <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
-                    <button
-                      type="button"
-                      className="wmr-modal-button-save"
-                      onClick={() => {
-                        void handleSaveStaff()
-                      }}
-                      disabled={staffSaving}
-                    >
-                      {staffSaving ? 'Saving…' : staffFormMode === 'edit' ? 'Save Changes' : 'Add Staff'}
-                    </button>
-                    {staffFormMode === 'edit' && (
-                      <button
-                        type="button"
-                        className="wmr-modal-button-secondary"
-                        onClick={resetStaffForm}
-                        disabled={staffSaving}
-                      >
-                        Cancel Edit
-                      </button>
-                    )}
-                  </div>
-                </section>
 
-                <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 12, alignItems: 'center' }}>
-                    <h4 style={{ margin: 0, fontSize: 15, color: '#111827' }}>Staff by Department</h4>
-                    <select
-                      className="inventory-input"
-                      value={staffDepartmentFilter}
-                      onChange={(e) => setStaffDepartmentFilter(e.target.value)}
-                      style={{ maxWidth: 260 }}
-                    >
-                      <option value="all">All Departments</option>
-                      {departments.map((dept) => (
-                        <option key={`staff-filter-${dept.id}`} value={String(dept.id)}>
-                          {dept.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div style={{ overflowX: 'auto' }}>
-                    <table className="inventory-table staff-table">
-                      <thead>
-                        <tr>
-                          <th scope="col">Staff ID</th>
-                          <th scope="col">Name</th>
-                          <th scope="col">Email</th>
-                          <th scope="col">Department</th>
-                          <th scope="col">Position</th>
-                          <th scope="col">Role</th>
-                          <th scope="col">Status</th>
-                          <th scope="col">Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {filteredDepartmentStaff.length === 0 ? (
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="inventory-table staff-table">
+                        <thead>
                           <tr>
-                            <td colSpan={8}>No staff records found for this department.</td>
+                            <th scope="col">Staff ID</th>
+                            <th scope="col">Name</th>
+                            <th scope="col">Email</th>
+                            <th scope="col">Department</th>
+                            <th scope="col">Position</th>
+                            <th scope="col">Role</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Actions</th>
                           </tr>
-                        ) : (
-                          filteredDepartmentStaff.map((user) => {
-                            const departmentName =
-                              departments.find((dept) => dept.id === user.department_id)?.name ?? 'Unassigned'
+                        </thead>
+                        <tbody>
+                          {filteredDepartmentStaff.length === 0 ? (
+                            <tr>
+                              <td colSpan={8}>No staff records found for this department.</td>
+                            </tr>
+                          ) : (
+                            filteredDepartmentStaff.map((user) => {
+                              const departmentName =
+                                departments.find((dept) => dept.id === user.department_id)?.name ?? 'Unassigned'
 
-                            return (
-                              <tr key={`staff-row-${user.id}`}>
-                                <td>{user.staff_id}</td>
-                                <td>{user.full_name}</td>
-                                <td>{user.email}</td>
-                                <td>{departmentName}</td>
-                                <td>{user.position ?? '—'}</td>
-                                <td>{mapStaffRoleToOption(user.role)}</td>
-                                <td>{user.is_locked ? 'Locked' : 'Active'}</td>
+                              return (
+                                <tr key={`staff-row-${user.id}`}>
+                                  <td>{user.staff_id}</td>
+                                  <td>{user.full_name}</td>
+                                  <td>{user.email}</td>
+                                  <td>{departmentName}</td>
+                                  <td>{user.position ?? '—'}</td>
+                                  <td>{mapStaffRoleToOption(user.role)}</td>
+                                  <td>{user.is_locked ? 'Locked' : 'Active'}</td>
+                                  <td>
+                                    <div className="staff-actions">
+                                      <div className="staff-actions-main">
+                                        <button
+                                          type="button"
+                                          className="staff-action-icon-button"
+                                          title="Edit"
+                                          aria-label="Edit"
+                                          onClick={() => {
+                                            startEditStaff(user)
+                                            setDepartmentStaffMode('add-staff')
+                                          }}
+                                          disabled={staffUpdatingId === user.id}
+                                        >
+                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path
+                                              d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="1.6"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                            <path
+                                              d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
+                                              fill="none"
+                                              stroke="currentColor"
+                                              strokeWidth="1.6"
+                                              strokeLinecap="round"
+                                              strokeLinejoin="round"
+                                            />
+                                          </svg>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="staff-action-icon-button"
+                                          title="View QR"
+                                          aria-label="View QR"
+                                          onClick={() => {
+                                            void handleStaffQrButtonClick(user)
+                                          }}
+                                          disabled={staffUpdatingId === user.id}
+                                        >
+                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <rect x="4" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                            <rect x="14" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                            <rect x="4" y="14" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                            <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
+                                          </svg>
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="staff-action-icon-button"
+                                          title={user.is_locked ? 'Unlock' : 'Lock'}
+                                          aria-label={user.is_locked ? 'Unlock' : 'Lock'}
+                                          onClick={() => {
+                                            void handleToggleStaffLock(user)
+                                          }}
+                                          disabled={staffUpdatingId === user.id}
+                                        >
+                                          {user.is_locked ? (
+                                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                              <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                              <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                              <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                            </svg>
+                                          ) : (
+                                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                              <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                              <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                              <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                            </svg>
+                                          )}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          className="staff-action-icon-button"
+                                          title="Delete"
+                                          aria-label="Delete"
+                                          onClick={() => {
+                                            void handleDeleteStaff(user)
+                                          }}
+                                          disabled={staffUpdatingId === user.id}
+                                        >
+                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <path d="M5 7h14M9 7V5h6v2M8 7l.7 11h6.6L16 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                            <path d="M10.5 11v5M13.5 11v5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                          </svg>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
+
+                {departmentStaffMode === 'manage-department' && (
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>Manage Department</h4>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table className="inventory-table">
+                        <thead>
+                          <tr>
+                            <th scope="col">Department Code</th>
+                            <th scope="col">Department Name</th>
+                            <th scope="col">Total Items</th>
+                            <th scope="col">Serviceable</th>
+                            <th scope="col">Unserviceable</th>
+                            <th scope="col">Staff Members</th>
+                            <th scope="col">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {departments.length === 0 ? (
+                            <tr>
+                              <td colSpan={7}>No departments found.</td>
+                            </tr>
+                          ) : (
+                            departments.map((dept) => (
+                              <tr key={`dept-manage-${dept.id}`}>
+                                <td>{dept.code}</td>
+                                <td>{dept.name}</td>
+                                <td>{formatValue(dept.totalItems)}</td>
+                                <td>{formatValue(dept.serviceable)}</td>
+                                <td>{formatValue(dept.unserviceable)}</td>
+                                <td>{formatValue(departmentStaffCountMap.get(dept.id) ?? 0)}</td>
                                 <td>
                                   <div className="staff-actions">
                                     <div className="staff-actions-main">
                                       <button
                                         type="button"
-                                        className="staff-action-icon-button staff-action-icon-button-primary"
+                                        className="staff-action-icon-button"
                                         title="Edit"
                                         aria-label="Edit"
-                                        onClick={() => startEditStaff(user)}
-                                        disabled={staffUpdatingId === user.id}
+                                        onClick={() => {
+                                          startEditDepartment(dept)
+                                          setDepartmentStaffMode('add-department')
+                                        }}
+                                        disabled={departmentUpdatingId === dept.id}
                                       >
                                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                                           <path
@@ -3500,54 +3968,13 @@ function DashboardPage() {
                                       </button>
                                       <button
                                         type="button"
-                                        className="staff-action-icon-button staff-action-icon-button-secondary"
-                                        title="View QR"
-                                        aria-label="View QR"
-                                        onClick={() => {
-                                          void handleStaffQrButtonClick(user)
-                                        }}
-                                        disabled={staffUpdatingId === user.id}
-                                      >
-                                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                          <rect x="4" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                          <rect x="14" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                          <rect x="4" y="14" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                          <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
-                                        </svg>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="staff-action-icon-button staff-action-icon-button-secondary"
-                                        title={user.is_locked ? 'Unlock' : 'Lock'}
-                                        aria-label={user.is_locked ? 'Unlock' : 'Lock'}
-                                        onClick={() => {
-                                          void handleToggleStaffLock(user)
-                                        }}
-                                        disabled={staffUpdatingId === user.id}
-                                      >
-                                        {user.is_locked ? (
-                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                            <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                            <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                            <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                          </svg>
-                                        ) : (
-                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                            <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                            <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                            <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                          </svg>
-                                        )}
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="staff-action-icon-button staff-action-icon-button-danger"
+                                        className="staff-action-icon-button"
                                         title="Delete"
                                         aria-label="Delete"
                                         onClick={() => {
-                                          void handleDeleteStaff(user)
+                                          void handleDeleteDepartment(dept)
                                         }}
-                                        disabled={staffUpdatingId === user.id}
+                                        disabled={departmentUpdatingId === dept.id}
                                       >
                                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                                           <path d="M5 7h14M9 7V5h6v2M8 7l.7 11h6.6L16 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -3558,14 +3985,16 @@ function DashboardPage() {
                                   </div>
                                 </td>
                               </tr>
-                            )
-                          })
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </section>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                )}
 
+                {departmentError && <p className="dashboard-error" style={{ margin: 0 }}>{departmentError}</p>}
+                {departmentSuccess && <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{departmentSuccess}</p>}
                 {staffError && <p className="dashboard-error" style={{ margin: 0 }}>{staffError}</p>}
                 {staffSuccess && <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{staffSuccess}</p>}
               </div>
@@ -4251,6 +4680,24 @@ function DashboardPage() {
                   {typeOptions.map((type) => (
                     <option key={type} value={type}>
                       {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="inventory-field">
+                <label htmlFor="edit-item-department">
+                  Location <span className="inventory-required">*</span>
+                </label>
+                <select
+                  id="edit-item-department"
+                  className="inventory-input"
+                  value={editDepartmentId}
+                  onChange={(e) => setEditDepartmentId(e.target.value)}
+                >
+                  <option value="">Select department</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={String(dept.id)}>
+                      {dept.name}
                     </option>
                   ))}
                 </select>

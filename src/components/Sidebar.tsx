@@ -19,9 +19,16 @@ type SidebarProps = {
   onChangeSection: (section: SidebarSection) => void
   isCollapsed: boolean
   onToggleCollapse: () => void
+  displayName: string
 }
 
-function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse }: SidebarProps) {
+function Sidebar({
+  activeSection,
+  onChangeSection,
+  isCollapsed,
+  onToggleCollapse,
+  displayName,
+}: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   return (
@@ -65,7 +72,7 @@ function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse
         </button>
       </div>
 
-      <div className="sidebar-user">Super Admin</div>
+      <div className="sidebar-user">{displayName}</div>
 
       <nav className="sidebar-nav" aria-label="Main">
         <button

@@ -270,4 +270,25 @@
 	.signin-page {
 		padding: 24px 12px;
 	}
+
+	.signin-shell {
+		padding: 20px 0;
+	}
+
+	.signin-card {
+		border-radius: 20px;
+	}
+
+	.signin-right {
+		padding: 24px 16px 28px;
+	}
+
+	.signin-heading {
+		font-size: 24px;
+		margin-bottom: 20px;
+	}
+
+	.signin-title {
+		font-size: 32px;
+	}
 }

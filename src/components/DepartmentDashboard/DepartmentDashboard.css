@@ -1,0 +1,35 @@
+.department-dashboard-page {
+  background: #f4f4f4;
+  color: #111827;
+}
+
+.department-dashboard-main {
+  gap: 20px;
+}
+
+.action-card-qr:hover,
+.action-card-qr:focus-visible,
+.action-card-qr:active {
+  border-color: #8b5cf6;
+}
+
+.department-dashboard-rescue-note {
+  max-width: 860px;
+}
+
+.department-dashboard-rescue-note h2 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.department-dashboard-rescue-note p {
+  margin: 4px 0 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+@media (max-width: 960px) {
+  .department-dashboard-main {
+    padding: 24px 18px 32px;
+  }
+}

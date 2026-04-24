@@ -42,6 +42,8 @@ type InventorySectionProps = {
   setNewItemName: (value: string) => void
   newItemType: string
   setNewItemType: (value: string) => void
+  newItemDepartmentId: string
+  setNewItemDepartmentId: (value: string) => void
   newQuantity: string
   setNewQuantity: (value: string) => void
   newUnitOfMeasure: string
@@ -96,6 +98,8 @@ function InventorySection({
   setNewItemName,
   newItemType,
   setNewItemType,
+  newItemDepartmentId,
+  setNewItemDepartmentId,
   newQuantity,
   setNewQuantity,
   newUnitOfMeasure,
@@ -203,6 +207,7 @@ function InventorySection({
                     <th scope="col">ID</th>
                     <th scope="col">Name</th>
                     <th scope="col">Type</th>
+                    <th scope="col">Location</th>
                     <th scope="col">Qty</th>
                     <th scope="col">Unit</th>
                     <th scope="col">Unit Cost</th>
@@ -217,17 +222,18 @@ function InventorySection({
                 <tbody>
                   {inventoryLoading ? (
                     <tr>
-                      <td colSpan={12}>Loading items…</td>
+                      <td colSpan={13}>Loading items…</td>
                     </tr>
                   ) : filteredInventoryItems.length === 0 ? (
                     <tr>
-                      <td colSpan={12}>No items found.</td>
+                      <td colSpan={13}>No items found.</td>
                     </tr>
                   ) : (
                     filteredInventoryItems.map((item) => {
                       const paddedId = `ITEM-${item.item_id.toString().padStart(3, '0')}`
                       const acquisitionMode = item.acquisition_mode?.trim() || null
                       const status = item.status?.trim() || null
+                      const locationName = departments.find((dept) => dept.id === item.department_id)?.name ?? 'Unassigned'
                       const photoUrls = getItemPhotoUrls(item)
 
                       return (
@@ -235,6 +241,7 @@ function InventorySection({
                           <td>{paddedId}</td>
                           <td>{item.item_name}</td>
                           <td>{item.item_type}</td>
+                          <td>{locationName}</td>
                           <td>{item.quantity ?? '—'}</td>
                           <td>{item.unit_of_measure ?? '—'}</td>
                           <td>{formatCurrency(item.unit_cost)}</td>
@@ -468,6 +475,24 @@ function InventorySection({
                   {typeOptions.map((type) => (
                     <option key={type} value={type}>
                       {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="inventory-field">
+                <label htmlFor="add-item-department">
+                  Location <span className="inventory-required">*</span>
+                </label>
+                <select
+                  id="add-item-department"
+                  className="inventory-input"
+                  value={newItemDepartmentId}
+                  onChange={(e) => setNewItemDepartmentId(e.target.value)}
+                >
+                  <option value="">Select department</option>
+                  {departments.map((dept) => (
+                    <option key={dept.id} value={String(dept.id)}>
+                      {dept.name}
                     </option>
                   ))}
                 </select>
