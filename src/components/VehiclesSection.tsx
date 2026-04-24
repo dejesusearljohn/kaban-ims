@@ -115,9 +115,6 @@ function VehiclesSection({
           className={vehicleMode === 'add-vehicle' ? 'inventory-primary-button' : 'inventory-secondary-button'}
           onClick={() => setVehicleMode('add-vehicle')}
         >
-          <span className="inventory-add-plus" aria-hidden="true">
-            +
-          </span>
           Add Vehicle
         </button>
       </section>

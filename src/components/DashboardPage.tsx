@@ -21,12 +21,14 @@ import StockpileSection from './StockpileSection'
 import WmrSection from './WmrSection'
 import VehiclesSection from './VehiclesSection'
 import ParSection from './ParSection'
+import ReportsSection, { type ReportPeriod } from './ReportsSection'
 import type { SidebarSection } from './Sidebar'
 import '../styles/DashboardPage.css'
 import '../styles/Inventory.css'
 import '../styles/Wmr.css'
 import '../styles/Par.css'
 import '../styles/Dashboard.css'
+import '../styles/Reports.css'
 
 type SummaryMetrics = {
   totalItems: number
@@ -38,6 +40,7 @@ type SummaryMetrics = {
 type DepartmentOverview = {
   id: number
   name: string
+  code: string
   totalItems: number
   serviceable: number
   unserviceable: number
@@ -119,6 +122,7 @@ const STOCKPILE_STATUS_COLORS: Record<string, string> = {
 function DashboardPage() {
   // [STATE] Navigation and dashboard overview
   const [activeSection, setActiveSection] = useState<SidebarSection>('dashboard')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [inventoryMode, setInventoryMode] = useState<'list' | 'add'>('list')
   const [summary, setSummary] = useState<SummaryMetrics>({
     totalItems: 0,
@@ -129,6 +133,74 @@ function DashboardPage() {
   const [departments, setDepartments] = useState<DepartmentOverview[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [settingsProfileLoading, setSettingsProfileLoading] = useState(false)
+  const [settingsUserId, setSettingsUserId] = useState<string | null>(null)
+  const [settingsEmail, setSettingsEmail] = useState('')
+  const [settingsStaffId, setSettingsStaffId] = useState('')
+  const [settingsNameInput, setSettingsNameInput] = useState('')
+  const [settingsPositionInput, setSettingsPositionInput] = useState('')
+  const [settingsNameSaving, setSettingsNameSaving] = useState(false)
+  const [settingsPasswordInput, setSettingsPasswordInput] = useState('')
+  const [settingsConfirmPasswordInput, setSettingsConfirmPasswordInput] = useState('')
+  const [settingsPasswordSaving, setSettingsPasswordSaving] = useState(false)
+  const [settingsSuccessMessage, setSettingsSuccessMessage] = useState<string | null>(null)
+  const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null)
+  const [staffDepartmentFilter, setStaffDepartmentFilter] = useState('all')
+  const [staffFormMode, setStaffFormMode] = useState<'add' | 'edit'>('add')
+  const [staffFormTargetId, setStaffFormTargetId] = useState<string | null>(null)
+  const [staffFormDepartmentId, setStaffFormDepartmentId] = useState('')
+  const [staffFormName, setStaffFormName] = useState('')
+  const [staffFormStaffId, setStaffFormStaffId] = useState('')
+  const [staffFormPosition, setStaffFormPosition] = useState('')
+  const [staffFormRole, setStaffFormRole] = useState('Staff')
+  const [staffFormContact, setStaffFormContact] = useState('')
+  const [staffSaving, setStaffSaving] = useState(false)
+  const [staffUpdatingId, setStaffUpdatingId] = useState<string | null>(null)
+  const [staffError, setStaffError] = useState<string | null>(null)
+  const [staffSuccess, setStaffSuccess] = useState<string | null>(null)
+  const [viewStaffQrItem, setViewStaffQrItem] = useState<UserRow | null>(null)
+
+  const normalizeStaffRole = (role: string | null | undefined) => {
+    const trimmedRole = role?.trim() || 'Staff'
+    if (trimmedRole.toLowerCase() === 'staff') {
+      return 'Staff'
+    }
+    return trimmedRole.toLowerCase() === 'admin' || trimmedRole.toLowerCase() === 'super admin'
+      ? 'Super Admin'
+      : trimmedRole
+  }
+
+  const mapStaffRoleToOption = (role: string | null | undefined) =>
+    normalizeStaffRole(role) === 'Super Admin' ? 'Admin' : 'Staff'
+
+  const buildStaffEmail = (staffId: string) => {
+    const normalizedStaffId = staffId.trim().toLowerCase().replace(/\s+/g, '')
+    return normalizedStaffId ? `${normalizedStaffId}@kaban.com` : ''
+  }
+
+  const buildStaffQrCode = (staffId: string) => {
+    const normalizedStaffId = staffId.trim().toLowerCase().replace(/\s+/g, '')
+    return normalizedStaffId ? `staff-${normalizedStaffId}` : ''
+  }
+
+  const buildStaffId = (departmentId: number, existingStaff: UserRow[]) => {
+    const departmentCode = (departments.find((dept) => dept.id === departmentId)?.code ?? '')
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, '')
+
+    if (!departmentCode) return ''
+
+    const matchingSuffixes = existingStaff
+      .map((user) => user.staff_id.trim().toUpperCase())
+      .filter((staffId) => staffId.startsWith(departmentCode))
+      .map((staffId) => staffId.slice(departmentCode.length))
+      .map((suffix) => Number.parseInt(suffix, 10))
+      .filter((value) => Number.isFinite(value))
+
+    const nextNumber = matchingSuffixes.length > 0 ? Math.max(...matchingSuffixes) + 1 : 1
+    return `${departmentCode}${String(nextNumber).padStart(3, '0')}`
+  }
 
   // [STATE] Inventory section
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
@@ -201,6 +273,13 @@ function DashboardPage() {
   const [parDateAcquiredInput, setParDateAcquiredInput] = useState('')
   const [parCostInput, setParCostInput] = useState('')
   const [activeParStaffId, setActiveParStaffId] = useState<string | null>(null)
+  const [selectedParReportStaffId, setSelectedParReportStaffId] = useState('')
+  const [selectedReportPeriod, setSelectedReportPeriod] = useState<ReportPeriod>('monthly')
+  const [reportStartDate, setReportStartDate] = useState(() => {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`
+  })
+  const [reportEndDate, setReportEndDate] = useState(() => new Date().toISOString().slice(0, 10))
 
   // [STATE] Vehicles section
   const [activeVehicleLogsId, setActiveVehicleLogsId] = useState<number | null>(null)
@@ -233,7 +312,7 @@ function DashboardPage() {
   const [stockpileItems, setStockpileItems] = useState<StockpileRow[]>([])
   const [stockpileLoading, setStockpileLoading] = useState(false)
   const [stockpileError, setStockpileError] = useState<string | null>(null)
-  const [stockpileMode, setStockpileMode] = useState<'list' | 'add'>('list')
+  const [stockpileMode, setStockpileMode] = useState<'list' | 'add' | 'logs' | 'expired'>('list')
   const [newStockpileItemName, setNewStockpileItemName] = useState('')
   const [newStockpileCategory, setNewStockpileCategory] = useState('')
   const [newStockpileQuantity, setNewStockpileQuantity] = useState('')
@@ -278,7 +357,7 @@ function DashboardPage() {
 
         const { data: deptRows, error: deptError } = await supabase
           .from('departments')
-          .select('id, dept_name')
+          .select('id, dept_name, dept_code')
           .order('id', { ascending: true })
 
         if (deptError) throw deptError
@@ -331,6 +410,7 @@ function DashboardPage() {
           deptMetrics.push({
             id: dept.id,
             name: dept.dept_name,
+            code: dept.dept_code,
             totalItems: invTotalRes.count ?? 0,
             serviceable: invServRes.count ?? 0,
             unserviceable: invUnservRes.count ?? 0,
@@ -458,6 +538,51 @@ function DashboardPage() {
   }, [])
 
   useEffect(() => {
+    const fetchSettingsProfile = async () => {
+      setSettingsProfileLoading(true)
+      setSettingsErrorMessage(null)
+
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser()
+
+      if (authError) {
+        setSettingsErrorMessage(authError.message)
+        setSettingsProfileLoading(false)
+        return
+      }
+
+      if (!user) {
+        setSettingsErrorMessage('No active user session found.')
+        setSettingsProfileLoading(false)
+        return
+      }
+
+      setSettingsUserId(user.id)
+
+      const { data: userRow, error: userRowError } = await supabase
+        .from('users')
+        .select('id, full_name, email, staff_id, position')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (userRowError) {
+        setSettingsErrorMessage(userRowError.message)
+      } else {
+        setSettingsNameInput(userRow?.full_name ?? '')
+        setSettingsEmail(userRow?.email ?? user.email ?? '')
+        setSettingsStaffId(userRow?.staff_id ?? '')
+        setSettingsPositionInput(userRow?.position ?? '')
+      }
+
+      setSettingsProfileLoading(false)
+    }
+
+    void fetchSettingsProfile()
+  }, [])
+
+  useEffect(() => {
     const fetchVehiclesData = async () => {
       setVehicleLoading(true)
       setVehicleError(null)
@@ -582,6 +707,84 @@ function DashboardPage() {
     const parsed = value.trim() ? Number(value) : null
     return parsed != null && Number.isFinite(parsed) ? parsed : null
   }
+  const parseDateLikeValue = (value: string | null | undefined) => {
+    if (!value) return null
+
+    const trimmed = value.trim()
+    const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+
+    const parsedDate = dateOnlyMatch
+      ? new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]))
+      : new Date(trimmed)
+
+    return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
+  }
+  const getReportPeriodBounds = (period: ReportPeriod) => {
+    const now = new Date()
+    const start = new Date(now)
+    const end = new Date(now)
+
+    if (period === 'weekly') {
+      start.setDate(now.getDate() - 6)
+      start.setHours(0, 0, 0, 0)
+      end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+
+    if (period === 'monthly') {
+      start.setDate(1)
+      start.setHours(0, 0, 0, 0)
+      end.setMonth(now.getMonth() + 1, 0)
+      end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+
+    start.setMonth(0, 1)
+    start.setHours(0, 0, 0, 0)
+    end.setMonth(11, 31)
+    end.setHours(23, 59, 59, 999)
+    return { start, end }
+  }
+  const getReportPeriodLabel = (period: ReportPeriod) => {
+    if (period === 'weekly') return 'Weekly'
+    if (period === 'monthly') return 'Monthly'
+    return 'Yearly'
+  }
+  const formatDateForInput = (date: Date) => {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+    return `${year}-${month}-${day}`
+  }
+  const formatDateForReportHeader = (date: Date) =>
+    date.toLocaleDateString('en-PH', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    })
+  const getReportDateRangeLabel = (startDate: string, endDate: string) => {
+    const start = parseDateLikeValue(startDate)
+    const end = parseDateLikeValue(endDate)
+
+    if (!start || !end) return 'N/A'
+    return `${formatDateForReportHeader(start)} to ${formatDateForReportHeader(end)}`
+  }
+  const isDateWithinReportRange = (
+    value: string | null | undefined,
+    startDate: string,
+    endDate: string,
+  ) => {
+    const dateValue = parseDateLikeValue(value)
+    const start = parseDateLikeValue(startDate)
+    const end = parseDateLikeValue(endDate)
+
+    if (!dateValue || !start || !end) return false
+
+    start.setHours(0, 0, 0, 0)
+    end.setHours(23, 59, 59, 999)
+
+    return dateValue >= start && dateValue <= end
+  }
   const calculateTotalCost = (quantity: number | null, unitCost: number | null) =>
     quantity != null && unitCost != null ? quantity * unitCost : null
 
@@ -644,6 +847,12 @@ function DashboardPage() {
     return item.photo_path ? [item.photo_path] : []
   }
 
+  useEffect(() => {
+    const { start, end } = getReportPeriodBounds(selectedReportPeriod)
+    setReportStartDate(formatDateForInput(start))
+    setReportEndDate(formatDateForInput(end))
+  }, [selectedReportPeriod])
+
   // [DERIVED] Search, filters, and computed view data
   const normalizedSearch = searchQuery.trim().toLowerCase()
   const normalizedWmrSearch = wmrSearchQuery.trim().toLowerCase()
@@ -670,7 +879,12 @@ function DashboardPage() {
     ).values(),
   ).sort((a, b) => a.localeCompare(b))
   const dynamicStatusOptions = Array.from(
-    new Set(inventoryItems.map((item) => item.status).filter((s): s is string => !!s)),
+    new Set(
+      inventoryItems
+        .map((item) => item.status)
+        .filter((s): s is string => !!s)
+        .filter((status) => status.trim() !== 'Archived'),
+    ),
   )
   const statusOptions = Array.from(
     new Set<string>(['Serviceable', 'Unserviceable', ...dynamicStatusOptions]),
@@ -757,6 +971,10 @@ function DashboardPage() {
   const combinedFilteredWmrCount = filteredWasteItems.length + filteredVehicleWmrReports.length
 
   const filteredInventoryItems = inventoryItems.filter((item) => {
+    if ((item.status ?? '').trim() === 'Archived') {
+      return false
+    }
+
     const paddedId = `ITEM-${item.item_id.toString().padStart(3, '0')}`
     const matchesSearch =
       !normalizedSearch ||
@@ -772,6 +990,15 @@ function DashboardPage() {
 
     return matchesSearch && matchesType && matchesDepartment && matchesStatus
   })
+
+  const archivedInventoryItems = inventoryItems.filter((item) => (item.status ?? '').trim() === 'Archived')
+  const filteredDepartmentStaff = parUsers
+    .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
+    .filter((user) => {
+      if (staffDepartmentFilter === 'all') return true
+      return user.department_id != null && String(user.department_id) === staffDepartmentFilter
+    })
+    .sort((a, b) => (a.full_name ?? '').localeCompare(b.full_name ?? ''))
 
   const today = new Date()
   const stockpileStatusCountMap = stockpileItems.reduce((acc, item) => {
@@ -799,6 +1026,9 @@ function DashboardPage() {
       count: stockpileStatusCountMap.get(status) ?? 0,
     }))
     .filter((entry) => entry.count > 0)
+
+  // Reflect both inventory-expired and stockpile-expired totals on the dashboard metric.
+  const dashboardExpiredCount = summary.expired + (stockpileStatusCountMap.get('Expired') ?? 0)
 
   const itemTypeCountMap = inventoryItems.reduce((acc, item) => {
     const type = item.item_type.trim()
@@ -872,6 +1102,55 @@ function DashboardPage() {
       })
     })
 
+  const reportPeriodParSummaries = Array.from(groupedParByStaff.entries())
+    .map(([staffId, records]) => {
+      const recordsWithinPeriod = records.filter((record) =>
+        isDateWithinReportRange(record.issue_date, reportStartDate, reportEndDate),
+      )
+
+      const receiver = parUsers.find((user) => user.id === staffId) ?? null
+
+      return {
+        staffId,
+        receiver,
+        recordsWithinPeriod,
+      }
+    })
+    .filter((summary) => summary.recordsWithinPeriod.length > 0)
+
+  const reportParOptions = reportPeriodParSummaries
+    .slice()
+    .sort((a, b) => {
+      const aName = a.receiver?.full_name ?? a.staffId
+      const bName = b.receiver?.full_name ?? b.staffId
+      return aName.localeCompare(bName)
+    })
+    .map((summary) => {
+      const label = summary.receiver
+        ? `${summary.receiver.full_name} (${summary.receiver.staff_id})`
+        : summary.staffId
+
+      return {
+        staffId: summary.staffId,
+        label,
+      }
+    })
+
+  useEffect(() => {
+    if (reportParOptions.length === 0) {
+      setSelectedParReportStaffId('')
+      return
+    }
+
+    setSelectedParReportStaffId((prev) => {
+      if (prev && reportParOptions.some((option) => option.staffId === prev)) {
+        return prev
+      }
+
+      return reportParOptions[0].staffId
+    })
+  }, [reportParOptions])
+
   const activeParRecords = activeParStaffId ? groupedParByStaff.get(activeParStaffId) ?? [] : []
   const activeParReceiver = activeParStaffId
     ? parUsers.find((user) => user.id === activeParStaffId) ?? null
@@ -892,6 +1171,7 @@ function DashboardPage() {
       ? vehicleRepairs.filter((repair) => repair.vehicle_id === activeVehicleLogsId)
       : []
   const activeVehicleRepairSpend = activeVehicleRepairs.reduce((sum, repair) => sum + Number(repair.amount ?? 0), 0)
+  const activeReportsError = parError ?? stockpileError ?? wmrError ?? vehicleError
 
   // [HANDLERS] PAR actions
   const escapeHtml = (value: string) =>
@@ -902,12 +1182,64 @@ function DashboardPage() {
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;')
 
-  const handlePrintPar = () => {
-    if (!activeParStaffId) return
+  const printHtmlViaIframe = (html: string, onError: (message: string) => void) => {
+    const frame = document.createElement('iframe')
+    frame.style.position = 'fixed'
+    frame.style.width = '0'
+    frame.style.height = '0'
+    frame.style.border = '0'
+    frame.style.opacity = '0'
+    frame.style.pointerEvents = 'none'
+    frame.setAttribute('aria-hidden', 'true')
+    document.body.appendChild(frame)
 
-    const rows = activeParRecords
+    const cleanup = () => {
+      window.setTimeout(() => {
+        if (frame.parentNode) {
+          frame.parentNode.removeChild(frame)
+        }
+      }, 0)
+    }
+
+    const frameDoc = frame.contentDocument
+    const frameWindow = frame.contentWindow
+
+    if (!frameDoc || !frameWindow) {
+      cleanup()
+      onError('Could not start print preview. Please try again.')
+      return
+    }
+
+    frame.onload = () => {
+      frameWindow.focus()
+      frameWindow.print()
+      cleanup()
+    }
+
+    frameDoc.open()
+    frameDoc.write(html)
+    frameDoc.close()
+  }
+
+  const handlePrintParForStaff = (staffId: string, period?: ReportPeriod, startDate?: string, endDate?: string) => {
+    if (!staffId) return
+
+    const rangeStart = startDate ?? reportStartDate
+    const rangeEnd = endDate ?? reportEndDate
+
+    const records = (groupedParByStaff.get(staffId) ?? []).filter((record) => {
+      return isDateWithinReportRange(record.issue_date, rangeStart, rangeEnd)
+    })
+    const receiver = parUsers.find((user) => user.id === staffId) ?? null
+    const parNo = receiver?.staff_id ? `PAR-${receiver.staff_id}` : `PAR-${staffId.slice(0, 8)}`
+    const departmentName =
+      receiver?.department_id != null
+        ? departments.find((dept) => dept.id === receiver.department_id)?.name ?? '—'
+        : '—'
+
+    const rows = records
       .slice()
-      .sort((a, b) => b.par_id - a.par_id)
+      .sort((a, b) => a.par_id - b.par_id)
       .map((record) => {
         const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
 
@@ -920,6 +1252,7 @@ function DashboardPage() {
             item?.property_no ??
             item?.qr_code ??
             (record.item_id != null ? `ITEM-${record.item_id.toString().padStart(3, '0')}` : '—'),
+          issuedDate: formatDisplayDate(record.issue_date),
           dateAcquired: record.date_acquired_snapshot ?? item?.date_acquired ?? '—',
           cost:
             record.cost_snapshot != null
@@ -944,6 +1277,7 @@ function DashboardPage() {
             <td>${escapeHtml(row.unit)}</td>
             <td>${escapeHtml(row.description)}</td>
             <td>${escapeHtml(row.propertyNo)}</td>
+            <td>${escapeHtml(row.issuedDate)}</td>
             <td>${escapeHtml(row.dateAcquired)}</td>
             <td>${escapeHtml(row.cost)}</td>
             <td>${escapeHtml(row.lineTotal)}</td>
@@ -951,19 +1285,12 @@ function DashboardPage() {
       )
       .join('')
 
-    const printWindow = window.open('', '_blank', 'width=980,height=760')
-
-    if (!printWindow) {
-      setParError('Could not open print window. Please allow pop-ups for this site.')
-      return
-    }
-
-    printWindow.document.write(`
+    const printDocument = `
       <!doctype html>
       <html>
         <head>
           <meta charset="utf-8" />
-          <title>${escapeHtml(activeParNo)}</title>
+          <title>${escapeHtml(parNo)}</title>
           <style>
             body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
             h1 { margin: 0 0 16px; font-size: 20px; }
@@ -980,10 +1307,12 @@ function DashboardPage() {
         <body>
           <h1>Property Acknowledgment Receipt</h1>
           <div class="meta">
-            <p><strong>Employee Name:</strong> ${escapeHtml(activeParReceiver?.full_name ?? activeParStaffId)}</p>
-            <p><strong>Department:</strong> ${escapeHtml(activeParDepartment)}</p>
-            <p><strong>PAR No:</strong> ${escapeHtml(activeParNo)}</p>
+            <p><strong>Employee Name:</strong> ${escapeHtml(receiver?.full_name ?? staffId)}</p>
+            <p><strong>Department:</strong> ${escapeHtml(departmentName)}</p>
+            <p><strong>PAR No:</strong> ${escapeHtml(parNo)}</p>
             <p><strong>Date Printed:</strong> ${escapeHtml(new Date().toISOString().slice(0, 10))}</p>
+            ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
+            <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
           </div>
 
           <table>
@@ -993,13 +1322,14 @@ function DashboardPage() {
                 <th>Unit</th>
                 <th>Description</th>
                 <th>Property No.</th>
+                <th>Issue Date</th>
                 <th>Date Acquired</th>
                 <th>Unit Cost</th>
                 <th>Line Total</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsMarkup || '<tr><td colspan="7">No PAR items found.</td></tr>'}
+              ${rowsMarkup || '<tr><td colspan="8">No PAR items found.</td></tr>'}
             </tbody>
           </table>
 
@@ -1013,11 +1343,14 @@ function DashboardPage() {
           </div>
         </body>
       </html>
-    `)
+    `
 
-    printWindow.document.close()
-    printWindow.focus()
-    printWindow.print()
+    printHtmlViaIframe(printDocument, setParError)
+  }
+
+  const handlePrintPar = () => {
+    if (!activeParStaffId) return
+    handlePrintParForStaff(activeParStaffId)
   }
 
   const handleCreateParRecord = async () => {
@@ -1497,95 +1830,343 @@ function DashboardPage() {
     setEditingItem(null)
   }
 
-  const extractStoragePathFromPublicUrl = (url: string) => {
-    const marker = `/object/public/${INVENTORY_PHOTO_BUCKET}/`
-    const markerIndex = url.indexOf(marker)
-
-    if (markerIndex === -1) return null
-
-    return decodeURIComponent(url.slice(markerIndex + marker.length))
-  }
-
-  const openDeleteConfirmation = (item: InventoryRow) => {
+  const openArchiveConfirmation = (item: InventoryRow) => {
     setDeleteTargetItem(item)
   }
 
-  const handleDeleteItem = async (itemToDelete?: InventoryRow) => {
-    const targetItem = itemToDelete ?? editingItem
+  const handleArchiveItem = async (itemToArchive?: InventoryRow) => {
+    const targetItem = itemToArchive ?? editingItem
     if (!targetItem) return
 
     setEditDeleting(true)
     setInventoryError(null)
 
-    const [{ count: parCount, error: parCountError }, { count: wmrCount, error: wmrCountError }] = await Promise.all([
-      supabase
-        .from('par_records')
-        .select('*', { count: 'exact', head: true })
-        .eq('item_id', targetItem.item_id),
-      supabase
-        .from('wmr_reports')
-        .select('*', { count: 'exact', head: true })
-        .eq('item_id', targetItem.item_id),
-    ])
-
-    if (parCountError || wmrCountError) {
-      setInventoryError(parCountError?.message || wmrCountError?.message || 'Failed to validate item dependencies.')
-      setEditDeleting(false)
-      return
-    }
-
-    if ((parCount ?? 0) > 0 || (wmrCount ?? 0) > 0) {
-      setInventoryError('Cannot delete this item because it has related PAR/WMR records.')
-      setEditDeleting(false)
-      return
-    }
-
-    const linkedPhotos = inventoryPhotos.filter((photo) => photo.item_id === targetItem.item_id)
-    const photoPathsToDelete = linkedPhotos
-      .map((photo) => extractStoragePathFromPublicUrl(photo.photo_url))
-      .filter((path): path is string => !!path)
-
-    if (linkedPhotos.length > 0) {
-      const { error: deletePhotoRowsError } = await supabase
-        .from('inventory_photos')
-        .delete()
-        .eq('item_id', targetItem.item_id)
-
-      if (deletePhotoRowsError) {
-        setInventoryError(deletePhotoRowsError.message)
-        setEditDeleting(false)
-        return
-      }
-    }
-
-    if (photoPathsToDelete.length > 0) {
-      const { error: removeStorageError } = await supabase.storage
-        .from(INVENTORY_PHOTO_BUCKET)
-        .remove(photoPathsToDelete)
-
-      if (removeStorageError) {
-        setInventoryError(`Item deleted but failed to remove one or more photo files: ${removeStorageError.message}`)
-      }
-    }
-
-    const { error: deleteInventoryError } = await supabase
+    const { error: archiveInventoryError } = await supabase
       .from('inventory')
-      .delete()
+      .update({ status: 'Archived' })
       .eq('item_id', targetItem.item_id)
 
-    if (deleteInventoryError) {
-      setInventoryError(deleteInventoryError.message)
+    if (archiveInventoryError) {
+      setInventoryError(archiveInventoryError.message)
       setEditDeleting(false)
       return
     }
 
-    setInventoryItems((prev) => prev.filter((item) => item.item_id !== targetItem.item_id))
-    setInventoryPhotos((prev) => prev.filter((photo) => photo.item_id !== targetItem.item_id))
+    setInventoryItems((prev) =>
+      prev.map((item) => (item.item_id === targetItem.item_id ? { ...item, status: 'Archived' } : item)),
+    )
     setEditDeleting(false)
     setDeleteTargetItem(null)
     if (editingItem?.item_id === targetItem.item_id) {
       setEditingItem(null)
     }
+  }
+
+  const handleSaveSettingsName = async () => {
+    const trimmedName = settingsNameInput.trim()
+    const trimmedPosition = settingsPositionInput.trim()
+
+    if (!settingsUserId) {
+      setSettingsErrorMessage('Unable to identify the signed-in user.')
+      return
+    }
+
+    if (!trimmedName) {
+      setSettingsErrorMessage('Name is required.')
+      return
+    }
+
+    setSettingsNameSaving(true)
+    setSettingsErrorMessage(null)
+    setSettingsSuccessMessage(null)
+
+    const { error: updateNameError } = await supabase
+      .from('users')
+      .update({ full_name: trimmedName, position: trimmedPosition || null })
+      .eq('id', settingsUserId)
+
+    if (updateNameError) {
+      setSettingsErrorMessage(updateNameError.message)
+      setSettingsNameSaving(false)
+      return
+    }
+
+    setParUsers((prev) =>
+      prev.map((user) =>
+        user.id === settingsUserId
+          ? { ...user, full_name: trimmedName, position: trimmedPosition || null }
+          : user,
+      ),
+    )
+    setSettingsSuccessMessage('Profile updated successfully.')
+    setSettingsNameSaving(false)
+  }
+
+  const hashPasswordForStorage = async (password: string) => {
+    if (typeof window === 'undefined' || !window.crypto?.subtle) {
+      throw new Error('Secure hashing is not available in this environment.')
+    }
+
+    const encoded = new TextEncoder().encode(password)
+    const digest = await window.crypto.subtle.digest('SHA-256', encoded)
+    const hashHex = Array.from(new Uint8Array(digest))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
+
+    return `sha256:${hashHex}`
+  }
+
+  const handleChangeSettingsPassword = async () => {
+    if (settingsPasswordInput.length < 8) {
+      setSettingsErrorMessage('Password must be at least 8 characters long.')
+      return
+    }
+
+    if (settingsPasswordInput !== settingsConfirmPasswordInput) {
+      setSettingsErrorMessage('Password confirmation does not match.')
+      return
+    }
+
+    setSettingsPasswordSaving(true)
+    setSettingsErrorMessage(null)
+    setSettingsSuccessMessage(null)
+
+    const { error: updatePasswordError } = await supabase.auth.updateUser({
+      password: settingsPasswordInput,
+    })
+
+    if (updatePasswordError) {
+      setSettingsErrorMessage(updatePasswordError.message)
+      setSettingsPasswordSaving(false)
+      return
+    }
+
+    try {
+      const passwordHash = await hashPasswordForStorage(settingsPasswordInput)
+
+      if (!settingsUserId) {
+        throw new Error('Unable to identify the signed-in user for password hash storage.')
+      }
+
+      const { error: updatePasswordHashError } = await supabase
+        .from('users')
+        .update({ password_hash: passwordHash })
+        .eq('id', settingsUserId)
+
+      if (updatePasswordHashError) {
+        setSettingsErrorMessage(updatePasswordHashError.message)
+        setSettingsPasswordSaving(false)
+        return
+      }
+    } catch (hashError) {
+      const hashErrorMessage = hashError instanceof Error ? hashError.message : 'Failed to hash password for storage.'
+      setSettingsErrorMessage(hashErrorMessage)
+      setSettingsPasswordSaving(false)
+      return
+    }
+
+    setSettingsPasswordInput('')
+    setSettingsConfirmPasswordInput('')
+    setSettingsSuccessMessage('Password changed successfully and stored as a hash.')
+    setSettingsPasswordSaving(false)
+  }
+
+  const resetStaffForm = () => {
+    setStaffFormMode('add')
+    setStaffFormTargetId(null)
+    setStaffFormDepartmentId('')
+    setStaffFormName('')
+    setStaffFormStaffId('')
+    setStaffFormPosition('')
+    setStaffFormRole('Staff')
+    setStaffFormContact('')
+  }
+
+  const startEditStaff = (user: UserRow) => {
+    setStaffFormMode('edit')
+    setStaffFormTargetId(user.id)
+    setStaffFormDepartmentId(user.department_id != null ? String(user.department_id) : '')
+    setStaffFormName(user.full_name)
+    setStaffFormStaffId(user.staff_id)
+    setStaffFormPosition(user.position ?? '')
+    setStaffFormRole(mapStaffRoleToOption(user.role))
+    setStaffFormContact(user.contact_info ?? '')
+    setStaffError(null)
+    setStaffSuccess(null)
+  }
+
+  const handleAddStaffDepartmentChange = (departmentId: string) => {
+    setStaffFormDepartmentId(departmentId)
+
+    if (!departmentId) {
+      setStaffFormStaffId('')
+      return
+    }
+
+    if (staffFormMode === 'edit') {
+      return
+    }
+
+    const generatedStaffId = buildStaffId(Number(departmentId), parUsers)
+    setStaffFormStaffId(generatedStaffId)
+  }
+
+  const handleSaveStaff = async () => {
+    const trimmedName = staffFormName.trim()
+    const trimmedStaffId = staffFormStaffId.trim()
+    const derivedEmail = buildStaffEmail(trimmedStaffId)
+    const derivedQrCode = buildStaffQrCode(trimmedStaffId)
+    const trimmedRole = staffFormRole === 'Admin' ? 'Super Admin' : 'Staff'
+    const deptId = staffFormDepartmentId ? Number(staffFormDepartmentId) : null
+
+    if (!trimmedName || !derivedEmail || !trimmedStaffId || deptId == null || Number.isNaN(deptId)) {
+      setStaffError('Department and name are required.')
+      return
+    }
+
+    setStaffSaving(true)
+    setStaffError(null)
+    setStaffSuccess(null)
+
+    if (staffFormMode === 'edit' && staffFormTargetId) {
+      const { data: updatedUser, error: updateError } = await supabase
+        .from('users')
+        .update({
+          department_id: deptId,
+          full_name: trimmedName,
+          email: derivedEmail,
+          staff_id: trimmedStaffId,
+          qr_code: derivedQrCode,
+          position: staffFormPosition.trim() || null,
+          role: trimmedRole,
+          contact_info: staffFormContact.trim() || null,
+        })
+        .eq('id', staffFormTargetId)
+        .select('*')
+        .single()
+
+      if (updateError) {
+        setStaffError(updateError.message)
+        setStaffSaving(false)
+        return
+      }
+
+      setParUsers((prev) => prev.map((user) => (user.id === updatedUser.id ? updatedUser : user)))
+      setStaffSuccess('Staff updated successfully.')
+      resetStaffForm()
+      setStaffSaving(false)
+      return
+    }
+
+    const { data: createdUser, error: createError } = await supabase
+      .from('users')
+      .insert([
+        {
+          department_id: deptId,
+          full_name: trimmedName,
+          email: derivedEmail,
+          staff_id: trimmedStaffId,
+          qr_code: derivedQrCode,
+          position: staffFormPosition.trim() || null,
+          role: trimmedRole,
+          contact_info: staffFormContact.trim() || null,
+          is_locked: false,
+          is_online: false,
+        },
+      ])
+      .select('*')
+      .single()
+
+    if (createError) {
+      setStaffError(createError.message)
+      setStaffSaving(false)
+      return
+    }
+
+    setParUsers((prev) => [createdUser, ...prev])
+    setStaffSuccess('Staff added successfully.')
+    resetStaffForm()
+    setStaffSaving(false)
+  }
+
+  const handleToggleStaffLock = async (user: UserRow) => {
+    setStaffUpdatingId(user.id)
+    setStaffError(null)
+    setStaffSuccess(null)
+
+    const nextLockState = !(user.is_locked ?? false)
+    const { data: updatedUser, error: updateError } = await supabase
+      .from('users')
+      .update({ is_locked: nextLockState })
+      .eq('id', user.id)
+      .select('*')
+      .single()
+
+    if (updateError) {
+      setStaffError(updateError.message)
+      setStaffUpdatingId(null)
+      return
+    }
+
+    setParUsers((prev) => prev.map((current) => (current.id === updatedUser.id ? updatedUser : current)))
+    setStaffSuccess(nextLockState ? 'Staff account locked.' : 'Staff account unlocked.')
+    setStaffUpdatingId(null)
+  }
+
+  const handleStaffQrButtonClick = async (user: UserRow) => {
+    if (user.qr_code) {
+      setViewStaffQrItem(user)
+      return
+    }
+
+    setStaffUpdatingId(user.id)
+    setStaffError(null)
+    setStaffSuccess(null)
+
+    const qrValue = buildStaffQrCode(user.staff_id)
+
+    const { data, error: qrError } = await supabase
+      .from('users')
+      .update({ qr_code: qrValue })
+      .eq('id', user.id)
+      .select('*')
+      .single()
+
+    if (qrError) {
+      setStaffError(qrError.message)
+      setStaffUpdatingId(null)
+      return
+    }
+
+    setParUsers((prev) => prev.map((row) => (row.id === data.id ? data : row)))
+    setViewStaffQrItem(data)
+    setStaffUpdatingId(null)
+  }
+
+  const handleDeleteStaff = async (user: UserRow) => {
+    if (typeof window !== 'undefined') {
+      const proceed = window.confirm(`Delete ${user.full_name}? This removes the staff record.`)
+      if (!proceed) return
+    }
+
+    setStaffUpdatingId(user.id)
+    setStaffError(null)
+    setStaffSuccess(null)
+
+    const { error: deleteError } = await supabase.from('users').delete().eq('id', user.id)
+
+    if (deleteError) {
+      setStaffError(deleteError.message)
+      setStaffUpdatingId(null)
+      return
+    }
+
+    setParUsers((prev) => prev.filter((current) => current.id !== user.id))
+    setStaffSuccess('Staff deleted successfully.')
+    if (staffFormTargetId === user.id) {
+      resetStaffForm()
+    }
+    setStaffUpdatingId(null)
   }
 
   const handleAddItem = async () => {
@@ -1932,10 +2513,16 @@ function DashboardPage() {
     setReleaseQtyInput('')
   }
 
-  const handlePrintStockpileReleaseLogs = () => {
+  const handlePrintStockpileReleaseLogs = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
+    const rangeStart = startDate ?? reportStartDate
+    const rangeEnd = endDate ?? reportEndDate
+
     const rows = parsedStockpileReleaseLogs
+      .filter((entry) => {
+        return isDateWithinReportRange(entry.log.operation_date, rangeStart, rangeEnd)
+      })
       .slice()
-      .sort((a, b) => b.log.log_id - a.log.log_id)
+      .sort((a, b) => a.log.log_id - b.log.log_id)
       .map((entry) => ({
         date: formatDisplayDate(entry.log.operation_date),
         item: entry.itemName || '—',
@@ -1959,14 +2546,7 @@ function DashboardPage() {
       )
       .join('')
 
-    const printWindow = window.open('', '_blank', 'width=980,height=760')
-
-    if (!printWindow) {
-      setStockpileError('Could not open print window. Please allow pop-ups for this site.')
-      return
-    }
-
-    printWindow.document.write(`
+    const printDocument = `
       <!doctype html>
       <html>
         <head>
@@ -1979,12 +2559,16 @@ function DashboardPage() {
             table { width: 100%; border-collapse: collapse; font-size: 13px; }
             th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
             th { background: #f3f4f6; font-weight: 600; }
+            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
+            .sign-line { margin-top: 48px; border-top: 1px solid #111827; padding-top: 6px; font-size: 12px; width: 280px; }
             @media print { body { margin: 10mm; } }
           </style>
         </head>
         <body>
           <h1>Stockpile Release Logs</h1>
           <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
+          ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
+          <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
           <table>
             <thead>
               <tr>
@@ -2000,13 +2584,196 @@ function DashboardPage() {
               ${rowsMarkup || '<tr><td colspan="6">No release logs found.</td></tr>'}
             </tbody>
           </table>
+
+          <div class="signatures">
+            <div>
+              <div class="sign-line">Issued by</div>
+            </div>
+          </div>
         </body>
       </html>
-    `)
+    `
 
-    printWindow.document.close()
-    printWindow.focus()
-    printWindow.print()
+    printHtmlViaIframe(printDocument, setStockpileError)
+  }
+
+  const handlePrintWmrSummary = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
+    const rangeStart = startDate ?? reportStartDate
+    const rangeEnd = endDate ?? reportEndDate
+
+    const allRows = wmrReports
+      .filter((report) => {
+        const fallbackDate =
+          report.item_id != null
+            ? inventoryItems.find((item) => item.item_id === report.item_id)?.created_at ??
+              inventoryItems.find((item) => item.item_id === report.item_id)?.date_acquired ??
+              null
+            : null
+
+        return isDateWithinReportRange(report.date_reported ?? fallbackDate, rangeStart, rangeEnd)
+      })
+      .slice()
+      .sort((a, b) => a.report_id - b.report_id)
+      .map((report) => {
+        const mappedItem =
+          report.item_id != null ? inventoryItems.find((item) => item.item_id === report.item_id) ?? null : null
+
+        return {
+          reportNo: `WMR-${report.report_id.toString().padStart(3, '0')}`,
+          description: report.reason_damage?.trim() || mappedItem?.item_name || 'Waste material report',
+          type: mappedItem?.item_type || (report.item_id == null ? 'Vehicle' : 'Inventory Item'),
+          location:
+            report.location?.trim() ||
+            (mappedItem?.department_id != null
+              ? departments.find((dept) => dept.id === mappedItem.department_id)?.name ?? '—'
+              : '—'),
+          status: report.status?.trim() || 'Pending',
+          dateReported: formatDisplayDate(report.date_reported ?? mappedItem?.created_at ?? mappedItem?.date_acquired),
+        }
+      })
+
+    const rowsMarkup = allRows
+      .map(
+        (row) =>
+          `<tr>
+            <td>${escapeHtml(row.reportNo)}</td>
+            <td>${escapeHtml(row.description)}</td>
+            <td>${escapeHtml(row.type)}</td>
+            <td>${escapeHtml(row.location)}</td>
+            <td>${escapeHtml(row.status)}</td>
+            <td>${escapeHtml(row.dateReported)}</td>
+          </tr>`,
+      )
+      .join('')
+
+    const printDocument = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Waste Materials Report Summary</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+            h1 { margin: 0 0 8px; font-size: 20px; }
+            p { margin: 0 0 12px; color: #4b5563; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
+            th { background: #f3f4f6; font-weight: 600; }
+            @media print { body { margin: 10mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>Waste Materials Report Summary</h1>
+          <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
+          ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
+          <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Report No</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th>Location</th>
+                <th>Status</th>
+                <th>Date Reported</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsMarkup || '<tr><td colspan="6">No WMR entries found.</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `
+
+    printHtmlViaIframe(printDocument, setWmrError)
+  }
+
+  const handlePrintVehicleRepairLogs = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
+    const rangeStart = startDate ?? reportStartDate
+    const rangeEnd = endDate ?? reportEndDate
+
+    const rows = vehicleRepairs
+      .filter((repair) => {
+        return isDateWithinReportRange(repair.date_repaired, rangeStart, rangeEnd)
+      })
+      .slice()
+      .sort((a, b) => a.repair_id - b.repair_id)
+      .map((repair) => {
+        const vehicle = vehicles.find((entry) => entry.id === repair.vehicle_id) ?? null
+        const admin = parUsers.find((user) => user.id === repair.admin_id) ?? null
+
+        return {
+          repairNo: `VR-${repair.repair_id.toString().padStart(3, '0')}`,
+          vehicle: vehicle?.make_model ?? `Vehicle ${repair.vehicle_id ?? '—'}`,
+          date: formatDisplayDate(repair.date_repaired),
+          jobOrder: repair.job_order_number ?? '—',
+          serviceCenter: repair.service_center ?? '—',
+          remarks: getRepairDescription(repair.repair_id, vehicle?.repair_history_log ?? null),
+          amount: formatCurrency(Number(repair.amount ?? 0)),
+          issuedTo: admin?.full_name ?? repair.admin_id ?? '—',
+        }
+      })
+
+    const rowsMarkup = rows
+      .map(
+        (row) =>
+          `<tr>
+            <td>${escapeHtml(row.repairNo)}</td>
+            <td>${escapeHtml(row.vehicle)}</td>
+            <td>${escapeHtml(row.date)}</td>
+            <td>${escapeHtml(row.jobOrder)}</td>
+            <td>${escapeHtml(row.serviceCenter)}</td>
+            <td>${escapeHtml(row.remarks)}</td>
+            <td>${escapeHtml(row.amount)}</td>
+            <td>${escapeHtml(row.issuedTo)}</td>
+          </tr>`,
+      )
+      .join('')
+
+    const printDocument = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Vehicle Repair Logs</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+            h1 { margin: 0 0 8px; font-size: 20px; }
+            p { margin: 0 0 12px; color: #4b5563; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
+            th { background: #f3f4f6; font-weight: 600; }
+            @media print { body { margin: 10mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>Vehicle Repair Logs</h1>
+          <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
+          ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
+          <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
+          <table>
+            <thead>
+              <tr>
+                <th>Repair No</th>
+                <th>Vehicle</th>
+                <th>Date Repaired</th>
+                <th>Job Order</th>
+                <th>Service Center</th>
+                <th>Remarks</th>
+                <th>Cost</th>
+                <th>Issued To</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsMarkup || '<tr><td colspan="8">No repair logs found.</td></tr>'}
+            </tbody>
+          </table>
+        </body>
+      </html>
+    `
+
+    printHtmlViaIframe(printDocument, setVehicleError)
   }
 
   const dynamicStockpileCategories = Array.from(
@@ -2018,11 +2785,37 @@ function DashboardPage() {
   )
 
   const filteredStockpileItems = stockpileItems.filter((item) => {
+    if (!item.expiration_date) {
+      const matchesSearch =
+        !stockpileSearchQuery ||
+        (item.item_name ?? '').toLowerCase().includes(stockpileSearchQuery.toLowerCase())
+      const matchesCategory = stockpileCategoryFilter === 'all' || item.category === stockpileCategoryFilter
+      return matchesSearch && matchesCategory
+    }
+
+    const expiration = new Date(item.expiration_date)
+    const isExpired = !Number.isNaN(expiration.getTime()) && expiration < today
+    if (isExpired) return false
+
     const matchesSearch =
       !stockpileSearchQuery ||
       (item.item_name ?? '').toLowerCase().includes(stockpileSearchQuery.toLowerCase())
     const matchesCategory = stockpileCategoryFilter === 'all' || item.category === stockpileCategoryFilter
     return matchesSearch && matchesCategory
+  })
+
+  const filteredExpiredStockpileItems = stockpileItems.filter((item) => {
+    if (!item.expiration_date) return false
+
+    const expiration = new Date(item.expiration_date)
+    if (Number.isNaN(expiration.getTime())) return false
+
+    const matchesSearch =
+      !stockpileSearchQuery ||
+      (item.item_name ?? '').toLowerCase().includes(stockpileSearchQuery.toLowerCase())
+    const matchesCategory = stockpileCategoryFilter === 'all' || item.category === stockpileCategoryFilter
+
+    return expiration < today && matchesSearch && matchesCategory
   })
 
   const parsedStockpileReleaseLogs: StockpileReleaseLog[] = stockpileReleaseLogs.flatMap((log) => {
@@ -2049,6 +2842,35 @@ function DashboardPage() {
     })
   })
 
+  const reportStockpileLogCount = parsedStockpileReleaseLogs.filter((entry) =>
+    isDateWithinReportRange(entry.log.operation_date, reportStartDate, reportEndDate),
+  ).length
+
+  const reportWmrCount = wmrReports.filter((report) => {
+    const fallbackDate =
+      report.item_id != null
+        ? inventoryItems.find((item) => item.item_id === report.item_id)?.created_at ??
+          inventoryItems.find((item) => item.item_id === report.item_id)?.date_acquired ??
+          null
+        : null
+
+    return isDateWithinReportRange(report.date_reported ?? fallbackDate, reportStartDate, reportEndDate)
+  }).length
+
+  const reportVehicleRepairCount = vehicleRepairs.filter((repair) =>
+    isDateWithinReportRange(repair.date_repaired, reportStartDate, reportEndDate),
+  ).length
+
+  const parsedReportStartDate = parseDateLikeValue(reportStartDate)
+  const parsedReportEndDate = parseDateLikeValue(reportEndDate)
+  const reportDateRangeInvalid =
+    parsedReportStartDate != null &&
+    parsedReportEndDate != null &&
+    parsedReportStartDate.getTime() > parsedReportEndDate.getTime()
+  const reportsErrorMessage = reportDateRangeInvalid
+    ? 'Invalid date range. "From" date must not be later than "To" date.'
+    : activeReportsError
+
   const newItemQuantityValue = parseNumericInput(newQuantity)
   const newItemUnitCostValue = parseNumericInput(newUnitCost)
   const newItemTotalCost = calculateTotalCost(newItemQuantityValue, newItemUnitCostValue)
@@ -2063,8 +2885,13 @@ function DashboardPage() {
 
   // [RENDER] Main layout and section tabs
   return (
-    <div className="dashboard-page">
-      <Sidebar activeSection={activeSection} onChangeSection={setActiveSection} />
+    <div className={`dashboard-page ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      <Sidebar
+        activeSection={activeSection}
+        onChangeSection={setActiveSection}
+        isCollapsed={isSidebarCollapsed}
+        onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+      />
 
       <main className="dashboard-main">
         {activeSection === 'dashboard' && (
@@ -2130,7 +2957,7 @@ function DashboardPage() {
               <article className="metric-card">
                 <div className="metric-text">
                   <div className="metric-label">Expired Items</div>
-                  <div className="metric-value">{formatValue(summary.expired)}</div>
+                  <div className="metric-value">{formatValue(dashboardExpiredCount)}</div>
                 </div>
                 <div className="metric-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
@@ -2321,7 +3148,7 @@ function DashboardPage() {
             handleQrButtonClick={handleQrButtonClick}
             qrGeneratingId={qrGeneratingId}
             editDeleting={editDeleting}
-            openDeleteConfirmation={openDeleteConfirmation}
+            openArchiveConfirmation={openArchiveConfirmation}
             formatCurrency={formatCurrency}
             calculateTotalCost={calculateTotalCost}
             newItemName={newItemName}
@@ -2349,6 +3176,403 @@ function DashboardPage() {
           />
         )}
 
+        {activeSection === 'settings' && (
+          <section className="dashboard-row" aria-label="Settings overview">
+            <article className="panel panel-wide">
+              <header className="panel-header">
+                <h3>Settings</h3>
+              </header>
+              <div className="panel-body">
+                <div style={{ display: 'grid', gap: 16 }}>
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>Profile</h4>
+                    {settingsProfileLoading ? (
+                      <p style={{ margin: 0, color: '#6b7280', fontSize: 13 }}>Loading profile…</p>
+                    ) : (
+                      <>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 12 }}>
+                          <div>
+                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Email</label>
+                            <input className="inventory-input" value={settingsEmail || '—'} readOnly />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Staff ID</label>
+                            <input className="inventory-input" value={settingsStaffId || '—'} readOnly />
+                          </div>
+                        </div>
+                        <div style={{ display: 'grid', gap: 8 }}>
+                          <label htmlFor="settings-full-name" style={{ fontSize: 12, color: '#6b7280' }}>Change Name</label>
+                          <input
+                            id="settings-full-name"
+                            className="inventory-input"
+                            value={settingsNameInput}
+                            onChange={(e) => setSettingsNameInput(e.target.value)}
+                            placeholder="Enter full name"
+                          />
+                          <label htmlFor="settings-position" style={{ fontSize: 12, color: '#6b7280' }}>Position</label>
+                          <input
+                            id="settings-position"
+                            className="inventory-input"
+                            value={settingsPositionInput}
+                            onChange={(e) => setSettingsPositionInput(e.target.value)}
+                            placeholder="Enter position"
+                          />
+                          <div>
+                            <button
+                              type="button"
+                              className="wmr-modal-button-save"
+                              onClick={() => {
+                                void handleSaveSettingsName()
+                              }}
+                              disabled={settingsNameSaving || settingsProfileLoading}
+                            >
+                              {settingsNameSaving ? 'Saving…' : 'Save Profile'}
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </section>
+
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>Change Password</h4>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                      <div>
+                        <label htmlFor="settings-new-password" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+                          New Password
+                        </label>
+                        <input
+                          id="settings-new-password"
+                          type="password"
+                          className="inventory-input"
+                          value={settingsPasswordInput}
+                          onChange={(e) => setSettingsPasswordInput(e.target.value)}
+                          placeholder="At least 8 characters"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="settings-confirm-password" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
+                          Confirm Password
+                        </label>
+                        <input
+                          id="settings-confirm-password"
+                          type="password"
+                          className="inventory-input"
+                          value={settingsConfirmPasswordInput}
+                          onChange={(e) => setSettingsConfirmPasswordInput(e.target.value)}
+                          placeholder="Retype new password"
+                        />
+                      </div>
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <button
+                        type="button"
+                        className="wmr-modal-button-save"
+                        onClick={() => {
+                          void handleChangeSettingsPassword()
+                        }}
+                        disabled={settingsPasswordSaving || settingsProfileLoading}
+                      >
+                        {settingsPasswordSaving ? 'Updating…' : 'Update Password'}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
+                      Archived Inventory ({archivedInventoryItems.length})
+                    </h4>
+                    {archivedInventoryItems.length === 0 ? (
+                      <p style={{ margin: 0, color: '#6b7280', fontSize: 13 }}>No archived inventory items.</p>
+                    ) : (
+                      <div style={{ overflowX: 'auto' }}>
+                        <table className="inventory-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">ID</th>
+                              <th scope="col">Name</th>
+                              <th scope="col">Type</th>
+                              <th scope="col">Qty</th>
+                              <th scope="col">Date Acquired</th>
+                              <th scope="col">Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {archivedInventoryItems.map((item) => (
+                              <tr key={`archived-${item.item_id}`}>
+                                <td>{`ITEM-${item.item_id.toString().padStart(3, '0')}`}</td>
+                                <td>{item.item_name}</td>
+                                <td>{item.item_type}</td>
+                                <td>{item.quantity ?? '—'}</td>
+                                <td>{formatDisplayDate(item.date_acquired)}</td>
+                                <td>
+                                  <span className="badge">Archived</span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </section>
+
+                  {settingsErrorMessage && <p className="dashboard-error" style={{ margin: 0 }}>{settingsErrorMessage}</p>}
+                  {settingsSuccessMessage && (
+                    <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{settingsSuccessMessage}</p>
+                  )}
+                </div>
+              </div>
+            </article>
+          </section>
+        )}
+
+        {activeSection === 'departments-staff' && (
+          <section className="dashboard-row" aria-label="Departments and staff management">
+            <article className="panel panel-wide">
+              <header className="panel-header">
+                <h3>Departments &amp; Staff</h3>
+              </header>
+              <div className="panel-body" style={{ display: 'grid', gap: 16 }}>
+                <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                  <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
+                    {staffFormMode === 'edit' ? 'Edit Staff' : 'Add Staff'}
+                  </h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department</label>
+                      <select
+                        className="inventory-input"
+                        value={staffFormDepartmentId}
+                        onChange={(e) => handleAddStaffDepartmentChange(e.target.value)}
+                      >
+                        <option value="">Select department</option>
+                        {departments.map((dept) => (
+                          <option key={`staff-dept-${dept.id}`} value={String(dept.id)}>
+                            {dept.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Full Name</label>
+                      <input className="inventory-input" value={staffFormName} onChange={(e) => setStaffFormName(e.target.value)} />
+                    </div>
+                    {staffFormMode === 'edit' && (
+                      <>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Email</label>
+                          <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
+                            {buildStaffEmail(staffFormStaffId) || '—'}
+                          </div>
+                        </div>
+                        <div>
+                          <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Staff ID</label>
+                          <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
+                            {staffFormStaffId || '—'}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Position</label>
+                      <input className="inventory-input" value={staffFormPosition} onChange={(e) => setStaffFormPosition(e.target.value)} />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Role</label>
+                      <select
+                        className="inventory-input"
+                        value={staffFormRole}
+                        onChange={(e) => setStaffFormRole(e.target.value)}
+                      >
+                        <option value="Staff">Staff</option>
+                        <option value="Admin">Admin</option>
+                      </select>
+                    </div>
+                    <div style={{ gridColumn: '1 / -1' }}>
+                      <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Contact Info</label>
+                      <input className="inventory-input" value={staffFormContact} onChange={(e) => setStaffFormContact(e.target.value)} />
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+                    <button
+                      type="button"
+                      className="wmr-modal-button-save"
+                      onClick={() => {
+                        void handleSaveStaff()
+                      }}
+                      disabled={staffSaving}
+                    >
+                      {staffSaving ? 'Saving…' : staffFormMode === 'edit' ? 'Save Changes' : 'Add Staff'}
+                    </button>
+                    {staffFormMode === 'edit' && (
+                      <button
+                        type="button"
+                        className="wmr-modal-button-secondary"
+                        onClick={resetStaffForm}
+                        disabled={staffSaving}
+                      >
+                        Cancel Edit
+                      </button>
+                    )}
+                  </div>
+                </section>
+
+                <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 12, alignItems: 'center' }}>
+                    <h4 style={{ margin: 0, fontSize: 15, color: '#111827' }}>Staff by Department</h4>
+                    <select
+                      className="inventory-input"
+                      value={staffDepartmentFilter}
+                      onChange={(e) => setStaffDepartmentFilter(e.target.value)}
+                      style={{ maxWidth: 260 }}
+                    >
+                      <option value="all">All Departments</option>
+                      {departments.map((dept) => (
+                        <option key={`staff-filter-${dept.id}`} value={String(dept.id)}>
+                          {dept.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div style={{ overflowX: 'auto' }}>
+                    <table className="inventory-table staff-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Staff ID</th>
+                          <th scope="col">Name</th>
+                          <th scope="col">Email</th>
+                          <th scope="col">Department</th>
+                          <th scope="col">Position</th>
+                          <th scope="col">Role</th>
+                          <th scope="col">Status</th>
+                          <th scope="col">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredDepartmentStaff.length === 0 ? (
+                          <tr>
+                            <td colSpan={8}>No staff records found for this department.</td>
+                          </tr>
+                        ) : (
+                          filteredDepartmentStaff.map((user) => {
+                            const departmentName =
+                              departments.find((dept) => dept.id === user.department_id)?.name ?? 'Unassigned'
+
+                            return (
+                              <tr key={`staff-row-${user.id}`}>
+                                <td>{user.staff_id}</td>
+                                <td>{user.full_name}</td>
+                                <td>{user.email}</td>
+                                <td>{departmentName}</td>
+                                <td>{user.position ?? '—'}</td>
+                                <td>{mapStaffRoleToOption(user.role)}</td>
+                                <td>{user.is_locked ? 'Locked' : 'Active'}</td>
+                                <td>
+                                  <div className="staff-actions">
+                                    <div className="staff-actions-main">
+                                      <button
+                                        type="button"
+                                        className="staff-action-icon-button staff-action-icon-button-primary"
+                                        title="Edit"
+                                        aria-label="Edit"
+                                        onClick={() => startEditStaff(user)}
+                                        disabled={staffUpdatingId === user.id}
+                                      >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                          <path
+                                            d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.6"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                          <path
+                                            d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="1.6"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                          />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="staff-action-icon-button staff-action-icon-button-secondary"
+                                        title="View QR"
+                                        aria-label="View QR"
+                                        onClick={() => {
+                                          void handleStaffQrButtonClick(user)
+                                        }}
+                                        disabled={staffUpdatingId === user.id}
+                                      >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                          <rect x="4" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                          <rect x="14" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                          <rect x="4" y="14" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                          <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
+                                        </svg>
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="staff-action-icon-button staff-action-icon-button-secondary"
+                                        title={user.is_locked ? 'Unlock' : 'Lock'}
+                                        aria-label={user.is_locked ? 'Unlock' : 'Lock'}
+                                        onClick={() => {
+                                          void handleToggleStaffLock(user)
+                                        }}
+                                        disabled={staffUpdatingId === user.id}
+                                      >
+                                        {user.is_locked ? (
+                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                            <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                            <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                          </svg>
+                                        ) : (
+                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                            <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                            <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                            <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                          </svg>
+                                        )}
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="staff-action-icon-button staff-action-icon-button-danger"
+                                        title="Delete"
+                                        aria-label="Delete"
+                                        onClick={() => {
+                                          void handleDeleteStaff(user)
+                                        }}
+                                        disabled={staffUpdatingId === user.id}
+                                      >
+                                        <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                          <path d="M5 7h14M9 7V5h6v2M8 7l.7 11h6.6L16 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                                          <path d="M10.5 11v5M13.5 11v5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                        </svg>
+                                      </button>
+                                    </div>
+                                  </div>
+                                </td>
+                              </tr>
+                            )
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </section>
+
+                {staffError && <p className="dashboard-error" style={{ margin: 0 }}>{staffError}</p>}
+                {staffSuccess && <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{staffSuccess}</p>}
+              </div>
+            </article>
+          </section>
+        )}
+
         {activeSection === 'stockpile' && (
           <StockpileSection
             loading={loading}
@@ -2364,6 +3588,7 @@ function DashboardPage() {
             categoryOptions={categoryOptions}
             stockpileLoading={stockpileLoading || stockpileReleaseLoading}
             filteredStockpileItems={filteredStockpileItems}
+            filteredExpiredStockpileItems={filteredExpiredStockpileItems}
             stockpileReleaseLogs={parsedStockpileReleaseLogs}
             openReleaseModal={openStockpileReleaseModal}
             handlePrintReleaseLogs={handlePrintStockpileReleaseLogs}
@@ -2492,6 +3717,41 @@ function DashboardPage() {
             parLoading={parLoading}
             filteredParSummaries={filteredParSummaries}
             setActiveParStaffId={setActiveParStaffId}
+          />
+        )}
+
+        {activeSection === 'reports' && (
+          <ReportsSection
+            reportsError={reportsErrorMessage}
+            selectedReportPeriod={selectedReportPeriod}
+            setSelectedReportPeriod={setSelectedReportPeriod}
+            reportStartDate={reportStartDate}
+            setReportStartDate={setReportStartDate}
+            reportEndDate={reportEndDate}
+            setReportEndDate={setReportEndDate}
+            disablePrintActions={reportDateRangeInvalid}
+            parOptions={reportParOptions}
+            selectedParStaffId={selectedParReportStaffId}
+            setSelectedParStaffId={setSelectedParReportStaffId}
+            onPrintPar={() =>
+              handlePrintParForStaff(
+                selectedParReportStaffId,
+                selectedReportPeriod,
+                reportStartDate,
+                reportEndDate,
+              )
+            }
+            onPrintStockpileLogs={() =>
+              handlePrintStockpileReleaseLogs(selectedReportPeriod, reportStartDate, reportEndDate)
+            }
+            onPrintWmrSummary={() => handlePrintWmrSummary(selectedReportPeriod, reportStartDate, reportEndDate)}
+            onPrintRepairLogs={() =>
+              handlePrintVehicleRepairLogs(selectedReportPeriod, reportStartDate, reportEndDate)
+            }
+            parReportCount={reportParOptions.length}
+            stockpileLogCount={reportStockpileLogCount}
+            wmrReportCount={reportWmrCount}
+            repairLogCount={reportVehicleRepairCount}
           />
         )}
       </main>
@@ -2706,8 +3966,36 @@ function DashboardPage() {
                 type="button"
                 className="wmr-modal-button-save"
                 onClick={handlePrintPar}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
               >
-                Print PAR
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+                  <path
+                    d="M7 9V4h10v5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <rect
+                    x="5"
+                    y="10"
+                    width="14"
+                    height="7"
+                    rx="1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <path
+                    d="M8 14h8M8 17h8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span>Print</span>
               </button>
               <button
                 type="button"
@@ -3102,13 +4390,13 @@ function DashboardPage() {
         >
           <div className="inventory-delete-modal">
             <h2 id="inventory-delete-modal-title" className="inventory-delete-modal-title">
-              Delete Item
+              Archive Item
             </h2>
             <p className="inventory-delete-modal-text">
-              Delete <strong>{deleteTargetItem.item_name}</strong>? This action cannot be undone.
+              Archive <strong>{deleteTargetItem.item_name}</strong>? You can restore it later by setting its status back from the database.
             </p>
             <p className="inventory-delete-modal-subtext">
-              Items with linked PAR/WMR records cannot be deleted.
+              Archiving hides the item from the active Inventory list and keeps historical records intact.
             </p>
             <div className="inventory-delete-modal-actions">
               <button
@@ -3125,11 +4413,11 @@ function DashboardPage() {
                 type="button"
                 className="inventory-delete-button-confirm"
                 onClick={() => {
-                  void handleDeleteItem(deleteTargetItem)
+                  void handleArchiveItem(deleteTargetItem)
                 }}
                 disabled={editDeleting}
               >
-                {editDeleting ? 'Deleting…' : 'Delete'}
+                {editDeleting ? 'Archiving…' : 'Archive'}
               </button>
             </div>
           </div>
@@ -3216,6 +4504,49 @@ function DashboardPage() {
                 type="button"
                 className="logout-modal-button-secondary"
                 onClick={() => setViewImageItem(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* [MODAL] Staff QR viewer */}
+      {viewStaffQrItem && (
+        <div
+          className="logout-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="view-staff-qr-modal-title"
+        >
+          <div className="logout-modal">
+            <h2 id="view-staff-qr-modal-title" className="logout-modal-title">
+              Staff QR Code
+            </h2>
+            <p className="logout-modal-text" style={{ marginBottom: 12 }}>
+              <strong>{viewStaffQrItem.full_name}</strong>
+              <br />
+              {viewStaffQrItem.staff_id}
+            </p>
+            {viewStaffQrItem.qr_code ? (
+              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <QRCodeSVG
+                  value={viewStaffQrItem.qr_code}
+                  size={200}
+                  bgColor="transparent"
+                  fgColor="#111827"
+                  includeMargin
+                />
+              </div>
+            ) : (
+              <p className="logout-modal-text">No QR code available for this staff record.</p>
+            )}
+            <div className="logout-modal-actions">
+              <button
+                type="button"
+                className="logout-modal-button-secondary"
+                onClick={() => setViewStaffQrItem(null)}
               >
                 Close
               </button>
@@ -3313,6 +4644,8 @@ function DashboardPage() {
                           ? 'badge-status-pending'
                           : wmrStatusInput === 'For Disposal'
                             ? 'badge-status-disposal'
+                            : wmrStatusInput === 'Disposed'
+                              ? 'badge-status-disposed'
                             : wmrStatusInput === 'For Repair'
                               ? 'badge-status-repair'
                               : wmrStatusInput === 'Repaired'
@@ -3351,6 +4684,7 @@ function DashboardPage() {
                   >
                     <option value="Pending">Pending</option>
                     <option value="For Disposal">For Disposal</option>
+                    <option value="Disposed">Disposed</option>
                     <option value="For Repair">For Repair</option>
                     <option value="Repaired">Repaired</option>
                   </select>

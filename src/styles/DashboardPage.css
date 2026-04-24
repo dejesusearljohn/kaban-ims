@@ -5,6 +5,11 @@
   background: #f4f4f4;
   color: #111827;
   font-family: var(--sans);
+  transition: padding-left 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.dashboard-page.sidebar-collapsed {
+  padding-left: 76px;
 }
 
 .dashboard-main {

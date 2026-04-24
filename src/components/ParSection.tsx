@@ -106,9 +106,6 @@ function ParSection({
           className={parMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
           onClick={() => setParMode('add')}
         >
-          <span className="inventory-add-plus" aria-hidden="true">
-            +
-          </span>
           Add PAR
         </button>
       </section>

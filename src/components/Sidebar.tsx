@@ -3,18 +3,29 @@ import { BANICAIN_LOGO_URL } from './SignInPage'
 import { supabase } from '../supabaseClient'
 import '../styles/Sidebar.css'
 
-export type SidebarSection = 'dashboard' | 'inventory' | 'stockpile' | 'wmr' | 'par' | 'vehicles'
+export type SidebarSection =
+  | 'dashboard'
+  | 'inventory'
+  | 'stockpile'
+  | 'wmr'
+  | 'par'
+  | 'vehicles'
+  | 'reports'
+  | 'departments-staff'
+  | 'settings'
 
 type SidebarProps = {
   activeSection: SidebarSection
   onChangeSection: (section: SidebarSection) => void
+  isCollapsed: boolean
+  onToggleCollapse: () => void
 }
 
-function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
+function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="sidebar-header">
         <div className="sidebar-logo" aria-hidden="true">
           <img src={BANICAIN_LOGO_URL} alt="" />
@@ -23,6 +34,35 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
           <h1>KABAN</h1>
           <p>Barangay Banicain Inventory</p>
         </div>
+        <button
+          type="button"
+          className="sidebar-toggle"
+          aria-label={isCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          title={isCollapsed ? 'Show sidebar' : 'Hide sidebar'}
+          onClick={onToggleCollapse}
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            {isCollapsed ? (
+              <path
+                d="M9 6l6 6-6 6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            ) : (
+              <path
+                d="M15 6l-6 6 6 6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            )}
+          </svg>
+        </button>
       </div>
 
       <div className="sidebar-user">Super Admin</div>
@@ -110,7 +150,25 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
           </span>
           <span className="sidebar-link-text">Vehicles</span>
         </button>
-        <button className="sidebar-link" type="button">
+        <button
+          className={`sidebar-link ${activeSection === 'reports' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('reports')}
+        >
+          <span className="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M6 3h9l3 3v15H6z" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+              <path d="M15 3v4h4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+              <path d="M9 11h6M9 14h6M9 17h5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="sidebar-link-text">Reports</span>
+        </button>
+        <button
+          className={`sidebar-link ${activeSection === 'departments-staff' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('departments-staff')}
+        >
           <span className="sidebar-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <circle cx="9" cy="9" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -119,7 +177,26 @@ function Sidebar({ activeSection, onChangeSection }: SidebarProps) {
               <path d="M14.5 17.5c.4-1.4 1.4-2.2 2.5-2.2 1 0 1.9.6 2.3 1.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="sidebar-link-text">Departments &amp; Staffs</span>
+          <span className="sidebar-link-text">Departments &amp; Staff</span>
+        </button>
+        <button
+          className={`sidebar-link ${activeSection === 'settings' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('settings')}
+        >
+          <span className="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.7" />
+              <path
+                d="M12 3.8v2.1M12 18.1v2.1M3.8 12h2.1M18.1 12h2.1M6.1 6.1l1.5 1.5M16.4 16.4l1.5 1.5M17.9 6.1l-1.5 1.5M7.6 16.4l-1.5 1.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </span>
+          <span className="sidebar-link-text">Settings</span>
         </button>
       </nav>
 

@@ -15,8 +15,8 @@ type StockpileSectionProps = {
   totalStockpiles: number
   formatValue: (value: number) => string
   stockpileError: string | null
-  stockpileMode: 'list' | 'add'
-  setStockpileMode: (mode: 'list' | 'add') => void
+  stockpileMode: 'list' | 'add' | 'logs' | 'expired'
+  setStockpileMode: (mode: 'list' | 'add' | 'logs' | 'expired') => void
   searchQuery: string
   setSearchQuery: (value: string) => void
   categoryFilter: string
@@ -24,6 +24,7 @@ type StockpileSectionProps = {
   categoryOptions: string[]
   stockpileLoading: boolean
   filteredStockpileItems: StockpileRow[]
+  filteredExpiredStockpileItems: StockpileRow[]
   stockpileReleaseLogs: StockpileReleaseLog[]
   openReleaseModal: () => void
   handlePrintReleaseLogs: () => void
@@ -59,6 +60,7 @@ function StockpileSection({
   categoryOptions,
   stockpileLoading,
   filteredStockpileItems,
+  filteredExpiredStockpileItems,
   stockpileReleaseLogs,
   openReleaseModal,
   handlePrintReleaseLogs,
@@ -103,10 +105,21 @@ function StockpileSection({
           className={stockpileMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
           onClick={() => setStockpileMode('add')}
         >
-          <span className="inventory-add-plus" aria-hidden="true">
-            +
-          </span>
           Add Stockpile
+        </button>
+        <button
+          type="button"
+          className={stockpileMode === 'logs' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+          onClick={() => setStockpileMode('logs')}
+        >
+          Release Logs
+        </button>
+        <button
+          type="button"
+          className={stockpileMode === 'expired' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+          onClick={() => setStockpileMode('expired')}
+        >
+          Expired
         </button>
       </section>
 
@@ -135,11 +148,7 @@ function StockpileSection({
                   </option>
                 ))}
               </select>
-              <button
-                type="button"
-                className="inventory-primary-button"
-                onClick={openReleaseModal}
-              >
+              <button type="button" className="inventory-primary-button" onClick={openReleaseModal}>
                 Stockpile Release
               </button>
             </div>
@@ -195,50 +204,164 @@ function StockpileSection({
               </table>
             </div>
           </section>
+        </>
+      )}
 
-          <section className="inventory-table-section" aria-label="Stockpile release logs">
+      {stockpileMode === 'logs' && (
+        <section className="inventory-table-section" aria-label="Stockpile release logs">
+          <div className="inventory-table-card">
+            <div
+              className="inventory-table-title"
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+            >
+              <h3 className="inventory-add-title" style={{ margin: 0 }}>
+                Release Logs
+              </h3>
+              <button
+                type="button"
+                className="wmr-modal-button-save"
+                onClick={handlePrintReleaseLogs}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+                  <path
+                    d="M7 9V4h10v5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <rect
+                    x="5"
+                    y="10"
+                    width="14"
+                    height="7"
+                    rx="1.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.6"
+                  />
+                  <path
+                    d="M8 14h8M8 17h8"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.4"
+                    strokeLinecap="round"
+                  />
+                </svg>
+                <span>Print</span>
+              </button>
+            </div>
+            <table className="inventory-table">
+              <thead>
+                <tr>
+                  <th scope="col">Date</th>
+                  <th scope="col">Item</th>
+                  <th scope="col">Qty</th>
+                  <th scope="col">Unit</th>
+                  <th scope="col">Issued To</th>
+                  <th scope="col">Reason</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stockpileLoading ? (
+                  <tr>
+                    <td colSpan={6}>Loading release logs...</td>
+                  </tr>
+                ) : stockpileReleaseLogs.length === 0 ? (
+                  <tr>
+                    <td colSpan={6}>No release logs found.</td>
+                  </tr>
+                ) : (
+                  stockpileReleaseLogs.map((entry) => (
+                    <tr key={entry.log.log_id}>
+                      <td>{formatDisplayDate(entry.log.operation_date)}</td>
+                      <td>{entry.itemName || '—'}</td>
+                      <td>{entry.quantity}</td>
+                      <td>{entry.unit || '—'}</td>
+                      <td>{entry.log.recipient_info ?? '—'}</td>
+                      <td>{entry.log.calamity_name ?? '—'}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {stockpileMode === 'expired' && (
+        <>
+          <section className="inventory-filters" aria-label="Expired stockpile filters">
+            <div className="inventory-search-wrapper">
+              <input
+                type="search"
+                className="inventory-search-input"
+                placeholder="Search by item name…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="inventory-filter-selects">
+              <select
+                className="inventory-filter-select"
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+              >
+                <option value="all">All Categories</option>
+                {categoryOptions.map((category) => (
+                  <option key={category} value={category}>
+                    {category}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </section>
+
+          <section className="inventory-table-section" aria-label="Expired stockpile table">
             <div className="inventory-table-card">
-              <div className="inventory-table-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 className="inventory-add-title" style={{ margin: 0 }}>Release Logs</h3>
-                <button
-                  type="button"
-                  className="inventory-secondary-button"
-                  onClick={handlePrintReleaseLogs}
-                >
-                  Print Release Logs
-                </button>
-              </div>
               <table className="inventory-table">
                 <thead>
                   <tr>
-                    <th scope="col">Date</th>
-                    <th scope="col">Item</th>
-                    <th scope="col">Qty</th>
+                    <th scope="col">ID</th>
+                    <th scope="col">Item Name</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Quantity</th>
                     <th scope="col">Unit</th>
-                    <th scope="col">Issued To</th>
-                    <th scope="col">Reason</th>
+                    <th scope="col">Packed Date</th>
+                    <th scope="col">Expiration Date</th>
                   </tr>
                 </thead>
                 <tbody>
                   {stockpileLoading ? (
                     <tr>
-                      <td colSpan={6}>Loading release logs...</td>
+                      <td colSpan={7}>Loading expired stockpiles…</td>
                     </tr>
-                  ) : stockpileReleaseLogs.length === 0 ? (
+                  ) : filteredExpiredStockpileItems.length === 0 ? (
                     <tr>
-                      <td colSpan={6}>No release logs found.</td>
+                      <td colSpan={7}>No expired stockpiles found.</td>
                     </tr>
                   ) : (
-                    stockpileReleaseLogs.map((entry) => (
-                      <tr key={entry.log.log_id}>
-                        <td>{formatDisplayDate(entry.log.operation_date)}</td>
-                        <td>{entry.itemName || '—'}</td>
-                        <td>{entry.quantity}</td>
-                        <td>{entry.unit || '—'}</td>
-                        <td>{entry.log.recipient_info ?? '—'}</td>
-                        <td>{entry.log.calamity_name ?? '—'}</td>
-                      </tr>
-                    ))
+                    filteredExpiredStockpileItems.map((item) => {
+                      const paddedId = `STOCK-${item.stockpile_id.toString().padStart(3, '0')}`
+
+                      return (
+                        <tr key={item.stockpile_id}>
+                          <td>{paddedId}</td>
+                          <td>{item.item_name ?? '—'}</td>
+                          <td>{item.category ?? '—'}</td>
+                          <td>{item.quantity_on_hand ?? '—'}</td>
+                          <td>{item.unit_of_measure ?? '—'}</td>
+                          <td>{formatDisplayDate(item.packed_date)}</td>
+                          <td>
+                            <span className="badge badge-status-unserviceable">
+                              {formatDisplayDate(item.expiration_date)}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })
                   )}
                 </tbody>
               </table>

@@ -22,6 +22,11 @@
   color: #b91c1c;
 }
 
+.badge-status-disposed {
+  background: #e5e7eb;
+  color: #374151;
+}
+
 .badge-status-repair {
   background: #e0f2fe;
   color: #0369a1;

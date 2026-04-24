@@ -35,7 +35,7 @@ type InventorySectionProps = {
   handleQrButtonClick: (item: InventoryRow) => void
   qrGeneratingId: number | null
   editDeleting: boolean
-  openDeleteConfirmation: (item: InventoryRow) => void
+  openArchiveConfirmation: (item: InventoryRow) => void
   formatCurrency: (value: number | null) => string
   calculateTotalCost: (quantity: number | null, unitCost: number | null) => number | null
   newItemName: string
@@ -89,7 +89,7 @@ function InventorySection({
   handleQrButtonClick,
   qrGeneratingId,
   editDeleting,
-  openDeleteConfirmation,
+  openArchiveConfirmation,
   formatCurrency,
   calculateTotalCost,
   newItemName,
@@ -139,9 +139,6 @@ function InventorySection({
           className={inventoryMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
           onClick={() => setInventoryMode('add')}
         >
-          <span className="inventory-add-plus" aria-hidden="true">
-            +
-          </span>
           Add Item
         </button>
       </section>
@@ -208,7 +205,7 @@ function InventorySection({
                     <th scope="col">Type</th>
                     <th scope="col">Qty</th>
                     <th scope="col">Unit</th>
-                    <th scope="col">Unit Cost (per 1 qty)</th>
+                    <th scope="col">Unit Cost</th>
                     <th scope="col">Total Cost</th>
                     <th scope="col">Acquired</th>
                     <th scope="col">Expiration</th>
@@ -279,134 +276,154 @@ function InventorySection({
                             )}
                           </td>
                           <td className="inventory-row-actions">
-                            <button
-                              type="button"
-                              aria-label="Edit item"
-                              className="inventory-icon-button"
-                              onClick={() => openEditItem(item)}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path
-                                  d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                                <path
-                                  d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              aria-label="View item photo"
-                              className="inventory-icon-button"
-                              disabled={photoUrls.length === 0}
-                              onClick={() => {
-                                if (photoUrls.length > 0) {
-                                  setViewImageItem(item)
-                                  setViewImageIndex(0)
-                                }
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <rect
-                                  x="4"
-                                  y="5"
-                                  width="16"
-                                  height="14"
-                                  rx="2"
-                                  ry="2"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                />
-                                <circle
-                                  cx="10"
-                                  cy="10"
-                                  r="1.7"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.4"
-                                />
-                                <path
-                                  d="M6 17l3.5-3.5 2.5 2.5 3-3 3 4"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              aria-label="View item QR code"
-                              className="inventory-icon-button"
-                              disabled={qrGeneratingId === item.item_id}
-                              onClick={() => {
-                                void handleQrButtonClick(item)
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <rect
-                                  x="4"
-                                  y="4"
-                                  width="6"
-                                  height="6"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                />
-                                <rect
-                                  x="14"
-                                  y="4"
-                                  width="6"
-                                  height="6"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                />
-                                <rect
-                                  x="4"
-                                  y="14"
-                                  width="6"
-                                  height="6"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                />
-                                <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
-                              </svg>
-                            </button>
-                            <button
-                              type="button"
-                              aria-label="Delete item"
-                              className="inventory-icon-button"
-                              disabled={editDeleting}
-                              onClick={() => {
-                                openDeleteConfirmation(item)
-                              }}
-                            >
-                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                <path
-                                  d="M5 7h14M9 7V5h6v2M8 7l.7 11h6.6L16 7"
-                                  fill="none"
-                                  stroke="currentColor"
-                                  strokeWidth="1.6"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                                <path d="M10.5 11v5M13.5 11v5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                              </svg>
-                            </button>
+                            <div className="inventory-actions-grid">
+                              <button
+                                type="button"
+                                aria-label="Edit item"
+                                title="Edit item"
+                                className="inventory-icon-button"
+                                onClick={() => openEditItem(item)}
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                  <path
+                                    d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="View item photo"
+                                title="View item photo"
+                                className="inventory-icon-button"
+                                disabled={photoUrls.length === 0}
+                                onClick={() => {
+                                  if (photoUrls.length > 0) {
+                                    setViewImageItem(item)
+                                    setViewImageIndex(0)
+                                  }
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                  <rect
+                                    x="4"
+                                    y="5"
+                                    width="16"
+                                    height="14"
+                                    rx="2"
+                                    ry="2"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                  />
+                                  <circle
+                                    cx="10"
+                                    cy="10"
+                                    r="1.7"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.4"
+                                  />
+                                  <path
+                                    d="M6 17l3.5-3.5 2.5 2.5 3-3 3 4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="View item QR code"
+                                title="View item QR code"
+                                className="inventory-icon-button"
+                                disabled={qrGeneratingId === item.item_id}
+                                onClick={() => {
+                                  void handleQrButtonClick(item)
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                  <rect
+                                    x="4"
+                                    y="4"
+                                    width="6"
+                                    height="6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                  />
+                                  <rect
+                                    x="14"
+                                    y="4"
+                                    width="6"
+                                    height="6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                  />
+                                  <rect
+                                    x="4"
+                                    y="14"
+                                    width="6"
+                                    height="6"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                  />
+                                  <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
+                                </svg>
+                              </button>
+                              <button
+                                type="button"
+                                aria-label="Archive item"
+                                title="Archive item"
+                                className="inventory-icon-button"
+                                disabled={editDeleting}
+                                onClick={() => {
+                                  openArchiveConfirmation(item)
+                                }}
+                              >
+                                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                  <path
+                                    d="M4 6h16v4H4z"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M6 10h12v9H6z"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.6"
+                                    strokeLinecap="round"
+                                    strokeLinejoin="round"
+                                  />
+                                  <path
+                                    d="M9 13h6M12 13v4"
+                                    fill="none"
+                                    stroke="currentColor"
+                                    strokeWidth="1.4"
+                                    strokeLinecap="round"
+                                  />
+                                </svg>
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       )

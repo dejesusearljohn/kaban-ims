@@ -114,6 +114,7 @@ function WmrSection({
               <option value="all">All Status</option>
               <option value="Pending">Pending</option>
               <option value="For Disposal">For Disposal</option>
+              <option value="Disposed">Disposed</option>
               <option value="For Repair">For Repair</option>
               <option value="Repaired">Repaired</option>
             </select>
@@ -177,6 +178,8 @@ function WmrSection({
                                   ? 'badge-status-pending'
                                   : status === 'For Disposal'
                                     ? 'badge-status-disposal'
+                                    : status === 'Disposed'
+                                      ? 'badge-status-disposed'
                                     : status === 'For Repair'
                                       ? 'badge-status-repair'
                                       : status === 'Repaired'
@@ -229,6 +232,8 @@ function WmrSection({
                                   ? 'badge-status-pending'
                                   : status === 'For Disposal'
                                     ? 'badge-status-disposal'
+                                    : status === 'Disposed'
+                                      ? 'badge-status-disposed'
                                     : status === 'For Repair'
                                       ? 'badge-status-repair'
                                       : status === 'Repaired'
