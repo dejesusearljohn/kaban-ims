@@ -237,9 +237,6 @@ function AccountabilityReportsSection() {
 
           {!loading && accountabilityRows.length > 0 && (
             <div className="inventory-pagination">
-              <span className="inventory-pagination-text">
-                {accountabilityRows.length} accountability report{accountabilityRows.length === 1 ? '' : 's'}
-              </span>
               {totalPages > 1 && (
                 <div className="inventory-pagination-controls">
                   <button type="button" className="inventory-page-button" disabled={page === 1} onClick={() => setPage((prev) => Math.max(1, prev - 1))}>
