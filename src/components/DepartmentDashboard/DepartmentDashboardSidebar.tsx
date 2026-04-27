@@ -10,6 +10,7 @@ type DepartmentDashboardSidebarProps = {
   onSelectSection: (section: DepartmentDashboardSectionKey) => void
   isCollapsed: boolean
   onToggleCollapse: () => void
+  showHeaderProfileButton?: boolean
 }
 
 function DepartmentDashboardSidebar({
@@ -19,6 +20,7 @@ function DepartmentDashboardSidebar({
   onSelectSection,
   isCollapsed,
   onToggleCollapse,
+  showHeaderProfileButton = false,
 }: DepartmentDashboardSidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
@@ -71,6 +73,15 @@ function DepartmentDashboardSidebar({
             <circle cx="12" cy="7" r="4" />
           </svg>
         )
+      case 'shift-turnover':
+        return (
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 1l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 014-4h14" />
+            <path d="M7 23l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 01-4 4H3" />
+          </svg>
+        )
     }
   }
 
@@ -84,6 +95,20 @@ function DepartmentDashboardSidebar({
           <h1>KABAN</h1>
           <p>Barangay Banicain Inventory</p>
         </div>
+        {showHeaderProfileButton && (
+          <button
+            type="button"
+            className={`sidebar-header-profile${activeSection === 'profile' ? ' active' : ''}`}
+            aria-label="Open profile"
+            title="Profile"
+            onClick={() => onSelectSection('profile')}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+              <circle cx="12" cy="7" r="4" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           className="sidebar-toggle"

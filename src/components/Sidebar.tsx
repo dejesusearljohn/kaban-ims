@@ -11,6 +11,7 @@ export type SidebarSection =
   | 'wmr'
   | 'par'
   | 'accountability'
+  | 'shift-turnover-records'
   | 'vehicles'
   | 'reports'
   | 'settings'
@@ -158,6 +159,21 @@ function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse
             </svg>
           </span>
           <span className="sidebar-link-text">Accountability Reports</span>
+        </button>
+        <button
+          className={`sidebar-link ${activeSection === 'shift-turnover-records' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('shift-turnover-records')}
+        >
+          <span className="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M17 1l4 4-4 4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M3 11V9a4 4 0 014-4h14" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M7 23l-4-4 4-4" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M21 13v2a4 4 0 01-4 4H3" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span className="sidebar-link-text">Shift Turnover Records</span>
         </button>
         <button
           className={`sidebar-link ${activeSection === 'vehicles' ? 'sidebar-link-active' : ''}`}

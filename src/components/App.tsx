@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import SignInPage from './SignInPage.tsx'
 import DashboardPage from './DashboardPage'
 import { DepartmentDashboardPage } from './DepartmentDashboard'
 import { supabase } from '../supabaseClient'
 
 const INACTIVITY_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
+const SHIFT_TURNOVER_DEADLINE_HOUR = 18 // 6:00 PM local time
+const SHIFT_TURNOVER_DEPARTMENT_CODE = 'NEBRU'
 
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -24,6 +26,41 @@ function App() {
 		typeof window !== 'undefined' ? detectRecoveryFlow() : false,
 	)
 	const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const enforceShiftTurnoverDeadline = useCallback(async (userId: string, departmentCode: string) => {
+		const normalizedCode = departmentCode.trim().toUpperCase()
+		if (normalizedCode !== SHIFT_TURNOVER_DEPARTMENT_CODE) return true
+
+		const now = new Date()
+		if (now.getHours() < SHIFT_TURNOVER_DEADLINE_HOUR) return true
+
+		const today = now.toISOString().split('T')[0]
+		const { data: checkRow, error: checkError } = await supabase
+			.from('daily_checks')
+			.select('check_id')
+			.eq('submitted_by', userId)
+			.eq('check_date', today)
+			.eq('is_submitted', true)
+			.limit(1)
+			.maybeSingle()
+
+		if (checkError) return true
+		if (checkRow) return true
+
+		const { error: lockError } = await supabase
+			.from('users')
+			.update({ is_locked: true })
+			.eq('id', userId)
+
+		if (lockError) {
+			// Fallback: block current session when lock write fails (e.g. strict RLS).
+			await supabase.auth.signOut()
+			return false
+		}
+
+		await supabase.auth.signOut()
+		return false
+	}, [])
 
 	const resetInactivityTimer = () => {
 		if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
@@ -77,10 +114,14 @@ function App() {
 					.eq('id', data.department_id)
 					.maybeSingle()
 
+				const departmentCode = department?.dept_code?.trim() || ''
+				const isWithinDeadline = await enforceShiftTurnoverDeadline(userId, departmentCode)
+				if (!isWithinDeadline) return null
+
 				return {
 					kind: 'department' as const,
 					departmentName: department?.dept_name?.trim() || 'Department',
-					departmentCode: department?.dept_code?.trim() || '',
+					departmentCode,
 					departmentId: data.department_id,
 				}
 			}
@@ -140,7 +181,23 @@ function App() {
 			isMounted = false
 			listener.subscription.unsubscribe()
 		}
-	}, [])
+	}, [enforceShiftTurnoverDeadline])
+
+	useEffect(() => {
+		if (!isAuthenticated || dashboardTarget !== 'department' || !staffUserId || !departmentCode) return
+
+		const runDeadlineCheck = async () => {
+			await enforceShiftTurnoverDeadline(staffUserId, departmentCode)
+		}
+
+		void runDeadlineCheck()
+
+		const deadlineInterval = setInterval(() => {
+			void runDeadlineCheck()
+		}, 60 * 1000)
+
+		return () => clearInterval(deadlineInterval)
+	}, [isAuthenticated, dashboardTarget, staffUserId, departmentCode, enforceShiftTurnoverDeadline])
 
 	if (isAuthenticated === null) {
 		return null

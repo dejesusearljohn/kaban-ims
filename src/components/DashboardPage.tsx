@@ -22,6 +22,7 @@ import WmrSection from './WmrSection'
 import VehiclesSection from './VehiclesSection'
 import ParSection, { type ParDraftItem } from './ParSection'
 import AccountabilityReportsSection from './AccountabilityReportsSection'
+import ShiftTurnoverRecordsSection from './ShiftTurnoverRecordsSection'
 import ReportsSection, { type ReportPeriod } from './ReportsSection'
 import type { SidebarSection } from './Sidebar'
 import '../styles/DashboardPage.css'
@@ -5691,6 +5692,10 @@ function DashboardPage() {
 
         {activeSection === 'accountability' && (
           <AccountabilityReportsSection />
+        )}
+
+        {activeSection === 'shift-turnover-records' && (
+          <ShiftTurnoverRecordsSection />
         )}
 
         {activeSection === 'reports' && (

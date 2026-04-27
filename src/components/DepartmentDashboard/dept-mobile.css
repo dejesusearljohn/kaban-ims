@@ -884,6 +884,326 @@
 .dept-alert-success { background: var(--dept-green-light); color: var(--dept-green-dark); }
 .dept-alert-info    { background: #e0f2fe; color: #0369a1; }
 
+/* ─── Header profile shortcut ──────────────── */
+.dept-app-shell .sidebar-header-profile {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  .dept-app-shell .sidebar-header,
+  .dept-app-shell .sidebar.sidebar-collapsed .sidebar-header {
+    align-items: center;
+  }
+
+  .dept-app-shell .sidebar-header-profile {
+    margin-left: auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    border: 1px solid var(--dept-border);
+    background: var(--dept-surface);
+    color: var(--dept-text-muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .dept-app-shell .sidebar-header-profile svg {
+    width: 18px;
+    height: 18px;
+  }
+
+  .dept-app-shell .sidebar-header-profile.active {
+    color: var(--dept-green-dark);
+    border-color: #86efac;
+    background: var(--dept-green-light);
+  }
+}
+
+/* ─── Shift Turnover ───────────────────────── */
+.dept-turnover {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dept-turnover-header {
+  margin-bottom: 2px;
+}
+
+.dept-turnover-tabs {
+  margin-bottom: 2px;
+}
+
+.dept-turnover-card .dept-card-body {
+  padding: 16px;
+}
+
+.dept-turnover-form {
+  margin-bottom: 12px;
+}
+
+.dept-turnover-helper {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--dept-text-muted);
+}
+
+.dept-turnover-progress {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f8fafc;
+  border: 1px solid var(--dept-border);
+  color: var(--dept-text-muted);
+  font-size: 12px;
+}
+
+.dept-turnover-progress strong {
+  color: var(--dept-text);
+}
+
+.dept-turnover-progress-done {
+  margin-left: 8px;
+  color: var(--dept-green-dark);
+  font-weight: 600;
+}
+
+.dept-turnover-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dept-turnover-item {
+  border: 1px solid var(--dept-border);
+  border-radius: 12px;
+  background: var(--dept-surface);
+  padding: 12px;
+}
+
+.dept-turnover-item.is-serviceable {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+}
+
+.dept-turnover-item.is-unserviceable {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.dept-turnover-item-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dept-turnover-item-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dept-text);
+}
+
+.dept-turnover-item-meta {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--dept-text-muted);
+}
+
+.dept-turnover-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dept-turnover-status-btn {
+  border: 1px solid var(--dept-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 700;
+  background: var(--dept-surface);
+  color: var(--dept-text-muted);
+  cursor: pointer;
+}
+
+.dept-turnover-status-btn.serviceable.active {
+  border-color: #16a34a;
+  background: #16a34a;
+  color: #ffffff;
+}
+
+.dept-turnover-status-btn.unserviceable.active {
+  border-color: #dc2626;
+  background: #dc2626;
+  color: #ffffff;
+}
+
+.dept-turnover-remarks {
+  margin-top: 10px;
+}
+
+.dept-turnover-alert {
+  margin-top: 12px;
+}
+
+.dept-turnover-submit-row {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.dept-turnover-submit-row .dept-btn {
+  width: 100%;
+}
+
+.dept-turnover-success {
+  padding: 28px 20px;
+  text-align: center;
+}
+
+.dept-turnover-success svg {
+  width: 40px;
+  height: 40px;
+  stroke: var(--dept-green-dark);
+  margin: 0 auto 10px;
+}
+
+.dept-turnover-success h2 {
+  margin: 0;
+  font-size: 18px;
+  color: var(--dept-text);
+}
+
+.dept-turnover-success p {
+  margin: 8px auto 16px;
+  max-width: 420px;
+  color: var(--dept-text-muted);
+  font-size: 13px;
+}
+
+.dept-turnover-request-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dept-turnover-request-card .dept-card-body {
+  padding: 14px;
+}
+
+.dept-turnover-request-header {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dept-turnover-request-name {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--dept-text);
+}
+
+.dept-turnover-request-name span {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--dept-text-muted);
+}
+
+.dept-turnover-request-meta {
+  margin: 3px 0 0;
+  font-size: 12px;
+  color: var(--dept-text-muted);
+}
+
+.dept-turnover-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dept-turnover-request-actions .dept-btn {
+  padding: 7px 12px;
+  font-size: 12px;
+}
+
+.dept-turnover-inline-note {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--dept-text-muted);
+}
+
+.dept-turnover-table-wrap {
+  margin-top: 12px;
+  border: 1px solid var(--dept-border);
+  border-radius: 10px;
+  overflow-x: auto;
+  background: var(--dept-surface);
+}
+
+.dept-turnover-table {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: 520px;
+}
+
+.dept-turnover-table th,
+.dept-turnover-table td {
+  text-align: left;
+  padding: 8px 10px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--dept-border);
+}
+
+.dept-turnover-table th {
+  background: #f8fafc;
+  color: #1f2937;
+  font-weight: 700;
+}
+
+.dept-turnover-table td {
+  color: #374151;
+}
+
+.dept-turnover-condition-ok {
+  color: #15803d;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+.dept-turnover-condition-bad {
+  color: #b91c1c;
+  font-weight: 700;
+  text-transform: capitalize;
+}
+
+@media (min-width: 560px) {
+  .dept-turnover-item-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+
+  .dept-turnover-submit-row .dept-btn {
+    width: auto;
+  }
+
+  .dept-turnover-request-header {
+    flex-direction: row;
+    align-items: flex-start;
+    justify-content: space-between;
+  }
+}
+
 /* Desktop consistency with admin spacing */
 @media (min-width: 961px) {
   .dept-section {

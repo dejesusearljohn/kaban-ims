@@ -441,6 +441,35 @@
   cursor: not-allowed;
 }
 
+.shift-turnover-actions-grid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-start;
+}
+
+.inventory-icon-button-success {
+  border-color: #bbf7d0;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.inventory-icon-button-success:hover:not(:disabled) {
+  border-color: #86efac;
+  background: #dcfce7;
+}
+
+.inventory-icon-button-danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.inventory-icon-button-danger:hover:not(:disabled) {
+  border-color: #fca5a5;
+  background: #fee2e2;
+}
+
 .staff-actions {
   display: flex;
   flex-direction: column;

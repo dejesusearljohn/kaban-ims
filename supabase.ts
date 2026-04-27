@@ -315,6 +315,51 @@ export type Database = {
         }
         Relationships: []
       }
+      daily_check_items: {
+        Row: {
+          check_id: number
+          check_item_id: number
+          condition: string
+          item_id: number
+          remarks: string | null
+          scanned_at: string
+          uid: string
+        }
+        Insert: {
+          check_id: number
+          check_item_id?: never
+          condition: string
+          item_id: number
+          remarks?: string | null
+          scanned_at?: string
+          uid?: string
+        }
+        Update: {
+          check_id?: number
+          check_item_id?: never
+          condition?: string
+          item_id?: number
+          remarks?: string | null
+          scanned_at?: string
+          uid?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "daily_check_items_check_id_fkey"
+            columns: ["check_id"]
+            isOneToOne: false
+            referencedRelation: "daily_checks"
+            referencedColumns: ["check_id"]
+          },
+          {
+            foreignKeyName: "daily_check_items_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory"
+            referencedColumns: ["item_id"]
+          },
+        ]
+      }
       daily_checks: {
         Row: {
           check_date: string | null
@@ -595,32 +640,45 @@ export type Database = {
       shift_turnovers: {
         Row: {
           created_at: string | null
+          daily_check_id: number | null
           details: string | null
           incoming_staff_id: string | null
           is_approved_by_admin: boolean | null
           outgoing_staff_id: string | null
+          status: string
           turnover_id: number
           uid: string
         }
         Insert: {
           created_at?: string | null
+          daily_check_id?: number | null
           details?: string | null
           incoming_staff_id?: string | null
           is_approved_by_admin?: boolean | null
           outgoing_staff_id?: string | null
+          status?: string
           turnover_id?: number
           uid?: string
         }
         Update: {
           created_at?: string | null
+          daily_check_id?: number | null
           details?: string | null
           incoming_staff_id?: string | null
           is_approved_by_admin?: boolean | null
           outgoing_staff_id?: string | null
+          status?: string
           turnover_id?: number
           uid?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "shift_turnovers_daily_check_id_fkey"
+            columns: ["daily_check_id"]
+            isOneToOne: false
+            referencedRelation: "daily_checks"
+            referencedColumns: ["check_id"]
+          },
           {
             foreignKeyName: "shift_turnovers_incoming_staff_id_fkey"
             columns: ["incoming_staff_id"]

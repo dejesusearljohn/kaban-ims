@@ -6,6 +6,7 @@ import DepartmentScannerSection from './DepartmentScannerSection'
 import DepartmentRequestsSection from './DepartmentRequestsSection'
 import DepartmentReportsSection from './DepartmentReportsSection'
 import DepartmentProfileSection from './DepartmentProfileSection'
+import DepartmentShiftTurnoverSection from './DepartmentShiftTurnoverSection'
 import {
   getDepartmentDashboardNavItems,
   type DepartmentDashboardSectionKey,
@@ -26,8 +27,9 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
   const [activeSection, setActiveSection] = useState<DepartmentDashboardSectionKey>('home')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [reportToOpenId, setReportToOpenId] = useState<number | null>(null)
+  const isNebruStaff = departmentCode.trim().toUpperCase() === 'NEBRU'
 
-  const navItems = useMemo(() => getDepartmentDashboardNavItems(departmentName), [departmentName])
+  const navItems = useMemo(() => getDepartmentDashboardNavItems(departmentName, departmentCode), [departmentName, departmentCode])
 
   const handleSignOut = () => {
     // Supabase auth state change in App.tsx will redirect to sign-in automatically
@@ -64,6 +66,8 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
         )
       case 'profile':
         return <DepartmentProfileSection userId={userId} onSignOut={handleSignOut} />
+      case 'shift-turnover':
+        return <DepartmentShiftTurnoverSection userId={userId} departmentId={departmentId} />
       default:
         return null
     }
@@ -79,6 +83,7 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
         onSelectSection={setActiveSection}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
+        showHeaderProfileButton={isNebruStaff}
       />
 
       {/* Page content */}
@@ -87,7 +92,12 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
       </div>
 
       {/* Mobile bottom nav */}
-      <DepartmentBottomNav active={activeSection} onSelect={setActiveSection} />
+      <DepartmentBottomNav
+        active={activeSection}
+        onSelect={setActiveSection}
+        showShiftTurnover={isNebruStaff}
+        showProfile={!isNebruStaff}
+      />
     </div>
   )
 }

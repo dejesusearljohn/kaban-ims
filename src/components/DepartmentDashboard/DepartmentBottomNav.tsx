@@ -3,6 +3,8 @@ import type { DepartmentDashboardSectionKey } from './departmentDashboardConfig'
 interface Props {
   active: DepartmentDashboardSectionKey
   onSelect: (key: DepartmentDashboardSectionKey) => void
+  showShiftTurnover?: boolean
+  showProfile?: boolean
 }
 
 const HomeIcon = () => (
@@ -41,7 +43,12 @@ const ProfileIcon = () => (
   </svg>
 )
 
-export default function DepartmentBottomNav({ active, onSelect }: Props) {
+export default function DepartmentBottomNav({
+  active,
+  onSelect,
+  showShiftTurnover,
+  showProfile = true,
+}: Props) {
   return (
     <nav className="dept-bottom-nav">
       <button
@@ -82,14 +89,32 @@ export default function DepartmentBottomNav({ active, onSelect }: Props) {
         <span>Reports</span>
       </button>
 
-      <button
-        className={`dept-bottom-nav-btn${active === 'profile' ? ' active' : ''}`}
-        onClick={() => onSelect('profile')}
-        aria-label="Profile"
-      >
-        <ProfileIcon />
-        <span>Profile</span>
-      </button>
+      {showProfile && (
+        <button
+          className={`dept-bottom-nav-btn${active === 'profile' ? ' active' : ''}`}
+          onClick={() => onSelect('profile')}
+          aria-label="Profile"
+        >
+          <ProfileIcon />
+          <span>Profile</span>
+        </button>
+      )}
+
+      {showShiftTurnover && (
+        <button
+          className={`dept-bottom-nav-btn${active === 'shift-turnover' ? ' active' : ''}`}
+          onClick={() => onSelect('shift-turnover')}
+          aria-label="Shift Turnover"
+        >
+          <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M17 1l4 4-4 4" />
+            <path d="M3 11V9a4 4 0 014-4h14" />
+            <path d="M7 23l-4-4 4-4" />
+            <path d="M21 13v2a4 4 0 01-4 4H3" />
+          </svg>
+          <span>Turnover</span>
+        </button>
+      )}
     </nav>
   )
 }

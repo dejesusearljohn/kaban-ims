@@ -152,3 +152,96 @@
 .vehicle-edit-actions .wmr-modal-button-save {
   flex: 0 0 auto;
 }
+
+.shift-turnover-preview-backdrop {
+  align-items: flex-start;
+  overflow-y: auto;
+  padding: 22px 16px;
+}
+
+.shift-turnover-preview-modal {
+  width: min(980px, calc(100vw - 32px));
+  max-width: 980px;
+  height: min(92vh, 860px);
+  max-height: min(92vh, 860px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.shift-turnover-preview-meta {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(220px, 1fr));
+  gap: 8px 16px;
+  margin-bottom: 8px;
+}
+
+.shift-turnover-preview-meta-line {
+  margin: 0;
+  font-size: 14px;
+}
+
+.shift-turnover-preview-meta-full {
+  grid-column: 1 / -1;
+}
+
+.shift-turnover-preview-error {
+  margin: 8px 0 0;
+}
+
+.shift-turnover-preview-table-wrap {
+  margin-top: 10px;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.shift-turnover-preview-table-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.shift-turnover-preview-table-wrap .inventory-table {
+  min-width: 760px;
+}
+
+.shift-turnover-preview-table-wrap .inventory-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: #ffffff;
+  box-shadow: inset 0 -1px 0 #e5e7eb;
+}
+
+.shift-turnover-preview-modal .wmr-modal-actions {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  flex-shrink: 0;
+}
+
+@media (max-width: 960px) {
+  .shift-turnover-preview-backdrop {
+    padding: 12px;
+  }
+
+  .shift-turnover-preview-modal {
+    width: calc(100vw - 24px);
+    height: 94vh;
+    max-height: 94vh;
+    padding: 16px;
+  }
+
+  .shift-turnover-preview-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .shift-turnover-preview-table-wrap .inventory-table {
+    min-width: 640px;
+  }
+}
