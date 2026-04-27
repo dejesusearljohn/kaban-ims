@@ -3,6 +3,83 @@ import type { FormEvent } from 'react'
 import '../styles/App.css'
 import { supabase } from '../supabaseClient'
 
+function TermsModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="terms-backdrop" role="dialog" aria-modal="true" aria-labelledby="terms-title" onClick={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="terms-modal">
+        <div className="terms-modal-header">
+          <h2 id="terms-title">Terms and Conditions</h2>
+          <button className="terms-close-btn" aria-label="Close" onClick={onClose}>✕</button>
+        </div>
+        <div className="terms-modal-body">
+          <p className="terms-effective">Effective Date: January 1, 2025 &nbsp;|&nbsp; Barangay Banicain, Olongapo City, Philippines</p>
+
+          <p>Welcome to <strong>KABAN</strong> — the Barangay Banicain Resource Management System. By accessing or using this system, you agree to be bound by the following Terms and Conditions. If you do not agree, do not use this system.</p>
+
+          <h3>1. Purpose of the System</h3>
+          <p>KABAN is an internal inventory and resource management system operated exclusively by authorized personnel of Barangay Banicain, Olongapo City. It is intended solely for official barangay government use in managing inventory, property accountability records (PAR), work and material requests (WMR), stockpile tracking, and vehicle monitoring.</p>
+
+          <h3>2. Authorized Users</h3>
+          <p>Access is restricted to duly appointed and authorized barangay officials and staff. Unauthorized access, sharing of credentials, or any attempt to circumvent access controls is strictly prohibited and may constitute a violation of Republic Act No. 10175 (Cybercrime Prevention Act of 2012).</p>
+
+          <h3>3. Data Privacy — Republic Act No. 10173</h3>
+          <p>The collection, storage, and processing of personal information within KABAN is governed by the <strong>Data Privacy Act of 2012 (RA 10173)</strong> and its Implementing Rules and Regulations (IRR), as administered by the National Privacy Commission (NPC).</p>
+          <ul>
+            <li>Personal data collected includes names, contact details, official positions, and records of transactions necessary for barangay operations.</li>
+            <li>Data is collected for legitimate government purposes only, is proportionate to those purposes, and is retained only for as long as necessary.</li>
+            <li>Data subjects have the right to access, correct, and object to the processing of their personal data, consistent with Section 16 of RA 10173.</li>
+            <li>All personnel with access to this system are bound by confidentiality obligations and shall not disclose personal data outside of authorized purposes.</li>
+            <li>Unauthorized disclosure, misuse, or unauthorized processing of personal data may result in administrative, civil, or criminal liability under RA 10173.</li>
+          </ul>
+
+          <h3>4. Government Property and Records</h3>
+          <p>All records, documents, and data generated or managed within KABAN are official government records. Unauthorized alteration, deletion, or tampering with these records may constitute a violation of:</p>
+          <ul>
+            <li>Republic Act No. 9470 (National Archives of the Philippines Act of 2007)</li>
+            <li>Revised Penal Code provisions on falsification of public documents (Articles 170–172)</li>
+            <li>Republic Act No. 3019 (Anti-Graft and Corrupt Practices Act)</li>
+          </ul>
+
+          <h3>5. Acceptable Use</h3>
+          <p>Users must use the system only for official and authorized barangay transactions. The following are strictly prohibited:</p>
+          <ul>
+            <li>Accessing another user's account without authorization</li>
+            <li>Entering false, misleading, or unauthorized records</li>
+            <li>Attempting to bypass, disable, or compromise system security features</li>
+            <li>Using the system for personal gain or for purposes unrelated to official barangay functions</li>
+          </ul>
+
+          <h3>6. Account Security</h3>
+          <p>Each user is responsible for maintaining the confidentiality of their login credentials. You must immediately report any unauthorized use of your account to the system administrator. The barangay reserves the right to suspend or revoke access at any time without prior notice.</p>
+
+          <h3>7. Session and Inactivity Policy</h3>
+          <p>For security purposes, user sessions automatically expire after <strong>20 minutes of inactivity</strong>. Users are advised to log out after each use, especially on shared devices.</p>
+
+          <h3>8. Audit and Monitoring</h3>
+          <p>All system activities, including logins, data entries, modifications, and deletions, may be logged and audited in accordance with applicable government accountability laws and Commission on Audit (COA) regulations.</p>
+
+          <h3>9. Intellectual Property</h3>
+          <p>KABAN and all associated software, design, and content are the property of Barangay Banicain. Unauthorized reproduction, distribution, or modification of any part of this system is prohibited.</p>
+
+          <h3>10. Disclaimer of Warranties</h3>
+          <p>This system is provided on an "as-is" basis. While the barangay makes reasonable efforts to maintain system availability and accuracy, it does not warrant uninterrupted or error-free operation. Users are encouraged to verify critical data.</p>
+
+          <h3>11. Amendments</h3>
+          <p>These Terms and Conditions may be updated from time to time. Continued use of the system after any amendment constitutes acceptance of the revised terms.</p>
+
+          <h3>12. Governing Law and Jurisdiction</h3>
+          <p>These Terms are governed by the laws of the Republic of the Philippines. Any dispute arising from the use of this system shall be subject to the jurisdiction of the appropriate courts of Olongapo City.</p>
+
+          <p className="terms-footer-note">For concerns regarding data privacy, please contact the Barangay Banicain Data Protection Officer through the barangay hall of Barangay Banicain, Olongapo City.</p>
+        </div>
+        <div className="terms-modal-footer">
+          <button className="primary-button" onClick={onClose}>I Understand</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function maskEmail(email: string): string {
   const [local, domain] = email.split('@')
   if (!domain) return email
@@ -27,6 +104,7 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
   const [rememberMe, setRememberMe] = useState(Boolean(rememberedUsername))
   const [showPassword, setShowPassword] = useState(false)
   const [view, setView] = useState<'signin' | 'forgot'>('signin')
+  const [showTerms, setShowTerms] = useState(false)
 
   // Forgot password state
   const [forgotEmail, setForgotEmail] = useState('')
@@ -165,6 +243,7 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
   }
 
   return (
+    <>
     <main className="signin-page">
       <div className="signin-shell">
         <div className="signin-background-logo" aria-hidden="true">
@@ -281,7 +360,7 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
 
                   <p className="signin-terms">
                     By signing in, you accept our{' '}
-                    <span className="signin-terms-link">Terms and Conditions</span>.
+                    <button type="button" className="signin-terms-link" onClick={() => setShowTerms(true)}>Terms and Conditions</button>.
                   </p>
                 </form>
               </>
@@ -328,6 +407,9 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
         </section>
       </div>
     </main>
+
+    {showTerms && <TermsModal onClose={() => setShowTerms(false)} />}
+  </>
   )
 }
 
