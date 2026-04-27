@@ -16,6 +16,7 @@ type WmrSectionProps = {
   wmrError: string | null
   wasteInventoryItemsCount: number
   vehicleWmrReportsCount: number
+  staffWmrReportsCount: number
   wmrSearchQuery: string
   setWmrSearchQuery: (value: string) => void
   wmrTypeFilter: string
@@ -28,12 +29,16 @@ type WmrSectionProps = {
   departments: DepartmentOverview[]
   combinedFilteredWmrCount: number
   filteredWasteItems: InventoryRow[]
+  filteredStaffWmrReports: WmrReportRow[]
   wmrReports: WmrReportRow[]
+  inventoryItems: InventoryRow[]
   formatDisplayDate: (value: string | null | undefined) => string
   openWmrRemarksModal: (item: InventoryRow) => void
+  openStaffWmrRemarksModal: (report: WmrReportRow) => void
   filteredVehicleWmrReports: WmrReportRow[]
   openVehicleWmrRemarksModal: (report: WmrReportRow, label: string) => void
   onArchiveWasteItem: (item: InventoryRow, report: WmrReportRow | null) => void
+  onArchiveStaffWmrReport: (report: WmrReportRow) => void
   onArchiveVehicleReport: (report: WmrReportRow) => void
 }
 
@@ -43,6 +48,7 @@ function WmrSection({
   wmrError,
   wasteInventoryItemsCount,
   vehicleWmrReportsCount,
+  staffWmrReportsCount,
   wmrSearchQuery,
   setWmrSearchQuery,
   wmrTypeFilter,
@@ -55,23 +61,28 @@ function WmrSection({
   departments,
   combinedFilteredWmrCount,
   filteredWasteItems,
+  filteredStaffWmrReports,
   wmrReports,
+  inventoryItems,
   formatDisplayDate,
   openWmrRemarksModal,
+  openStaffWmrRemarksModal,
   filteredVehicleWmrReports,
   openVehicleWmrRemarksModal,
   onArchiveWasteItem,
+  onArchiveStaffWmrReport,
   onArchiveVehicleReport,
 }: WmrSectionProps) {
   const wmrPageSize = useResponsivePageSize(8)
   const [wmrPage, setWmrPage] = useState(1)
 
   const getWmrStatusBadgeClass = (status: string | null) => {
-    if (status === 'Pending') return 'badge-status-pending'
-    if (status === 'For Disposal') return 'badge-status-disposal'
-    if (status === 'Disposed') return 'badge-status-disposed'
-    if (status === 'For Repair') return 'badge-status-repair'
-    if (status === 'Repaired') return 'badge-status-repaired'
+    const normalized = status?.toLowerCase().trim() || ''
+    if (normalized === 'pending') return 'badge-status-pending'
+    if (normalized === 'for disposal') return 'badge-status-disposal'
+    if (normalized === 'disposed') return 'badge-status-disposed'
+    if (normalized === 'for repair') return 'badge-status-repair'
+    if (normalized === 'repaired') return 'badge-status-repaired'
     return ''
   }
 
@@ -103,6 +114,31 @@ function WmrSection({
             hasRemarks,
             rowType: 'waste' as const,
             item,
+            vehicleLabel: null as string | null,
+            report,
+          }
+        }),
+        ...filteredStaffWmrReports.map((report) => {
+        const status = report.status?.trim() || null
+        const reason = report.reason_damage?.trim() || ''
+        const location = report.location?.trim() || 'Staff Report'
+        const hasRemarks = !!(report.admin_remarks && report.admin_remarks.trim().length > 0)
+        // Look up the actual item from inventory for this staff report
+        const linkedItem = report.item_id ? inventoryItems.find((i) => i.item_id === report.item_id) : null
+        const itemName = linkedItem?.item_name || `Item (ID: ${report.item_id || '—'})`
+
+          return {
+            key: `staff-wmr-${report.report_id}`,
+            reportId: `WMR-${report.report_id.toString().padStart(3, '0')}`,
+            itemName,
+            type: 'Staff Report',
+            reason,
+            status,
+            location,
+            dateReported: report.date_reported,
+            hasRemarks,
+            rowType: 'staff' as const,
+            item: linkedItem || null,
             vehicleLabel: null as string | null,
             report,
           }
@@ -142,7 +178,7 @@ function WmrSection({
 
         return bTime - aTime
       }),
-    [filteredWasteItems, filteredVehicleWmrReports, wmrReports, departments],
+    [filteredWasteItems, filteredStaffWmrReports, filteredVehicleWmrReports, wmrReports, departments, inventoryItems],
   )
 
   const wmrTotalPages = Math.max(1, Math.ceil(combinedWmrRows.length / wmrPageSize))
@@ -187,7 +223,7 @@ function WmrSection({
           <p>
             {wmrLoading || inventoryLoading
               ? 'Loading waste materials…'
-              : `Total WMR Cases: ${wasteInventoryItemsCount + vehicleWmrReportsCount}`}
+              : `Total WMR Cases: ${wasteInventoryItemsCount + staffWmrReportsCount + vehicleWmrReportsCount}`}
           </p>
         </div>
       </header>
@@ -294,6 +330,8 @@ function WmrSection({
                           onClick={() => {
                             if (row.rowType === 'waste' && row.item) {
                               openWmrRemarksModal(row.item)
+                            } else if (row.rowType === 'staff' && row.report) {
+                              openStaffWmrRemarksModal(row.report)
                             } else if (row.rowType === 'vehicle' && row.report) {
                               openVehicleWmrRemarksModal(row.report, row.vehicleLabel || 'Vehicle')
                             }
@@ -312,6 +350,8 @@ function WmrSection({
                             onClick={() => {
                               if (row.rowType === 'waste' && row.item) {
                                 onArchiveWasteItem(row.item, row.report)
+                              } else if (row.rowType === 'staff' && row.report) {
+                                onArchiveStaffWmrReport(row.report)
                               } else if (row.rowType === 'vehicle' && row.report) {
                                 onArchiveVehicleReport(row.report)
                               }

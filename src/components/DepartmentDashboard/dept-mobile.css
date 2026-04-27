@@ -362,9 +362,11 @@
   font-weight: 600;
   flex-shrink: 0;
 }
-.dept-list-item-badge.green { background: var(--dept-green-light); color: var(--dept-green-dark); }
-.dept-list-item-badge.red   { background: #fee2e2; color: var(--dept-danger); }
-.dept-list-item-badge.gray  { background: #f1f5f9; color: var(--dept-text-muted); }
+.dept-list-item-badge.green  { background: var(--dept-green-light); color: var(--dept-green-dark); }
+.dept-list-item-badge.red    { background: #fee2e2; color: var(--dept-danger); }
+.dept-list-item-badge.gray   { background: #f1f5f9; color: var(--dept-text-muted); }
+.dept-list-item-badge.yellow { background: #fef9c3; color: #854d0e; }
+.dept-list-item-badge.orange { background: #ffedd5; color: #9a3412; }
 
 .dept-segmented {
   display: grid;

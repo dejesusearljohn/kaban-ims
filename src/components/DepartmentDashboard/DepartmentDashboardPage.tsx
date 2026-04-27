@@ -25,6 +25,7 @@ type DepartmentDashboardPageProps = {
 function DepartmentDashboardPage({ departmentName, departmentCode, userId, departmentId }: DepartmentDashboardPageProps) {
   const [activeSection, setActiveSection] = useState<DepartmentDashboardSectionKey>('home')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
+  const [reportToOpenId, setReportToOpenId] = useState<number | null>(null)
 
   const navItems = useMemo(() => getDepartmentDashboardNavItems(departmentName), [departmentName])
 
@@ -32,16 +33,35 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
     // Supabase auth state change in App.tsx will redirect to sign-in automatically
   }
 
+  const handleOpenReport = (reportId: number) => {
+    setReportToOpenId(reportId)
+    setActiveSection('reports')
+  }
+
   const renderSection = () => {
     switch (activeSection) {
       case 'home':
-        return <DepartmentHomeSection userId={userId} departmentName={departmentName} departmentId={departmentId} />
+        return (
+          <DepartmentHomeSection
+            userId={userId}
+            departmentName={departmentName}
+            departmentId={departmentId}
+            onOpenReport={handleOpenReport}
+          />
+        )
       case 'scanner':
         return <DepartmentScannerSection userId={userId} departmentId={departmentId} />
       case 'requests':
         return <DepartmentRequestsSection departmentId={departmentId} departmentName={departmentName} userId={userId} />
       case 'reports':
-        return <DepartmentReportsSection userId={userId} departmentId={departmentId} />
+        return (
+          <DepartmentReportsSection
+            userId={userId}
+            departmentId={departmentId}
+            initialReportId={reportToOpenId}
+            onInitialReportHandled={() => setReportToOpenId(null)}
+          />
+        )
       case 'profile':
         return <DepartmentProfileSection userId={userId} onSignOut={handleSignOut} />
       default:

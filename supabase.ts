@@ -14,6 +14,91 @@ export type Database = {
   }
   public: {
     Tables: {
+      accountability_reports: {
+        Row: {
+          accountability_id: number
+          archived_at: string | null
+          contact_snapshot: string | null
+          created_at: string
+          department_id: number | null
+          description_snapshot: string | null
+          is_archived: boolean
+          issue_date: string
+          issued_to_id: string
+          item_id: number
+          property_no_snapshot: string | null
+          quantity_logged: number
+          reference_id: number | null
+          reference_type: string | null
+          remarks: string | null
+          source: string
+          uid: string
+          unit_snapshot: string | null
+        }
+        Insert: {
+          accountability_id?: never
+          archived_at?: string | null
+          contact_snapshot?: string | null
+          created_at?: string
+          department_id?: number | null
+          description_snapshot?: string | null
+          is_archived?: boolean
+          issue_date?: string
+          issued_to_id: string
+          item_id: number
+          property_no_snapshot?: string | null
+          quantity_logged: number
+          reference_id?: number | null
+          reference_type?: string | null
+          remarks?: string | null
+          source?: string
+          uid?: string
+          unit_snapshot?: string | null
+        }
+        Update: {
+          accountability_id?: never
+          archived_at?: string | null
+          contact_snapshot?: string | null
+          created_at?: string
+          department_id?: number | null
+          description_snapshot?: string | null
+          is_archived?: boolean
+          issue_date?: string
+          issued_to_id?: string
+          item_id?: number
+          property_no_snapshot?: string | null
+          quantity_logged?: number
+          reference_id?: number | null
+          reference_type?: string | null
+          remarks?: string | null
+          source?: string
+          uid?: string
+          unit_snapshot?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "accountability_reports_department_id_fkey"
+            columns: ["department_id"]
+            isOneToOne: false
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_reports_issued_to_id_fkey"
+            columns: ["issued_to_id"]
+            isOneToOne: false
+            referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "accountability_reports_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory"
+            referencedColumns: ["item_id"]
+          },
+        ]
+      }
       archived_departments: {
         Row: {
           archive_id: number
@@ -758,6 +843,7 @@ export type Database = {
           item_id: number | null
           last_user_id: string | null
           location: string | null
+          quantity_reported: number
           reason_damage: string | null
           report_id: number
           status: string | null
@@ -771,6 +857,7 @@ export type Database = {
           item_id?: number | null
           last_user_id?: string | null
           location?: string | null
+          quantity_reported?: number
           reason_damage?: string | null
           report_id?: number
           status?: string | null
@@ -784,6 +871,7 @@ export type Database = {
           item_id?: number | null
           last_user_id?: string | null
           location?: string | null
+          quantity_reported?: number
           reason_damage?: string | null
           report_id?: number
           status?: string | null

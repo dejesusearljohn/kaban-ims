@@ -4,6 +4,8 @@ import { supabase } from '../../supabaseClient'
 interface Props {
   userId: string
   departmentId: number | null
+  initialReportId?: number | null
+  onInitialReportHandled?: () => void
 }
 
 interface WmrReport {
@@ -13,12 +15,22 @@ interface WmrReport {
   reason_damage: string | null
   status: string | null
   date_reported: string | null
+  admin_remarks: string | null
+  quantity_reported: number
   item_name?: string
+  unit_of_measure?: string | null
 }
 
 interface InventoryOption {
   item_id: number
   item_name: string
+  quantity: number | null
+  unit_of_measure: string | null
+}
+
+interface DepartmentOption {
+  id: number
+  dept_name: string
 }
 
 const statusClass = (s: string | null) => {
@@ -27,17 +39,21 @@ const statusClass = (s: string | null) => {
   return 'dept-badge dept-badge-pending'
 }
 
-export default function DepartmentReportsSection({ userId, departmentId }: Props) {
+export default function DepartmentReportsSection({ userId, departmentId, initialReportId = null, onInitialReportHandled }: Props) {
   const [reports, setReports] = useState<WmrReport[]>([])
   const [inventoryOptions, setInventoryOptions] = useState<InventoryOption[]>([])
+  const [departmentOptions, setDepartmentOptions] = useState<DepartmentOption[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [showForm, setShowForm] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState('')
+  const [selectedReport, setSelectedReport] = useState<WmrReport | null>(null)
+  const [showDetailsModal, setShowDetailsModal] = useState(false)
 
   const [form, setForm] = useState({
     item_id: '',
+    quantity_reported: '1',
     location: '',
     reason_damage: '',
     date_reported: new Date().toISOString().slice(0, 10),
@@ -46,25 +62,57 @@ export default function DepartmentReportsSection({ userId, departmentId }: Props
   const loadReports = async () => {
     const { data } = await supabase
       .from('wmr_reports')
-      .select('report_id, item_id, location, reason_damage, status, date_reported')
+      .select('report_id, item_id, location, reason_damage, status, date_reported, admin_remarks, quantity_reported')
       .eq('last_user_id', userId)
       .eq('is_archived', false)
       .order('date_reported', { ascending: false })
 
     if (!data) return
 
-    // Enrich with item names
+    // Enrich with item labels and units from inventory
     const itemIds = [...new Set(data.map((r) => r.item_id).filter(Boolean))] as number[]
-    let itemNames: Record<number, string> = {}
+    let itemMetaById: Record<number, { item_name: string; unit_of_measure: string | null }> = {}
     if (itemIds.length) {
       const { data: inv } = await supabase
         .from('inventory')
-        .select('item_id, item_name')
+        .select('item_id, item_name, unit_of_measure')
         .in('item_id', itemIds)
-      if (inv) inv.forEach((i) => { itemNames[i.item_id] = i.item_name })
+      if (inv) inv.forEach((i) => { itemMetaById[i.item_id] = { item_name: i.item_name, unit_of_measure: i.unit_of_measure } })
     }
 
-    setReports(data.map((r) => ({ ...r, item_name: r.item_id ? itemNames[r.item_id] : undefined })))
+    setReports(data.map((r) => ({
+      ...r,
+      item_name: r.item_id ? itemMetaById[r.item_id]?.item_name : undefined,
+      unit_of_measure: r.item_id ? itemMetaById[r.item_id]?.unit_of_measure ?? null : null,
+    })))
+  }
+
+  const loadInventoryOptions = async () => {
+    const invQuery = supabase
+      .from('inventory')
+      .select('item_id, item_name, quantity, unit_of_measure')
+      .order('item_name')
+    if (departmentId) invQuery.eq('department_id', departmentId)
+    const { data: inv } = await invQuery
+    setInventoryOptions((inv ?? []) as InventoryOption[])
+  }
+
+  const loadDepartmentOptions = async () => {
+    const { data: departments } = await supabase
+      .from('departments')
+      .select('id, dept_name')
+      .eq('is_archived', false)
+      .order('dept_name')
+
+    const nextDepartments = (departments ?? []) as DepartmentOption[]
+    setDepartmentOptions(nextDepartments)
+
+    if (!form.location && departmentId != null) {
+      const currentDepartment = nextDepartments.find((department) => department.id === departmentId)
+      if (currentDepartment) {
+        setForm((prev) => ({ ...prev, location: currentDepartment.dept_name }))
+      }
+    }
   }
 
   useEffect(() => {
@@ -74,13 +122,9 @@ export default function DepartmentReportsSection({ userId, departmentId }: Props
     const init = async () => {
       try {
         await loadReports()
-        const invQuery = supabase
-          .from('inventory')
-          .select('item_id, item_name')
-          .order('item_name')
-        if (departmentId) invQuery.eq('department_id', departmentId)
-        const { data: inv } = await invQuery
-        if (mounted) setInventoryOptions((inv ?? []) as InventoryOption[])
+        if (mounted) {
+          await Promise.all([loadInventoryOptions(), loadDepartmentOptions()])
+        }
       } finally {
         if (mounted) setLoading(false)
       }
@@ -90,34 +134,94 @@ export default function DepartmentReportsSection({ userId, departmentId }: Props
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId, departmentId])
 
+  useEffect(() => {
+    if (!initialReportId || reports.length === 0) return
+
+    const targetReport = reports.find((report) => report.report_id === initialReportId)
+    if (!targetReport) {
+      onInitialReportHandled?.()
+      return
+    }
+
+    setSelectedReport(targetReport)
+    setShowDetailsModal(true)
+    onInitialReportHandled?.()
+  }, [initialReportId, onInitialReportHandled, reports])
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    if (!form.item_id) {
+      setError('Please select an item to report.')
+      return
+    }
+    const selectedItem = inventoryOptions.find((item) => String(item.item_id) === form.item_id) ?? null
+    const quantityReported = Number(form.quantity_reported)
+    if (!selectedItem) {
+      setError('Selected item is no longer available.')
+      return
+    }
+    if (!Number.isInteger(quantityReported) || quantityReported <= 0) {
+      setError('Quantity must be a whole number greater than zero.')
+      return
+    }
+    if (quantityReported > (selectedItem.quantity ?? 0)) {
+      setError('Reported quantity cannot exceed the available inventory quantity.')
+      return
+    }
     if (!form.location.trim() || !form.reason_damage.trim()) {
       setError('Location and reason are required.')
       return
     }
     setSubmitting(true)
     try {
-      const { error: dbErr } = await supabase.from('wmr_reports').insert({
-        last_user_id: userId,
-        location: form.location.trim(),
-        reason_damage: form.reason_damage.trim(),
-        date_reported: form.date_reported || new Date().toISOString().slice(0, 10),
-        status: 'pending',
-        is_archived: false,
-        uid: crypto.randomUUID(),
-        ...(form.item_id ? { item_id: Number(form.item_id) } : {}),
-      })
+      const itemId = Number(form.item_id)
+      const { data: insertedReports, error: dbErr } = await supabase
+        .from('wmr_reports')
+        .insert({
+          last_user_id: userId,
+          item_id: itemId,
+          quantity_reported: quantityReported,
+          location: form.location.trim(),
+          reason_damage: form.reason_damage.trim(),
+          date_reported: form.date_reported || new Date().toISOString().slice(0, 10),
+          status: 'Pending',
+          is_archived: false,
+          uid: crypto.randomUUID(),
+        })
+        .select('report_id')
       if (dbErr) throw dbErr
 
+      const updatedQuantity = (selectedItem.quantity ?? 0) - quantityReported
+      const { error: invErr } = await supabase
+        .from('inventory')
+        .update({ quantity: updatedQuantity })
+        .eq('item_id', itemId)
+      if (invErr) {
+        const insertedReportId = insertedReports?.[0]?.report_id
+        if (insertedReportId != null) {
+          await supabase.from('wmr_reports').delete().eq('report_id', insertedReportId)
+        }
+        throw invErr
+      }
+
       setSuccess('Report submitted successfully.')
-      setForm({ item_id: '', location: '', reason_damage: '', date_reported: new Date().toISOString().slice(0, 10) })
+      setForm((prev) => ({
+        item_id: '',
+        quantity_reported: '1',
+        location: departmentId != null
+          ? (departmentOptions.find((department) => department.id === departmentId)?.dept_name ?? prev.location)
+          : '',
+        reason_damage: '',
+        date_reported: new Date().toISOString().slice(0, 10),
+      }))
       setShowForm(false)
       await loadReports()
+      await loadInventoryOptions()
       setTimeout(() => setSuccess(''), 4000)
-    } catch {
-      setError('Failed to submit report. Please try again.')
+    } catch (submitError) {
+      const message = submitError instanceof Error ? submitError.message : 'Failed to submit report. Please try again.'
+      setError(message)
     } finally {
       setSubmitting(false)
     }
@@ -172,23 +276,49 @@ export default function DepartmentReportsSection({ userId, departmentId }: Props
             )}
             <form className="dept-form" onSubmit={handleSubmit}>
               <div className="dept-form-group">
-                <label>Item (optional)</label>
-                <select value={form.item_id} onChange={(e) => setForm({ ...form, item_id: e.target.value })}>
+                <label>Item *</label>
+                <select
+                  value={form.item_id}
+                  onChange={(e) => {
+                    const nextItemId = e.target.value
+                    const nextItem = inventoryOptions.find((item) => String(item.item_id) === nextItemId) ?? null
+                    const availableQuantity = Math.max(1, nextItem?.quantity ?? 1)
+                    setForm((prev) => ({
+                      ...prev,
+                      item_id: nextItemId,
+                      quantity_reported: String(Math.min(Number(prev.quantity_reported) || 1, availableQuantity)),
+                    }))
+                  }}
+                >
                   <option value="">— Select item —</option>
                   {inventoryOptions.map((i) => (
-                    <option key={i.item_id} value={i.item_id}>{i.item_name}</option>
+                    <option key={i.item_id} value={i.item_id}>{i.item_name} ({i.quantity ?? 0} {i.unit_of_measure ?? 'units'} available)</option>
                   ))}
                 </select>
               </div>
               <div className="dept-form-group">
-                <label>Location *</label>
+                <label>Quantity *</label>
                 <input
-                  type="text"
-                  placeholder="Where was the item located?"
+                  type="number"
+                  min="1"
+                  max={String(inventoryOptions.find((item) => String(item.item_id) === form.item_id)?.quantity ?? 1)}
+                  value={form.quantity_reported}
+                  onChange={(e) => setForm({ ...form, quantity_reported: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="dept-form-group">
+                <label>Location *</label>
+                <select
                   value={form.location}
                   onChange={(e) => setForm({ ...form, location: e.target.value })}
                   required
-                />
+                >
+                  <option value="">— Select department —</option>
+                  {departmentOptions.map((department) => (
+                    <option key={department.id} value={department.dept_name}>{department.dept_name}</option>
+                  ))}
+                </select>
               </div>
               <div className="dept-form-group">
                 <label>Reason / Description *</label>
@@ -227,7 +357,23 @@ export default function DepartmentReportsSection({ userId, departmentId }: Props
       ) : (
         <ul className="dept-list">
           {reports.map((r) => (
-            <li key={r.report_id} className="dept-list-item" style={{ cursor: 'default' }}>
+            <li 
+              key={r.report_id} 
+              className="dept-list-item" 
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                setSelectedReport(r)
+                setShowDetailsModal(true)
+              }}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  setSelectedReport(r)
+                  setShowDetailsModal(true)
+                }
+              }}
+            >
               <div className="dept-list-item-icon">
                 <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                   <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" /><polyline points="14 2 14 8 20 8" />
@@ -243,6 +389,95 @@ export default function DepartmentReportsSection({ userId, departmentId }: Props
             </li>
           ))}
         </ul>
+      )}
+
+      {showDetailsModal && selectedReport && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+          }}
+          onClick={() => setShowDetailsModal(false)}
+        >
+          <div
+            className="dept-card"
+            style={{ maxWidth: 360, width: 'calc(100% - 56px)', maxHeight: '64vh', overflowY: 'auto' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="dept-card-header">
+              <p className="dept-card-title">Report Details</p>
+              <button
+                className="dept-btn dept-btn-secondary"
+                style={{ padding: '4px 10px', fontSize: 12 }}
+                onClick={() => setShowDetailsModal(false)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="dept-card-body">
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Item</label>
+                <p style={{ margin: '4px 0 0', fontSize: 14, color: '#111827' }}>
+                  {selectedReport.item_name || `Item #${selectedReport.item_id || '—'}`}
+                </p>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Quantity Reported</label>
+                <p style={{ margin: '4px 0 0', fontSize: 14, color: '#111827' }}>
+                  {selectedReport.quantity_reported} {selectedReport.unit_of_measure ?? 'units'}
+                </p>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Location</label>
+                <p style={{ margin: '4px 0 0', fontSize: 14, color: '#111827' }}>
+                  {selectedReport.location || '—'}
+                </p>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Reason / Description</label>
+                <p style={{ margin: '4px 0 0', fontSize: 14, color: '#111827', whiteSpace: 'pre-wrap' }}>
+                  {selectedReport.reason_damage || '—'}
+                </p>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Date Reported</label>
+                <p style={{ margin: '4px 0 0', fontSize: 14, color: '#111827' }}>
+                  {selectedReport.date_reported ? new Date(selectedReport.date_reported).toLocaleDateString('en-PH') : '—'}
+                </p>
+              </div>
+
+              <div style={{ marginBottom: 16 }}>
+                <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Status</label>
+                <p style={{ margin: '4px 0 0' }}>
+                  <span className={statusClass(selectedReport.status)} style={{ textTransform: 'capitalize' }}>
+                    {selectedReport.status || 'Pending'}
+                  </span>
+                </p>
+              </div>
+
+              {selectedReport.status && selectedReport.status !== 'pending' && (
+                <div style={{ marginBottom: 0 }}>
+                  <label style={{ fontSize: 12, color: 'var(--dept-text-muted)', fontWeight: 500 }}>Admin Remarks</label>
+                  <p style={{ margin: '4px 0 0', fontSize: 14, color: '#111827', whiteSpace: 'pre-wrap' }}>
+                      {selectedReport.admin_remarks || 'No remarks provided.'}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

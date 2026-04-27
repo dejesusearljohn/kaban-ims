@@ -21,6 +21,7 @@ import StockpileSection from './StockpileSection'
 import WmrSection from './WmrSection'
 import VehiclesSection from './VehiclesSection'
 import ParSection, { type ParDraftItem } from './ParSection'
+import AccountabilityReportsSection from './AccountabilityReportsSection'
 import ReportsSection, { type ReportPeriod } from './ReportsSection'
 import type { SidebarSection } from './Sidebar'
 import '../styles/DashboardPage.css'
@@ -1310,7 +1311,16 @@ function DashboardPage() {
     new Set(['Purchased', 'Donated', ...inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)]),
   ).sort()
 
-  const wasteInventoryItems = inventoryItems.filter((item) => getInventoryStatus(item) === 'Unserviceable')
+  const wasteInventoryItems = inventoryItems.filter((item) => {
+    const s = getInventoryStatus(item)
+    return s === 'Unserviceable' || s === 'For Repair' || s === 'For Disposal' || s === 'Disposed'
+  })
+  // Filter reports that have an item_id (these are inventory-based WMR from staff): includes both reported items and items explicitly updated to waste status
+  const staffWmrReports = wmrReports.filter((report) => {
+    if (report.item_id == null) return false
+    if (isArchivedRow(report)) return false
+    return true
+  })
   const vehicleWmrReports = wmrReports.filter((report) => report.item_id == null && !isArchivedRow(report))
 
   const filteredWasteItems = wasteInventoryItems.filter((item) => {
@@ -1385,7 +1395,7 @@ function DashboardPage() {
     return true
   })
 
-  const combinedFilteredWmrCount = filteredWasteItems.length + filteredVehicleWmrReports.length
+  const combinedFilteredWmrCount = filteredWasteItems.length + staffWmrReports.filter((r) => !wasteInventoryItems.some((i) => i.item_id === r.item_id)).length + filteredVehicleWmrReports.length
   const activeVehicles = vehicles.filter((vehicle) => !isArchivedRow(vehicle))
 
   const filteredInventoryItems = inventoryItems.filter((item) => {
@@ -2310,6 +2320,17 @@ function DashboardPage() {
   }
 
   // [HANDLERS] WMR actions
+  const normalizeWmrStatus = (status: string | null | undefined) => {
+    if (!status) return 'Pending'
+    const normalized = status.toLowerCase().trim()
+    if (normalized === 'pending') return 'Pending'
+    if (normalized === 'for disposal') return 'For Disposal'
+    if (normalized === 'disposed') return 'Disposed'
+    if (normalized === 'for repair') return 'For Repair'
+    if (normalized === 'repaired') return 'Repaired'
+    return status // fallback to original if no match
+  }
+
   const openWmrRemarksModal = (item: InventoryRow) => {
     const existingReport = wmrReports.find((report) => report.item_id === item.item_id) ?? null
 
@@ -2317,7 +2338,7 @@ function DashboardPage() {
     setActiveWmrReport(existingReport)
     setActiveWmrVehicleLabel(null)
     setWmrRemarksInput(existingReport?.admin_remarks ?? '')
-    setWmrStatusInput(existingReport?.status ?? 'Pending')
+    setWmrStatusInput(normalizeWmrStatus(existingReport?.status))
     setIsEditingWmrRemarks(!existingReport || !existingReport.admin_remarks)
   }
 
@@ -2326,7 +2347,7 @@ function DashboardPage() {
     setActiveWmrReport(report)
     setActiveWmrVehicleLabel(label)
     setWmrRemarksInput(report.admin_remarks ?? '')
-    setWmrStatusInput(report.status ?? 'Pending')
+    setWmrStatusInput(normalizeWmrStatus(report.status))
     setIsEditingWmrRemarks(!report.admin_remarks)
   }
 
@@ -2351,6 +2372,38 @@ function DashboardPage() {
 
     const statusToSave = wmrStatusInput || 'Pending'
 
+    const reconcileInventoryQuantity = async (
+      itemId: number,
+      quantityReported: number,
+      previousStatus: string | null | undefined,
+      nextStatus: string | null | undefined,
+    ) => {
+      const normalizedPrevious = (previousStatus ?? '').trim().toLowerCase()
+      const normalizedNext = (nextStatus ?? '').trim().toLowerCase()
+      const wasRepaired = normalizedPrevious === 'repaired'
+      const isRepaired = normalizedNext === 'repaired'
+
+      let quantityDelta = 0
+      if (!wasRepaired && isRepaired) quantityDelta = quantityReported
+      if (wasRepaired && !isRepaired) quantityDelta = -quantityReported
+      if (quantityDelta === 0) return
+
+      const currentItem = inventoryItems.find((item) => item.item_id === itemId) ?? null
+      if (!currentItem) return
+
+      const nextQuantity = Math.max(0, (currentItem.quantity ?? 0) + quantityDelta)
+      const { error: invQuantityErr } = await supabase
+        .from('inventory')
+        .update({ quantity: nextQuantity })
+        .eq('item_id', itemId)
+
+      if (!invQuantityErr) {
+        setInventoryItems((prev) =>
+          prev.map((item) => (item.item_id === itemId ? { ...item, quantity: nextQuantity } : item)),
+        )
+      }
+    }
+
     if (existingReport) {
       const { data, error: updateError } = await supabase
         .from('wmr_reports')
@@ -2367,12 +2420,23 @@ function DashboardPage() {
       const updated = (data?.[0] ?? existingReport) as WmrReportRow
       setActiveWmrReport(updated)
       setWmrReports((prev) => prev.map((r) => (r.report_id === updated.report_id ? updated : r)))
+
+      const linkedItemId = updated.item_id ?? activeWmrItem?.item_id ?? null
+      if (linkedItemId != null) {
+        await reconcileInventoryQuantity(
+          linkedItemId,
+          updated.quantity_reported ?? 1,
+          existingReport.status,
+          statusToSave,
+        )
+      }
     } else if (activeWmrItem) {
       const { data, error: insertError } = await supabase
         .from('wmr_reports')
         .insert([
           {
             item_id: activeWmrItem.item_id,
+            quantity_reported: 1,
             admin_remarks: wmrRemarksInput || null,
             status: statusToSave,
           },
@@ -5494,6 +5558,7 @@ function DashboardPage() {
             wmrError={wmrError}
             wasteInventoryItemsCount={wasteInventoryItems.length}
             vehicleWmrReportsCount={vehicleWmrReports.length}
+            staffWmrReportsCount={staffWmrReports.filter((r) => !wasteInventoryItems.some((i) => i.item_id === r.item_id)).length}
             wmrSearchQuery={wmrSearchQuery}
             setWmrSearchQuery={setWmrSearchQuery}
             wmrTypeFilter={wmrTypeFilter}
@@ -5506,13 +5571,28 @@ function DashboardPage() {
             departments={departments.map((dept) => ({ id: dept.id, name: dept.name }))}
             combinedFilteredWmrCount={combinedFilteredWmrCount}
             filteredWasteItems={filteredWasteItems}
+            filteredStaffWmrReports={staffWmrReports.filter((r) => !wasteInventoryItems.some((i) => i.item_id === r.item_id))}
             wmrReports={wmrReports}
+            inventoryItems={inventoryItems}
             formatDisplayDate={formatDisplayDate}
             openWmrRemarksModal={openWmrRemarksModal}
+            openStaffWmrRemarksModal={(report) => {
+              // Find the linked inventory item for this staff report
+              const linkedItem = report.item_id ? inventoryItems.find((i) => i.item_id === report.item_id) : null
+              setActiveWmrItem(linkedItem || null)
+              setActiveWmrReport(report)
+              setActiveWmrVehicleLabel(linkedItem ? null : 'Staff Report')
+              setWmrRemarksInput(report.admin_remarks ?? '')
+              setWmrStatusInput(normalizeWmrStatus(report.status))
+              setIsEditingWmrRemarks(!report.admin_remarks)
+            }}
             filteredVehicleWmrReports={filteredVehicleWmrReports}
             openVehicleWmrRemarksModal={openVehicleWmrRemarksModal}
             onArchiveWasteItem={(item, report) => {
               openArchiveWasteWmrConfirmation(item, report)
+            }}
+            onArchiveStaffWmrReport={(report) => {
+              openArchiveVehicleWmrConfirmation(report)
             }}
             onArchiveVehicleReport={(report) => {
               openArchiveVehicleWmrConfirmation(report)
@@ -5607,6 +5687,10 @@ function DashboardPage() {
               openArchiveParSummaryConfirmation(staffId)
             }}
           />
+        )}
+
+        {activeSection === 'accountability' && (
+          <AccountabilityReportsSection />
         )}
 
         {activeSection === 'reports' && (
@@ -6456,6 +6540,14 @@ function DashboardPage() {
             </p>
             {activeWmrReport && !isEditingWmrRemarks ? (
               <>
+                <div className="inventory-field">
+                  <label style={{ fontSize: 12, color: '#6b7280' }}>Quantity Reported</label>
+                  <div className="inventory-input" style={{ minHeight: 44, paddingTop: 10 }}>
+                    <span style={{ fontSize: 13, color: '#111827' }}>
+                      {activeWmrReport.quantity_reported ?? 1} {activeWmrItem?.unit_of_measure ?? 'units'}
+                    </span>
+                  </div>
+                </div>
                 <div className="inventory-field">
                   <label style={{ fontSize: 12, color: '#6b7280' }}>Remarks</label>
                   <div className="inventory-input" style={{ minHeight: 60, paddingTop: 6 }}>

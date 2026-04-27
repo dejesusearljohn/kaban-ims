@@ -206,19 +206,21 @@ export default function DepartmentScannerSection({ userId, departmentId }: Props
 
       if (updateErr) throw updateErr
 
-      const { error: logErr } = await supabase.from('par_records').insert({
+      const { error: logErr } = await supabase.from('accountability_reports').insert({
         issued_to_id: userId,
         item_id: result.item_id,
-        quantity_issued: requestedQty,
+        department_id: departmentId,
+        quantity_logged: requestedQty,
         issue_date: new Date().toISOString().slice(0, 10),
-        is_archived: false,
-        uid: crypto.randomUUID(),
+        source: 'inventory_log',
+        reference_type: 'scanner_requisition',
+        contact_snapshot: staffName || null,
         description_snapshot: result.item_name,
-        cost_snapshot: result.unit_cost,
         unit_snapshot: result.unit_of_measure,
         property_no_snapshot: result.property_no,
-        date_acquired_snapshot: result.date_acquired,
-        contact_snapshot: staffName || null,
+        remarks: null,
+        is_archived: false,
+        uid: crypto.randomUUID(),
       })
 
       if (logErr) {

@@ -25,9 +25,9 @@ interface IssuedUser {
 }
 
 interface InventoryLog {
-  par_id: number
+  accountability_id: number
   issue_date: string | null
-  quantity_issued: number
+  quantity_logged: number
   description_snapshot: string | null
   unit_snapshot: string | null
   property_no_snapshot: string | null
@@ -65,11 +65,11 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
             .or('status.neq.archived,status.is.null')
             .order('item_name'),
           supabase
-            .from('par_records')
-            .select('par_id, issue_date, quantity_issued, description_snapshot, unit_snapshot, property_no_snapshot, issued_to_id, issued_user:users!par_records_issued_to_id_fkey(full_name, staff_id, department_id)')
+            .from('accountability_reports')
+            .select('accountability_id, issue_date, quantity_logged, description_snapshot, unit_snapshot, property_no_snapshot, issued_to_id, issued_user:users!accountability_reports_issued_to_id_fkey(full_name, staff_id, department_id)')
             .eq('is_archived', false)
             .order('issue_date', { ascending: false })
-            .order('par_id', { ascending: false }),
+            .order('accountability_id', { ascending: false }),
         ])
 
         if (inventoryRes.error) throw inventoryRes.error
@@ -116,7 +116,12 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
   }, [logs, logSearch])
 
   const statusBadge = (status: string | null) => {
-    if (!status) return <span className="dept-list-item-badge gray">—</span>
+    if (!status) return <span className="dept-list-item-badge green">Serviceable</span>
+    if (status === 'Serviceable') return <span className="dept-list-item-badge green">Serviceable</span>
+    if (status === 'Unserviceable') return <span className="dept-list-item-badge red">Unserviceable</span>
+    if (status === 'For Repair') return <span className="dept-list-item-badge yellow">For Repair</span>
+    if (status === 'For Disposal') return <span className="dept-list-item-badge orange">For Disposal</span>
+    if (status === 'Disposed') return <span className="dept-list-item-badge gray">Disposed</span>
     if (status === 'active') return <span className="dept-list-item-badge green">Active</span>
     if (status === 'expired') return <span className="dept-list-item-badge red">Expired</span>
     return <span className="dept-list-item-badge gray">{status}</span>
@@ -243,7 +248,7 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
               ) : (
                 <ul className="dept-list" style={{ marginTop: 10 }}>
                   {filteredLogs.map((log) => (
-                    <li key={log.par_id} className="dept-list-item">
+                    <li key={log.accountability_id} className="dept-list-item">
                       <div className="dept-list-item-icon">
                         <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -254,7 +259,7 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
                       <div className="dept-list-item-content">
                         <p className="dept-list-item-name">{log.description_snapshot ?? 'Inventory Item'}</p>
                         <p className="dept-list-item-meta">
-                          Qty pulled: {log.quantity_issued} {log.unit_snapshot ?? 'unit(s)'}
+                          Qty pulled: {log.quantity_logged} {log.unit_snapshot ?? 'unit(s)'}
                           {log.property_no_snapshot ? ` · ${log.property_no_snapshot}` : ''}
                         </p>
                         <p className="dept-list-item-meta" style={{ marginTop: 2 }}>

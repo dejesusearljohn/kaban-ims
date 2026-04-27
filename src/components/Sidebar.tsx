@@ -10,6 +10,7 @@ export type SidebarSection =
   | 'stockpile'
   | 'wmr'
   | 'par'
+  | 'accountability'
   | 'vehicles'
   | 'reports'
   | 'settings'
@@ -144,6 +145,19 @@ function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse
             </svg>
           </span>
           <span className="sidebar-link-text">PAR</span>
+        </button>
+        <button
+          className={`sidebar-link ${activeSection === 'accountability' ? 'sidebar-link-active' : ''}`}
+          type="button"
+          onClick={() => onChangeSection('accountability')}
+        >
+          <span className="sidebar-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span className="sidebar-link-text">Accountability Reports</span>
         </button>
         <button
           className={`sidebar-link ${activeSection === 'vehicles' ? 'sidebar-link-active' : ''}`}
