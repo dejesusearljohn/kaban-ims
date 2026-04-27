@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { BANICAIN_LOGO_URL } from '../SignInPage'
 import { supabase } from '../../supabaseClient'
 import type { DepartmentDashboardNavItem, DepartmentDashboardSectionKey } from './departmentDashboardConfig'
@@ -21,6 +21,14 @@ function DepartmentDashboardSidebar({
   onToggleCollapse,
 }: DepartmentDashboardSidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+
+  useEffect(() => {
+    document.body.classList.toggle('logout-modal-open', showLogoutConfirm)
+
+    return () => {
+      document.body.classList.remove('logout-modal-open')
+    }
+  }, [showLogoutConfirm])
 
   const getNavIcon = (key: DepartmentDashboardSectionKey) => {
     switch (key) {
@@ -136,7 +144,7 @@ function DepartmentDashboardSidebar({
             <h2 id="logout-modal-title" className="logout-modal-title">
               Sign out
             </h2>
-            <p className="logout-modal-text">Are you sure you want to sign out of KABAN?</p>
+            <p className="logout-modal-text">Are you sure you want to sign out?</p>
             <div className="logout-modal-actions">
               <button type="button" className="logout-modal-button-secondary" onClick={() => setShowLogoutConfirm(false)}>
                 Cancel

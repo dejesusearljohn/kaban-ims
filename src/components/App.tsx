@@ -1,12 +1,9 @@
 import { useEffect, useState } from 'react'
 import SignInPage from './SignInPage.tsx'
 import DashboardPage from './DashboardPage'
-import { DepartmentDashboardPage } from './DepartmentDashboard'
 import { supabase } from '../supabaseClient'
 
-type DashboardTarget =
-  | { kind: 'admin' }
-  | { kind: 'department'; departmentName: string }
+type DashboardTarget = { kind: 'admin' }
 
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -18,7 +15,7 @@ function App() {
 		const getDashboardTarget = async (userId: string) => {
 			const { data, error } = await supabase
 				.from('users')
-				.select('role, department_id')
+				.select('role')
 				.eq('id', userId)
 				.maybeSingle()
 
@@ -26,28 +23,11 @@ function App() {
 
 			const normalizedRole = (data.role ?? '').trim().toLowerCase()
 
-			if (normalizedRole === 'super admin') {
+			if (normalizedRole === 'super admin' || normalizedRole === 'admin') {
 				return { kind: 'admin' as const }
 			}
 
-			if (data.department_id == null) {
-				return null
-			}
-
-			const { data: departmentRow, error: departmentError } = await supabase
-				.from('departments')
-				.select('dept_name')
-				.eq('id', data.department_id)
-				.maybeSingle()
-
-			if (departmentError || !departmentRow) {
-				return null
-			}
-
-			return {
-				kind: 'department' as const,
-				departmentName: departmentRow.dept_name,
-			}
+			return null
 		}
 
 		const applySessionAccess = async (
@@ -94,10 +74,6 @@ function App() {
 	}
 
 	if (isAuthenticated) {
-		if (dashboardTarget?.kind === 'department') {
-			return <DepartmentDashboardPage departmentName={dashboardTarget.departmentName} />
-		}
-
 		return <DashboardPage />
 	}
 

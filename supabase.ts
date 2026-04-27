@@ -14,6 +14,222 @@ export type Database = {
   }
   public: {
     Tables: {
+      archived_departments: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_distribution_logs: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_inventory: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_par_records: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_stockpile: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_users: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_vehicles: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
+      archived_wmr_reports: {
+        Row: {
+          archive_id: number
+          archive_reason: string | null
+          archived_at: string
+          archived_by: string | null
+          payload: Json
+          source_id: string
+        }
+        Insert: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload: Json
+          source_id: string
+        }
+        Update: {
+          archive_id?: number
+          archive_reason?: string | null
+          archived_at?: string
+          archived_by?: string | null
+          payload?: Json
+          source_id?: string
+        }
+        Relationships: []
+      }
       daily_checks: {
         Row: {
           check_date: string | null
@@ -21,6 +237,7 @@ export type Database = {
           department_id: number | null
           is_submitted: boolean | null
           submitted_by: string | null
+          uid: string
         }
         Insert: {
           check_date?: string | null
@@ -28,6 +245,7 @@ export type Database = {
           department_id?: number | null
           is_submitted?: boolean | null
           submitted_by?: string | null
+          uid?: string
         }
         Update: {
           check_date?: string | null
@@ -35,6 +253,7 @@ export type Database = {
           department_id?: number | null
           is_submitted?: boolean | null
           submitted_by?: string | null
+          uid?: string
         }
         Relationships: [
           {
@@ -55,55 +274,75 @@ export type Database = {
       }
       departments: {
         Row: {
+          archived_at: string | null
           created_at: string | null
           dept_code: string
           dept_name: string
           id: number
+          is_archived: boolean
+          uid: string
         }
         Insert: {
+          archived_at?: string | null
           created_at?: string | null
           dept_code: string
           dept_name: string
           id?: number
+          is_archived?: boolean
+          uid?: string
         }
         Update: {
+          archived_at?: string | null
           created_at?: string | null
           dept_code?: string
           dept_name?: string
           id?: number
+          is_archived?: boolean
+          uid?: string
         }
         Relationships: []
       }
       distribution_logs: {
         Row: {
+          archived_at: string | null
           calamity_name: string | null
           families_helped: number | null
+          is_archived: boolean
           items_distributed: Json | null
           log_id: number
           operation_date: string | null
           recipient_info: string | null
+          uid: string
         }
         Insert: {
+          archived_at?: string | null
           calamity_name?: string | null
           families_helped?: number | null
+          is_archived?: boolean
           items_distributed?: Json | null
           log_id?: number
           operation_date?: string | null
           recipient_info?: string | null
+          uid?: string
         }
         Update: {
+          archived_at?: string | null
           calamity_name?: string | null
           families_helped?: number | null
+          is_archived?: boolean
           items_distributed?: Json | null
           log_id?: number
           operation_date?: string | null
           recipient_info?: string | null
+          uid?: string
         }
         Relationships: []
       }
       inventory: {
         Row: {
           acquisition_mode: string | null
+          archived_at: string | null
+          condition: string | null
           created_at: string | null
           date_acquired: string
           department_id: number | null
@@ -116,11 +355,14 @@ export type Database = {
           qr_code: string | null
           quantity: number | null
           status: string | null
+          uid: string
           unit_cost: number | null
           unit_of_measure: string | null
         }
         Insert: {
           acquisition_mode?: string | null
+          archived_at?: string | null
+          condition?: string | null
           created_at?: string | null
           date_acquired: string
           department_id?: number | null
@@ -133,11 +375,14 @@ export type Database = {
           qr_code?: string | null
           quantity?: number | null
           status?: string | null
+          uid?: string
           unit_cost?: number | null
           unit_of_measure?: string | null
         }
         Update: {
           acquisition_mode?: string | null
+          archived_at?: string | null
+          condition?: string | null
           created_at?: string | null
           date_acquired?: string
           department_id?: number | null
@@ -150,6 +395,7 @@ export type Database = {
           qr_code?: string | null
           quantity?: number | null
           status?: string | null
+          uid?: string
           unit_cost?: number | null
           unit_of_measure?: string | null
         }
@@ -169,18 +415,21 @@ export type Database = {
           item_id: number | null
           photo_id: number
           photo_url: string
+          uid: string
         }
         Insert: {
           created_at?: string | null
           item_id?: number | null
           photo_id?: number
           photo_url: string
+          uid?: string
         }
         Update: {
           created_at?: string | null
           item_id?: number | null
           photo_id?: number
           photo_url?: string
+          uid?: string
         }
         Relationships: [
           {
@@ -194,42 +443,51 @@ export type Database = {
       }
       par_records: {
         Row: {
+          archived_at: string | null
           contact_snapshot: string | null
           cost_snapshot: number | null
           date_acquired_snapshot: string | null
           description_snapshot: string | null
+          is_archived: boolean
           issue_date: string | null
           issued_to_id: string | null
           item_id: number | null
           par_id: number
           property_no_snapshot: string | null
           quantity_issued: number
+          uid: string
           unit_snapshot: string | null
         }
         Insert: {
+          archived_at?: string | null
           contact_snapshot?: string | null
           cost_snapshot?: number | null
           date_acquired_snapshot?: string | null
           description_snapshot?: string | null
+          is_archived?: boolean
           issue_date?: string | null
           issued_to_id?: string | null
           item_id?: number | null
           par_id?: number
           property_no_snapshot?: string | null
           quantity_issued: number
+          uid?: string
           unit_snapshot?: string | null
         }
         Update: {
+          archived_at?: string | null
           contact_snapshot?: string | null
           cost_snapshot?: number | null
           date_acquired_snapshot?: string | null
           description_snapshot?: string | null
+          is_archived?: boolean
           issue_date?: string | null
           issued_to_id?: string | null
           item_id?: number | null
           par_id?: number
           property_no_snapshot?: string | null
           quantity_issued?: number
+          uid?: string
           unit_snapshot?: string | null
         }
         Relationships: [
@@ -257,6 +515,7 @@ export type Database = {
           is_approved_by_admin: boolean | null
           outgoing_staff_id: string | null
           turnover_id: number
+          uid: string
         }
         Insert: {
           created_at?: string | null
@@ -265,6 +524,7 @@ export type Database = {
           is_approved_by_admin?: boolean | null
           outgoing_staff_id?: string | null
           turnover_id?: number
+          uid?: string
         }
         Update: {
           created_at?: string | null
@@ -273,6 +533,7 @@ export type Database = {
           is_approved_by_admin?: boolean | null
           outgoing_staff_id?: string | null
           turnover_id?: number
+          uid?: string
         }
         Relationships: [
           {
@@ -293,79 +554,103 @@ export type Database = {
       }
       stockpile: {
         Row: {
+          archived_at: string | null
           category: string | null
           expiration_date: string | null
+          is_archived: boolean
           item_name: string | null
           packed_date: string | null
           quantity_on_hand: number | null
           stockpile_id: number
+          uid: string
           unit_of_measure: string | null
         }
         Insert: {
+          archived_at?: string | null
           category?: string | null
           expiration_date?: string | null
+          is_archived?: boolean
           item_name?: string | null
           packed_date?: string | null
           quantity_on_hand?: number | null
           stockpile_id?: number
+          uid?: string
           unit_of_measure?: string | null
         }
         Update: {
+          archived_at?: string | null
           category?: string | null
           expiration_date?: string | null
+          is_archived?: boolean
           item_name?: string | null
           packed_date?: string | null
           quantity_on_hand?: number | null
           stockpile_id?: number
+          uid?: string
           unit_of_measure?: string | null
         }
         Relationships: []
       }
       users: {
         Row: {
+          archived_at: string | null
           contact_info: string | null
           created_at: string | null
           department_id: number | null
           email: string
+          emergency_contact: string | null
           full_name: string
           id: string
+          is_archived: boolean
           is_locked: boolean | null
           is_online: boolean | null
           password_hash: string | null
           position: string | null
           qr_code: string | null
+          recovery_email: string | null
           role: string | null
           staff_id: string
+          uid: string
         }
         Insert: {
+          archived_at?: string | null
           contact_info?: string | null
           created_at?: string | null
           department_id?: number | null
           email: string
+          emergency_contact?: string | null
           full_name: string
           id?: string
+          is_archived?: boolean
           is_locked?: boolean | null
           is_online?: boolean | null
           password_hash?: string | null
           position?: string | null
           qr_code?: string | null
+          recovery_email?: string | null
           role?: string | null
           staff_id: string
+          uid?: string
         }
         Update: {
+          archived_at?: string | null
           contact_info?: string | null
           created_at?: string | null
           department_id?: number | null
           email?: string
+          emergency_contact?: string | null
           full_name?: string
           id?: string
+          is_archived?: boolean
           is_locked?: boolean | null
           is_online?: boolean | null
           password_hash?: string | null
           position?: string | null
           qr_code?: string | null
+          recovery_email?: string | null
           role?: string | null
           staff_id?: string
+          uid?: string
         }
         Relationships: [
           {
@@ -385,6 +670,7 @@ export type Database = {
           job_order_number: string | null
           repair_id: number
           service_center: string | null
+          uid: string
           vehicle_id: number | null
         }
         Insert: {
@@ -394,6 +680,7 @@ export type Database = {
           job_order_number?: string | null
           repair_id?: number
           service_center?: string | null
+          uid?: string
           vehicle_id?: number | null
         }
         Update: {
@@ -403,6 +690,7 @@ export type Database = {
           job_order_number?: string | null
           repair_id?: number
           service_center?: string | null
+          uid?: string
           vehicle_id?: number | null
         }
         Relationships: [
@@ -424,30 +712,39 @@ export type Database = {
       }
       vehicles: {
         Row: {
+          archived_at: string | null
           cr_number: string | null
           engine_number: string | null
           id: number
+          is_archived: boolean
           is_serviceable: boolean | null
           make_model: string | null
           repair_history_log: string | null
+          uid: string
           year_model: number | null
         }
         Insert: {
+          archived_at?: string | null
           cr_number?: string | null
           engine_number?: string | null
           id?: number
+          is_archived?: boolean
           is_serviceable?: boolean | null
           make_model?: string | null
           repair_history_log?: string | null
+          uid?: string
           year_model?: number | null
         }
         Update: {
+          archived_at?: string | null
           cr_number?: string | null
           engine_number?: string | null
           id?: number
+          is_archived?: boolean
           is_serviceable?: boolean | null
           make_model?: string | null
           repair_history_log?: string | null
+          uid?: string
           year_model?: number | null
         }
         Relationships: []
@@ -455,33 +752,42 @@ export type Database = {
       wmr_reports: {
         Row: {
           admin_remarks: string | null
+          archived_at: string | null
           date_reported: string | null
+          is_archived: boolean
           item_id: number | null
           last_user_id: string | null
           location: string | null
           reason_damage: string | null
           report_id: number
           status: string | null
+          uid: string
         }
         Insert: {
           admin_remarks?: string | null
+          archived_at?: string | null
           date_reported?: string | null
+          is_archived?: boolean
           item_id?: number | null
           last_user_id?: string | null
           location?: string | null
           reason_damage?: string | null
           report_id?: number
           status?: string | null
+          uid?: string
         }
         Update: {
           admin_remarks?: string | null
+          archived_at?: string | null
           date_reported?: string | null
+          is_archived?: boolean
           item_id?: number | null
           last_user_id?: string | null
           location?: string | null
           reason_damage?: string | null
           report_id?: number
           status?: string | null
+          uid?: string
         }
         Relationships: [
           {

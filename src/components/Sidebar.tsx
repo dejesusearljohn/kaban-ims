@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { BANICAIN_LOGO_URL } from './SignInPage'
 import { supabase } from '../supabaseClient'
 import '../styles/Sidebar.css'
@@ -11,8 +12,8 @@ export type SidebarSection =
   | 'par'
   | 'vehicles'
   | 'reports'
-  | 'departments-staff'
   | 'settings'
+  | 'departments-staff'
 
 type SidebarProps = {
   activeSection: SidebarSection
@@ -22,14 +23,16 @@ type SidebarProps = {
   displayName: string
 }
 
-function Sidebar({
-  activeSection,
-  onChangeSection,
-  isCollapsed,
-  onToggleCollapse,
-  displayName,
-}: SidebarProps) {
+function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse, displayName }: SidebarProps) {
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
+
+  useEffect(() => {
+    document.body.classList.toggle('logout-modal-open', showLogoutConfirm)
+
+    return () => {
+      document.body.classList.remove('logout-modal-open')
+    }
+  }, [showLogoutConfirm])
 
   return (
     <aside className={`sidebar ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
@@ -184,7 +187,7 @@ function Sidebar({
               <path d="M14.5 17.5c.4-1.4 1.4-2.2 2.5-2.2 1 0 1.9.6 2.3 1.8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="sidebar-link-text">Departments &amp; Staff</span>
+          <span className="sidebar-link-text">Departments &amp; Staffs</span>
         </button>
         <button
           className={`sidebar-link ${activeSection === 'settings' ? 'sidebar-link-active' : ''}`}
@@ -193,12 +196,12 @@ function Sidebar({
         >
           <span className="sidebar-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" strokeWidth="1.7" />
+              <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.6" />
               <path
-                d="M12 3.8v2.1M12 18.1v2.1M3.8 12h2.1M18.1 12h2.1M6.1 6.1l1.5 1.5M16.4 16.4l1.5 1.5M17.9 6.1l-1.5 1.5M7.6 16.4l-1.5 1.5"
+                d="M12 4.5v2.2M12 17.3v2.2M4.5 12h2.2M17.3 12h2.2M6.7 6.7l1.6 1.6M15.7 15.7l1.6 1.6M17.3 6.7l-1.6 1.6M8.3 15.7l-1.6 1.6"
                 fill="none"
                 stroke="currentColor"
-                strokeWidth="1.5"
+                strokeWidth="1.6"
                 strokeLinecap="round"
               />
             </svg>
@@ -222,35 +225,37 @@ function Sidebar({
         <span className="sidebar-link-text">Sign Out</span>
       </button>
 
-      {showLogoutConfirm && (
-        <div className="logout-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="logout-modal-title">
-          <div className="logout-modal">
-            <h2 id="logout-modal-title" className="logout-modal-title">
-              Sign out
-            </h2>
-            <p className="logout-modal-text">Are you sure you want to sign out of KABAN?</p>
-            <div className="logout-modal-actions">
-              <button
-                type="button"
-                className="logout-modal-button-secondary"
-                onClick={() => setShowLogoutConfirm(false)}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="logout-modal-button-primary"
-                onClick={() => {
-                  setShowLogoutConfirm(false)
-                  void supabase.auth.signOut()
-                }}
-              >
-                Sign Out
-              </button>
+      {showLogoutConfirm &&
+        createPortal(
+          <div className="logout-modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="logout-modal-title">
+            <div className="logout-modal">
+              <h2 id="logout-modal-title" className="logout-modal-title">
+                Sign out
+              </h2>
+              <p className="logout-modal-text">Are you sure you want to sign out of KABAN?</p>
+              <div className="logout-modal-actions">
+                <button
+                  type="button"
+                  className="logout-modal-button-secondary"
+                  onClick={() => setShowLogoutConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="logout-modal-button-primary"
+                  onClick={() => {
+                    setShowLogoutConfirm(false)
+                    void supabase.auth.signOut()
+                  }}
+                >
+                  Sign Out
+                </button>
+              </div>
             </div>
-          </div>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </aside>
   )
 }

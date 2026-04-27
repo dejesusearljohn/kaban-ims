@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
+import useResponsivePageSize from './useResponsivePageSize'
 
 type VehicleRow = Tables<'vehicles'>
 type VehicleRepairRow = Tables<'vehicle_repairs'>
@@ -44,6 +46,7 @@ type VehiclesSectionProps = {
   setNewRepairDescription: (value: string) => void
   parUsers: UserRow[]
   handleAddVehicleRepair: () => void
+  handleArchiveVehicle: (vehicle: VehicleRow) => void
 }
 
 function VehiclesSection({
@@ -86,7 +89,48 @@ function VehiclesSection({
   setNewRepairDescription,
   parUsers,
   handleAddVehicleRepair,
+  handleArchiveVehicle,
 }: VehiclesSectionProps) {
+  const vehiclesPageSize = useResponsivePageSize(8)
+  const [vehiclePage, setVehiclePage] = useState(1)
+
+  const vehicleTotalPages = Math.max(1, Math.ceil(vehicles.length / vehiclesPageSize))
+
+  useEffect(() => {
+    if (vehicleMode !== 'manage') {
+      return
+    }
+    setVehiclePage(1)
+  }, [vehicleMode])
+
+  useEffect(() => {
+    if (vehiclePage > vehicleTotalPages) {
+      setVehiclePage(vehicleTotalPages)
+    }
+  }, [vehiclePage, vehicleTotalPages])
+
+  const paginatedVehicles = useMemo(() => {
+    const start = (vehiclePage - 1) * vehiclesPageSize
+    return vehicles.slice(start, start + vehiclesPageSize)
+  }, [vehicles, vehiclePage, vehiclesPageSize])
+
+  const visibleVehiclePageNumbers = useMemo(() => {
+    const maxVisiblePages = 5
+    if (vehicleTotalPages <= maxVisiblePages) {
+      return Array.from({ length: vehicleTotalPages }, (_, index) => index + 1)
+    }
+
+    const halfWindow = Math.floor(maxVisiblePages / 2)
+    let start = Math.max(1, vehiclePage - halfWindow)
+    let end = Math.min(vehicleTotalPages, start + maxVisiblePages - 1)
+
+    if (end - start + 1 < maxVisiblePages) {
+      start = Math.max(1, end - maxVisiblePages + 1)
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  }, [vehiclePage, vehicleTotalPages])
+
   return (
     <div className="inventory-layout">
       <header className="dashboard-header">
@@ -135,7 +179,7 @@ function VehiclesSection({
               </strong>
             </article>
             <article className="dashboard-metric-card info">
-              <span className="dashboard-metric-label">Repair Spend</span>
+              <span className="dashboard-metric-label">Overall Expenditures</span>
               <strong className="dashboard-metric-value">
                 {formatCurrency(vehicleRepairs.reduce((sum, repair) => sum + Number(repair.amount ?? 0), 0))}
               </strong>
@@ -168,7 +212,7 @@ function VehiclesSection({
                       <td colSpan={8}>No vehicles found.</td>
                     </tr>
                   ) : (
-                    vehicles.map((vehicle) => (
+                    paginatedVehicles.map((vehicle) => (
                       <tr key={vehicle.id}>
                         <td>{`VEH-${vehicle.id.toString().padStart(3, '0')}`}</td>
                         <td>{vehicle.make_model}</td>
@@ -189,22 +233,129 @@ function VehiclesSection({
                             {`View Logs (${vehicleRepairs.filter((repair) => repair.vehicle_id === vehicle.id).length})`}
                           </button>
                         </td>
-                        <td>
-                          <button
-                            type="button"
-                            className="wmr-remarks-button"
-                            onClick={() => openVehicleEditModal(vehicle)}
-                          >
-                            View
-                          </button>
+                        <td className="inventory-row-actions inventory-row-actions-left">
+                          <div className="inventory-actions-grid">
+                            <button
+                              type="button"
+                              aria-label="View vehicle"
+                              title="View vehicle"
+                              className="inventory-icon-button"
+                              onClick={() => openVehicleEditModal(vehicle)}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path
+                                  d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.6"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                <circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                              </svg>
+                            </button>
+                            <button
+                              type="button"
+                              aria-label="Archive vehicle"
+                              title="Archive vehicle"
+                              className="inventory-icon-button"
+                              onClick={() => handleArchiveVehicle(vehicle)}
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                <path
+                                  d="M4 6h16v4H4z"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.6"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                <path
+                                  d="M6 10h12v9H6z"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.6"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                                <path
+                                  d="M9 13h6M12 13v4"
+                                  fill="none"
+                                  stroke="currentColor"
+                                  strokeWidth="1.4"
+                                  strokeLinecap="round"
+                                />
+                              </svg>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))
                   )}
                 </tbody>
               </table>
+
             </div>
           </section>
+
+          {!vehicleLoading && vehicleTotalPages > 1 && (
+            <div className="inventory-pagination" aria-label="Vehicles pagination">
+              <div className="inventory-pagination-controls">
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setVehiclePage((prev) => Math.max(1, prev - 1))}
+                  disabled={vehiclePage === 1}
+                  aria-label="Previous page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path
+                      d="M15 6l-6 6 6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                {visibleVehiclePageNumbers.map((pageNumber) => (
+                  <button
+                    key={pageNumber}
+                    type="button"
+                    className={`inventory-pagination-button inventory-pagination-circle ${
+                      pageNumber === vehiclePage ? 'inventory-pagination-circle-active' : ''
+                    }`}
+                    onClick={() => setVehiclePage(pageNumber)}
+                    aria-label={`Page ${pageNumber}`}
+                    aria-current={pageNumber === vehiclePage ? 'page' : undefined}
+                  >
+                    {pageNumber}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setVehiclePage((prev) => Math.min(vehicleTotalPages, prev + 1))}
+                  disabled={vehiclePage === vehicleTotalPages}
+                  aria-label="Next page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path
+                      d="M9 6l6 6-6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

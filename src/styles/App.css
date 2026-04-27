@@ -178,6 +178,36 @@
 	background: #ffffff;
 }
 
+.password-input-wrapper {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.password-input-wrapper input {
+	width: 100%;
+	padding-right: 42px;
+}
+
+.password-toggle {
+	position: absolute;
+	right: 10px;
+	background: none;
+	border: none;
+	padding: 4px;
+	cursor: pointer;
+	color: #717182;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	border-radius: 4px;
+	transition: color 0.15s;
+}
+
+.password-toggle:hover {
+	color: #0a0a0a;
+}
+
 .signin-meta {
 	display: flex;
 	align-items: center;
@@ -239,6 +269,11 @@
 	font-size: 14px;
 	color: #338833;
 	text-decoration: none;
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	font-family: inherit;
 }
 
 .link-muted:hover {
@@ -249,6 +284,41 @@
 	margin-top: 8px;
 	font-size: 14px;
 	color: #b91c1c;
+}
+
+.signin-success {
+	margin-top: 8px;
+	font-size: 13px;
+	color: #166534;
+	background: #f0fdf4;
+	border: 1px solid #bbf7d0;
+	border-radius: 8px;
+	padding: 10px 12px;
+	line-height: 1.5;
+}
+
+.signin-forgot-desc {
+	font-size: 14px;
+	color: #6b7280;
+	margin: 0 0 20px;
+	line-height: 1.5;
+}
+
+.signin-back-link {
+	background: none;
+	border: none;
+	padding: 0;
+	cursor: pointer;
+	font-size: 13px;
+	color: #6b7280;
+	font-family: inherit;
+	margin-top: 4px;
+	align-self: flex-start;
+}
+
+.signin-back-link:hover {
+	color: #338833;
+	text-decoration: underline;
 }
 
 @media (max-width: 900px) {

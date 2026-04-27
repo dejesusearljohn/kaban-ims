@@ -18,13 +18,15 @@ export type ReportsSectionProps = {
   selectedParStaffId: string
   setSelectedParStaffId: (value: string) => void
   onPrintPar: () => void
-  onPrintStockpileLogs: () => void
+  onPrintInventoryReport: () => void
   onPrintWmrSummary: () => void
   onPrintRepairLogs: () => void
+  onPrintStockpileReleaseLogs: () => void
   parReportCount: number
-  stockpileLogCount: number
+  inventoryReportCount: number
   wmrReportCount: number
   repairLogCount: number
+  stockpileReleaseLogCount: number
 }
 
 function ReportsSection({
@@ -40,20 +42,22 @@ function ReportsSection({
   selectedParStaffId,
   setSelectedParStaffId,
   onPrintPar,
-  onPrintStockpileLogs,
+  onPrintInventoryReport,
   onPrintWmrSummary,
   onPrintRepairLogs,
+  onPrintStockpileReleaseLogs,
   parReportCount,
-  stockpileLogCount,
+  inventoryReportCount,
   wmrReportCount,
   repairLogCount,
+  stockpileReleaseLogCount,
 }: ReportsSectionProps) {
   return (
     <div className="reports-layout">
       <header className="dashboard-header">
         <div>
           <h2>Reports</h2>
-          <p>Store and print centralized report views for PAR, stockpile release logs, and WMR.</p>
+          <p>Store and print centralized report views for PAR, inventory, WMR, and vehicle repairs.</p>
         </div>
       </header>
 
@@ -143,16 +147,16 @@ function ReportsSection({
           </button>
         </article>
 
-        <article className="reports-card" aria-label="Stockpile release logs print card">
-          <h3 className="reports-card-title">Stockpile Release Logs</h3>
-          <p className="reports-card-meta">{stockpileLogCount} release log entr{stockpileLogCount === 1 ? 'y' : 'ies'} recorded</p>
+        <article className="reports-card" aria-label="Inventory report print card">
+          <h3 className="reports-card-title">Inventory Report</h3>
+          <p className="reports-card-meta">{inventoryReportCount} inventory entr{inventoryReportCount === 1 ? 'y' : 'ies'} available</p>
           <p className="reports-card-description">
-            Generates a printable table of stockpile release transactions.
+            Generates a printable inventory report with inventory items only.
           </p>
           <button
             type="button"
             className="wmr-modal-button-save reports-print-button"
-            onClick={onPrintStockpileLogs}
+            onClick={onPrintInventoryReport}
             disabled={disablePrintActions}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
@@ -195,6 +199,27 @@ function ReportsSection({
             type="button"
             className="wmr-modal-button-save reports-print-button"
             onClick={onPrintRepairLogs}
+            disabled={disablePrintActions}
+          >
+            <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
+              <path d="M7 9V4h10v5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+              <rect x="5" y="10" width="14" height="7" rx="1.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M8 14h8M8 17h8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+            <span>Print</span>
+          </button>
+        </article>
+
+        <article className="reports-card" aria-label="Stockpile release logs print card">
+          <h3 className="reports-card-title">Stockpile Release Logs</h3>
+          <p className="reports-card-meta">{stockpileReleaseLogCount} release log entr{stockpileReleaseLogCount === 1 ? 'y' : 'ies'} available</p>
+          <p className="reports-card-description">
+            Prints stockpile release records including item, quantity, recipient, and reason.
+          </p>
+          <button
+            type="button"
+            className="wmr-modal-button-save reports-print-button"
+            onClick={onPrintStockpileReleaseLogs}
             disabled={disablePrintActions}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">

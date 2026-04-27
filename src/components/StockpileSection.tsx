@@ -1,6 +1,8 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
+import useResponsivePageSize from './useResponsivePageSize'
 
-type StockpileRow = Tables<'stockpile'>
+type StockpileRow = Tables<'stockpile'> & { status?: string | null }
 type DistributionLogRow = Tables<'distribution_logs'>
 
 type StockpileReleaseLog = {
@@ -10,40 +12,37 @@ type StockpileReleaseLog = {
   quantity: number
 }
 
+type StockpileReleaseDraftItem = {
+  stockpileId: string
+  quantity: string
+}
+
 type StockpileSectionProps = {
   loading: boolean
   totalStockpiles: number
   formatValue: (value: number) => string
   stockpileError: string | null
-  stockpileMode: 'list' | 'add' | 'logs' | 'expired'
-  setStockpileMode: (mode: 'list' | 'add' | 'logs' | 'expired') => void
-  searchQuery: string
-  setSearchQuery: (value: string) => void
-  categoryFilter: string
-  setCategoryFilter: (value: string) => void
-  categoryOptions: string[]
+  stockpileMode: 'list' | 'logs' | 'expired' | 'release'
+  setStockpileMode: (mode: 'list' | 'logs' | 'expired' | 'release') => void
+  openReleasePage: () => void
   stockpileLoading: boolean
   filteredStockpileItems: StockpileRow[]
   filteredExpiredStockpileItems: StockpileRow[]
   stockpileReleaseLogs: StockpileReleaseLog[]
-  openReleaseModal: () => void
+  stockpileReleaseItems: StockpileReleaseDraftItem[]
+  setStockpileReleaseIssuedToInput: (value: string) => void
+  stockpileReleaseIssuedToInput: string
+  setStockpileReleaseReasonInput: (value: string) => void
+  stockpileReleaseReasonInput: string
+  availableReleaseItems: StockpileRow[]
+  addStockpileReleaseItem: () => void
+  updateStockpileReleaseItem: (index: number, field: keyof StockpileReleaseDraftItem, value: string) => void
+  removeStockpileReleaseItem: (index: number) => void
+  closeStockpileReleasePage: () => void
+  handleReleaseStockpile: () => void
+  releasingStockpile: boolean
   handlePrintReleaseLogs: () => void
   formatDisplayDate: (dateString: string | null) => string
-  newItemName: string
-  setNewItemName: (value: string) => void
-  newCategory: string
-  setNewCategory: (value: string) => void
-  newQuantity: string
-  setNewQuantity: (value: string) => void
-  newUnitOfMeasure: string
-  setNewUnitOfMeasure: (value: string) => void
-  newPackedDate: string
-  setNewPackedDate: (value: string) => void
-  newExpirationDate: string
-  setNewExpirationDate: (value: string) => void
-  addingStockpile: boolean
-  handleAddStockpile: () => void
-  unitOfMeasureOptions: string[]
 }
 
 function StockpileSection({
@@ -53,34 +52,78 @@ function StockpileSection({
   stockpileError,
   stockpileMode,
   setStockpileMode,
-  searchQuery,
-  setSearchQuery,
-  categoryFilter,
-  setCategoryFilter,
-  categoryOptions,
+  openReleasePage,
   stockpileLoading,
   filteredStockpileItems,
   filteredExpiredStockpileItems,
   stockpileReleaseLogs,
-  openReleaseModal,
+  stockpileReleaseItems,
+  setStockpileReleaseIssuedToInput,
+  stockpileReleaseIssuedToInput,
+  setStockpileReleaseReasonInput,
+  stockpileReleaseReasonInput,
+  availableReleaseItems,
+  addStockpileReleaseItem,
+  updateStockpileReleaseItem,
+  removeStockpileReleaseItem,
+  closeStockpileReleasePage,
+  handleReleaseStockpile,
+  releasingStockpile,
   handlePrintReleaseLogs,
   formatDisplayDate,
-  newItemName,
-  setNewItemName,
-  newCategory,
-  setNewCategory,
-  newQuantity,
-  setNewQuantity,
-  newUnitOfMeasure,
-  setNewUnitOfMeasure,
-  newPackedDate,
-  setNewPackedDate,
-  newExpirationDate,
-  setNewExpirationDate,
-  addingStockpile,
-  handleAddStockpile,
-  unitOfMeasureOptions,
 }: StockpileSectionProps) {
+  const stockpilePageSize = useResponsivePageSize(10)
+  const [stockpilePage, setStockpilePage] = useState(1)
+
+  const currentStockpileItems = useMemo(
+    () => (stockpileMode === 'expired' ? filteredExpiredStockpileItems : filteredStockpileItems),
+    [stockpileMode, filteredStockpileItems, filteredExpiredStockpileItems],
+  )
+  const currentStockpileRowCount = stockpileMode === 'logs' ? stockpileReleaseLogs.length : currentStockpileItems.length
+
+  const stockpileTotalPages = Math.max(1, Math.ceil(currentStockpileRowCount / stockpilePageSize))
+
+  useEffect(() => {
+    setStockpilePage(1)
+  }, [stockpileMode])
+
+  useEffect(() => {
+    if (stockpilePage > stockpileTotalPages) {
+      setStockpilePage(stockpileTotalPages)
+    }
+  }, [stockpilePage, stockpileTotalPages])
+
+  const paginatedStockpileItems = useMemo(() => {
+    const start = (stockpilePage - 1) * stockpilePageSize
+    return currentStockpileItems.slice(start, start + stockpilePageSize)
+  }, [currentStockpileItems, stockpilePage, stockpilePageSize])
+  const paginatedStockpileReleaseLogs = useMemo(() => {
+    const start = (stockpilePage - 1) * stockpilePageSize
+    return stockpileReleaseLogs.slice(start, start + stockpilePageSize)
+  }, [stockpileReleaseLogs, stockpilePage, stockpilePageSize])
+
+  const visibleStockpilePageNumbers = useMemo(() => {
+    const maxVisiblePages = 5
+    if (stockpileTotalPages <= maxVisiblePages) {
+      return Array.from({ length: stockpileTotalPages }, (_, index) => index + 1)
+    }
+
+    const halfWindow = Math.floor(maxVisiblePages / 2)
+    let start = Math.max(1, stockpilePage - halfWindow)
+    let end = Math.min(stockpileTotalPages, start + maxVisiblePages - 1)
+
+    if (end - start + 1 < maxVisiblePages) {
+      start = Math.max(1, end - maxVisiblePages + 1)
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  }, [stockpilePage, stockpileTotalPages])
+
+  const selectedReleaseItemIds = useMemo(
+    () => new Set(stockpileReleaseItems.map((item) => item.stockpileId).filter((itemId) => itemId.trim())),
+    [stockpileReleaseItems],
+  )
+
   return (
     <div className="inventory-layout">
       <header className="dashboard-header">
@@ -102,10 +145,10 @@ function StockpileSection({
         </button>
         <button
           type="button"
-          className={stockpileMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setStockpileMode('add')}
+          className={stockpileMode === 'release' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+          onClick={openReleasePage}
         >
-          Add Stockpile
+          Stockpile Release
         </button>
         <button
           type="button"
@@ -125,35 +168,6 @@ function StockpileSection({
 
       {stockpileMode === 'list' && (
         <>
-          <section className="inventory-filters" aria-label="Stockpile filters">
-            <div className="inventory-search-wrapper">
-              <input
-                type="search"
-                className="inventory-search-input"
-                placeholder="Search by item name…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <div className="inventory-filter-selects">
-              <select
-                className="inventory-filter-select"
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-              >
-                <option value="all">All Categories</option>
-                {categoryOptions.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-              <button type="button" className="inventory-primary-button" onClick={openReleaseModal}>
-                Stockpile Release
-              </button>
-            </div>
-          </section>
-
           <section className="inventory-table-section" aria-label="Stockpile table">
             <div className="inventory-table-card">
               <table className="inventory-table">
@@ -178,7 +192,7 @@ function StockpileSection({
                       <td colSpan={7}>No stockpiles found.</td>
                     </tr>
                   ) : (
-                    filteredStockpileItems.map((item) => {
+                    paginatedStockpileItems.map((item) => {
                       const paddedId = `STOCK-${item.stockpile_id.toString().padStart(3, '0')}`
                       const isExpired =
                         item.expiration_date && new Date(item.expiration_date) < new Date()
@@ -192,7 +206,7 @@ function StockpileSection({
                           <td>{item.unit_of_measure ?? '—'}</td>
                           <td>{formatDisplayDate(item.packed_date)}</td>
                           <td>
-                            <span className={isExpired ? 'badge badge-status-unserviceable' : ''}>
+                            <span className={isExpired ? 'badge badge-status-expired' : 'badge badge-status-valid'}>
                               {formatDisplayDate(item.expiration_date)}
                             </span>
                           </td>
@@ -204,12 +218,241 @@ function StockpileSection({
               </table>
             </div>
           </section>
+
+          {!stockpileLoading && stockpileTotalPages > 1 && (
+            <div className="inventory-pagination" aria-label="Stockpile pagination">
+              <div className="inventory-pagination-controls">
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setStockpilePage((prev) => Math.max(1, prev - 1))}
+                  disabled={stockpilePage === 1}
+                  aria-label="Previous page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path
+                      d="M15 6l-6 6 6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                {visibleStockpilePageNumbers.map((pageNumber) => (
+                  <button
+                    key={pageNumber}
+                    type="button"
+                    className={`inventory-pagination-button inventory-pagination-circle ${
+                      pageNumber === stockpilePage ? 'inventory-pagination-circle-active' : ''
+                    }`}
+                    onClick={() => setStockpilePage(pageNumber)}
+                    aria-label={`Page ${pageNumber}`}
+                    aria-current={pageNumber === stockpilePage ? 'page' : undefined}
+                  >
+                    {pageNumber}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setStockpilePage((prev) => Math.min(stockpileTotalPages, prev + 1))}
+                  disabled={stockpilePage === stockpileTotalPages}
+                  aria-label="Next page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path
+                      d="M9 6l6 6-6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+
+      {stockpileMode === 'release' && (
+        <>
+          <section className="inventory-add-section" aria-label="Stockpile release details">
+            <div className="inventory-add-card">
+              <div className="stockpile-release-header">
+                <h3 className="inventory-add-title">Stockpile Release</h3>
+                <button type="button" className="inventory-secondary-button" onClick={closeStockpileReleasePage}>
+                  Back to Stockpiles
+                </button>
+              </div>
+
+              <p className="inventory-help-text stockpile-release-help">
+                Add one or more stockpile items, then submit them as a single release transaction.
+              </p>
+
+              <div className="inventory-add-grid">
+                <div className="inventory-field">
+                  <label htmlFor="stockpile-release-issued-to">
+                    Issued To <span className="inventory-required">*</span>
+                  </label>
+                  <input
+                    id="stockpile-release-issued-to"
+                    type="text"
+                    className="inventory-input"
+                    placeholder="e.g. Barangay Banicain"
+                    value={stockpileReleaseIssuedToInput}
+                    onChange={(e) => setStockpileReleaseIssuedToInput(e.target.value)}
+                    disabled={releasingStockpile}
+                  />
+                </div>
+
+                <div className="inventory-field">
+                  <label htmlFor="stockpile-release-reason">
+                    Reason of Issuance <span className="inventory-required">*</span>
+                  </label>
+                  <input
+                    id="stockpile-release-reason"
+                    type="text"
+                    className="inventory-input"
+                    placeholder="e.g. Typhoon relief"
+                    value={stockpileReleaseReasonInput}
+                    onChange={(e) => setStockpileReleaseReasonInput(e.target.value)}
+                    disabled={releasingStockpile}
+                  />
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section className="inventory-table-section inventory-table-section-compact" aria-label="Stockpile release items">
+            <div className="inventory-table-card stockpile-release-lines-card">
+              <div className="inventory-table-title stockpile-release-lines-header">
+                <h3 className="inventory-add-title">Release Items</h3>
+              </div>
+
+              <table className="inventory-table stockpile-release-table">
+                <thead>
+                  <tr>
+                    <th scope="col" className="stockpile-release-no-column">No.</th>
+                    <th scope="col" className="stockpile-release-item-column">Stockpile Item</th>
+                    <th scope="col" className="stockpile-release-qty-column">Release Qty</th>
+                    <th scope="col" className="stockpile-release-avail-column">Available</th>
+                    <th scope="col" className="stockpile-release-action-column">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {stockpileReleaseItems.map((item, index) => {
+                    const selectedItem = availableReleaseItems.find(
+                      (stockpileItem) => stockpileItem.stockpile_id === Number(item.stockpileId),
+                    )
+
+                    return (
+                      <tr key={`release-line-${index}`}>
+                        <td className="stockpile-release-line-number stockpile-release-no-column">{index + 1}</td>
+                        <td className="stockpile-release-item-column">
+                          <select
+                            className="inventory-input stockpile-release-select"
+                            value={item.stockpileId}
+                            onChange={(e) => updateStockpileReleaseItem(index, 'stockpileId', e.target.value)}
+                            disabled={releasingStockpile || availableReleaseItems.length === 0}
+                          >
+                            <option value="">Select stockpile item</option>
+                            {availableReleaseItems.map((stockpileItem) => {
+                              const stockpileIdValue = String(stockpileItem.stockpile_id)
+                              const isSelectedInAnotherLine =
+                                selectedReleaseItemIds.has(stockpileIdValue) && stockpileIdValue !== item.stockpileId
+
+                              return (
+                                <option
+                                  key={stockpileItem.stockpile_id}
+                                  value={stockpileItem.stockpile_id}
+                                  disabled={isSelectedInAnotherLine}
+                                >
+                                  {`${stockpileItem.item_name ?? 'Unnamed'} (${stockpileItem.quantity_on_hand ?? 0} ${stockpileItem.unit_of_measure ?? ''})`}
+                                </option>
+                              )
+                            })}
+                          </select>
+                        </td>
+                        <td className="stockpile-release-qty-column">
+                          <input
+                            type="number"
+                            min="1"
+                            className="inventory-input stockpile-release-quantity-input"
+                            placeholder="Enter quantity"
+                            value={item.quantity}
+                            onChange={(e) => updateStockpileReleaseItem(index, 'quantity', e.target.value)}
+                            disabled={releasingStockpile || !item.stockpileId}
+                          />
+                        </td>
+                        <td className="stockpile-release-avail-column">
+                          {selectedItem
+                            ? `${selectedItem.quantity_on_hand ?? 0} ${selectedItem.unit_of_measure ?? ''}`.trim()
+                            : '—'}
+                        </td>
+                        <td className="stockpile-release-action-column stockpile-release-action-cell">
+                          <button
+                            type="button"
+                            className="stockpile-row-remove-link"
+                            onClick={() => removeStockpileReleaseItem(index)}
+                            disabled={releasingStockpile || stockpileReleaseItems.length === 1}
+                            aria-label={`Remove release item ${index + 1}`}
+                          >
+                            ×
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
+
+                  <tr className="stockpile-release-add-row">
+                    <td colSpan={5}>
+                      <button
+                        type="button"
+                        className="stockpile-release-add-button"
+                        onClick={addStockpileReleaseItem}
+                        disabled={releasingStockpile}
+                      >
+                        <span className="stockpile-release-add-icon">+</span>
+                        <span>Add Item</span>
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div className="stockpile-release-actions">
+              <button
+                type="button"
+                className="inventory-secondary-button"
+                onClick={closeStockpileReleasePage}
+                disabled={releasingStockpile}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="inventory-add-submit"
+                onClick={handleReleaseStockpile}
+                disabled={releasingStockpile || availableReleaseItems.length === 0}
+              >
+                {releasingStockpile ? 'Releasing…' : 'Submit Release'}
+              </button>
+            </div>
+          </section>
         </>
       )}
 
       {stockpileMode === 'logs' && (
-        <section className="inventory-table-section" aria-label="Stockpile release logs">
-          <div className="inventory-table-card">
+        <>
+          <section className="inventory-table-section" aria-label="Stockpile release logs">
+            <div className="inventory-table-card">
             <div
               className="inventory-table-title"
               style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
@@ -274,7 +517,7 @@ function StockpileSection({
                     <td colSpan={6}>No release logs found.</td>
                   </tr>
                 ) : (
-                  stockpileReleaseLogs.map((entry) => (
+                  paginatedStockpileReleaseLogs.map((entry) => (
                     <tr key={entry.log.log_id}>
                       <td>{formatDisplayDate(entry.log.operation_date)}</td>
                       <td>{entry.itemName || '—'}</td>
@@ -287,40 +530,65 @@ function StockpileSection({
                 )}
               </tbody>
             </table>
-          </div>
-        </section>
+            </div>
+          </section>
+
+          {!stockpileLoading && stockpileReleaseLogs.length > stockpilePageSize && (
+            <div className="inventory-pagination" aria-label="Stockpile release logs pagination">
+              <div className="inventory-pagination-controls">
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setStockpilePage((prev) => Math.max(1, prev - 1))}
+                  disabled={stockpilePage === 1}
+                  aria-label="Previous page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+
+                {visibleStockpilePageNumbers.map((pageNumber) => (
+                  <button
+                    key={pageNumber}
+                    type="button"
+                    className={`inventory-pagination-button inventory-pagination-circle ${
+                      pageNumber === stockpilePage ? 'inventory-pagination-circle-active' : ''
+                    }`}
+                    onClick={() => setStockpilePage(pageNumber)}
+                    aria-label={`Page ${pageNumber}`}
+                    aria-current={pageNumber === stockpilePage ? 'page' : undefined}
+                  >
+                    {pageNumber}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setStockpilePage((prev) => Math.min(stockpileTotalPages, prev + 1))}
+                  disabled={stockpilePage === stockpileTotalPages}
+                  aria-label="Next page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {stockpileMode === 'expired' && (
         <>
-          <section className="inventory-filters" aria-label="Expired stockpile filters">
-            <div className="inventory-search-wrapper">
-              <input
-                type="search"
-                className="inventory-search-input"
-                placeholder="Search by item name…"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <div className="inventory-filter-selects">
-              <select
-                className="inventory-filter-select"
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-              >
-                <option value="all">All Categories</option>
-                {categoryOptions.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </section>
-
           <section className="inventory-table-section" aria-label="Expired stockpile table">
             <div className="inventory-table-card">
+              <div className="inventory-table-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h3 className="inventory-add-title" style={{ margin: 0 }}>
+                  Expired Stockpiles
+                </h3>
+              </div>
               <table className="inventory-table">
                 <thead>
                   <tr>
@@ -343,8 +611,11 @@ function StockpileSection({
                       <td colSpan={7}>No expired stockpiles found.</td>
                     </tr>
                   ) : (
-                    filteredExpiredStockpileItems.map((item) => {
+                    paginatedStockpileItems.map((item) => {
                       const paddedId = `STOCK-${item.stockpile_id.toString().padStart(3, '0')}`
+                      const isExpired =
+                        item.status?.trim() === 'Expired' ||
+                        (item.expiration_date && new Date(item.expiration_date) < new Date())
 
                       return (
                         <tr key={item.stockpile_id}>
@@ -355,7 +626,7 @@ function StockpileSection({
                           <td>{item.unit_of_measure ?? '—'}</td>
                           <td>{formatDisplayDate(item.packed_date)}</td>
                           <td>
-                            <span className="badge badge-status-unserviceable">
+                            <span className={isExpired ? 'badge badge-status-expired' : 'badge badge-status-valid'}>
                               {formatDisplayDate(item.expiration_date)}
                             </span>
                           </td>
@@ -367,110 +638,68 @@ function StockpileSection({
               </table>
             </div>
           </section>
+
+          {!stockpileLoading && stockpileTotalPages > 1 && (
+            <div className="inventory-pagination" aria-label="Expired stockpile pagination">
+              <div className="inventory-pagination-controls">
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setStockpilePage((prev) => Math.max(1, prev - 1))}
+                  disabled={stockpilePage === 1}
+                  aria-label="Previous page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path
+                      d="M15 6l-6 6 6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+
+                {visibleStockpilePageNumbers.map((pageNumber) => (
+                  <button
+                    key={pageNumber}
+                    type="button"
+                    className={`inventory-pagination-button inventory-pagination-circle ${
+                      pageNumber === stockpilePage ? 'inventory-pagination-circle-active' : ''
+                    }`}
+                    onClick={() => setStockpilePage(pageNumber)}
+                    aria-label={`Page ${pageNumber}`}
+                    aria-current={pageNumber === stockpilePage ? 'page' : undefined}
+                  >
+                    {pageNumber}
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  className="inventory-pagination-button inventory-pagination-circle"
+                  onClick={() => setStockpilePage((prev) => Math.min(stockpileTotalPages, prev + 1))}
+                  disabled={stockpilePage === stockpileTotalPages}
+                  aria-label="Next page"
+                >
+                  <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                    <path
+                      d="M9 6l6 6-6 6"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 
-      {stockpileMode === 'add' && (
-        <section className="inventory-add-section" aria-label="Add new stockpile">
-          <div className="inventory-add-card">
-            <h3 className="inventory-add-title">Add New Stockpile</h3>
-            <div className="inventory-add-grid">
-              <div className="inventory-field">
-                <label htmlFor="add-item-name">
-                  Item Name <span className="inventory-required">*</span>
-                </label>
-                <input
-                  id="add-item-name"
-                  type="text"
-                  className="inventory-input"
-                  placeholder="Enter item name"
-                  value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
-                />
-              </div>
-              <div className="inventory-field">
-                <label htmlFor="add-category">
-                  Category <span className="inventory-required">*</span>
-                </label>
-                <select
-                  id="add-category"
-                  className="inventory-input"
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                >
-                  <option value="">Select category</option>
-                  {categoryOptions.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="inventory-field">
-                <label htmlFor="add-quantity">
-                  Quantity <span className="inventory-required">*</span>
-                </label>
-                <input
-                  id="add-quantity"
-                  type="number"
-                  className="inventory-input"
-                  placeholder="1"
-                  value={newQuantity}
-                  onChange={(e) => setNewQuantity(e.target.value)}
-                />
-              </div>
-              <div className="inventory-field">
-                <label htmlFor="add-unit-of-measure">
-                  Unit of Measure <span className="inventory-required">*</span>
-                </label>
-                <select
-                  id="add-unit-of-measure"
-                  className="inventory-input"
-                  value={newUnitOfMeasure}
-                  onChange={(e) => setNewUnitOfMeasure(e.target.value)}
-                >
-                  <option value="">Select unit</option>
-                  {unitOfMeasureOptions.map((unit) => (
-                    <option key={unit} value={unit}>
-                      {unit}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="inventory-field">
-                <label htmlFor="add-packed-date">Packed Date</label>
-                <input
-                  id="add-packed-date"
-                  type="date"
-                  className="inventory-input"
-                  value={newPackedDate}
-                  onChange={(e) => setNewPackedDate(e.target.value)}
-                />
-              </div>
-              <div className="inventory-field">
-                <label htmlFor="add-expiration-date">Expiration Date</label>
-                <input
-                  id="add-expiration-date"
-                  type="date"
-                  className="inventory-input"
-                  value={newExpirationDate}
-                  onChange={(e) => setNewExpirationDate(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="inventory-add-actions">
-              <button
-                type="button"
-                className="inventory-add-submit"
-                onClick={handleAddStockpile}
-                disabled={addingStockpile}
-              >
-                {addingStockpile ? 'Adding…' : 'Add Stockpile'}
-              </button>
-            </div>
-          </div>
-        </section>
-      )}
     </div>
   )
 }

@@ -33,7 +33,7 @@
 
 .dashboard-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
 }
 
@@ -135,6 +135,18 @@
 .metric-value {
   font-size: 22px;
   font-weight: 600;
+}
+
+.dashboard-source-card-label {
+  font-size: 12px;
+  color: #6b7280;
+  line-height: 1.2;
+}
+
+.dashboard-source-card-value {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.1;
 }
 
 /* Dashboard summary colors for serviceable/unserviceable */

@@ -7,7 +7,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 40;
+  z-index: 2000;
+}
+
+body.logout-modal-open .dashboard-main,
+body.logout-modal-open .department-dashboard-main {
+  pointer-events: none;
 }
 
 .logout-modal {
@@ -21,7 +26,7 @@
 
 .logout-modal-title {
   margin: 0 0 8px;
-  font-size: 16px;
+  font-size: 20px;
   font-weight: 600;
   color: #0f172a;
 }

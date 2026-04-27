@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
+import useResponsivePageSize from './useResponsivePageSize'
 
 type InventoryRow = Tables<'inventory'>
 type WmrReportRow = Tables<'wmr_reports'>
@@ -31,6 +33,8 @@ type WmrSectionProps = {
   openWmrRemarksModal: (item: InventoryRow) => void
   filteredVehicleWmrReports: WmrReportRow[]
   openVehicleWmrRemarksModal: (report: WmrReportRow, label: string) => void
+  onArchiveWasteItem: (item: InventoryRow, report: WmrReportRow | null) => void
+  onArchiveVehicleReport: (report: WmrReportRow) => void
 }
 
 function WmrSection({
@@ -56,7 +60,125 @@ function WmrSection({
   openWmrRemarksModal,
   filteredVehicleWmrReports,
   openVehicleWmrRemarksModal,
+  onArchiveWasteItem,
+  onArchiveVehicleReport,
 }: WmrSectionProps) {
+  const wmrPageSize = useResponsivePageSize(8)
+  const [wmrPage, setWmrPage] = useState(1)
+
+  const getWmrStatusBadgeClass = (status: string | null) => {
+    if (status === 'Pending') return 'badge-status-pending'
+    if (status === 'For Disposal') return 'badge-status-disposal'
+    if (status === 'Disposed') return 'badge-status-disposed'
+    if (status === 'For Repair') return 'badge-status-repair'
+    if (status === 'Repaired') return 'badge-status-repaired'
+    return ''
+  }
+
+  const combinedWmrRows = useMemo(
+    () =>
+      [
+        ...filteredWasteItems.map((item) => {
+        const report = wmrReports.find((r) => r.item_id === item.item_id) || null
+        const reportId = report
+          ? `WMR-${report.report_id.toString().padStart(3, '0')}`
+          : `WMR-${item.item_id.toString().padStart(3, '0')}`
+        const status = report?.status?.trim() || null
+        const reason = report?.reason_damage?.trim() || ''
+        const location =
+          report?.location?.trim() ||
+          (item.department_id != null ? departments.find((dept) => dept.id === item.department_id)?.name ?? '' : '')
+        const dateReported = report?.date_reported ?? item.created_at ?? item.date_acquired
+        const hasRemarks = !!(report && report.admin_remarks && report.admin_remarks.trim().length > 0)
+
+          return {
+            key: `waste-${item.item_id}`,
+            reportId,
+            itemName: item.item_name,
+            type: item.item_type,
+            reason,
+            status,
+            location,
+            dateReported,
+            hasRemarks,
+            rowType: 'waste' as const,
+            item,
+            vehicleLabel: null as string | null,
+            report,
+          }
+        }),
+        ...filteredVehicleWmrReports.map((report) => {
+        const status = report.status?.trim() || null
+        const reason = report.reason_damage?.trim() || ''
+        const location = report.location?.trim() || 'Vehicle Registry'
+        const vehicleLabel = report.location?.startsWith('Vehicle Registry - ')
+          ? report.location.slice('Vehicle Registry - '.length)
+          : 'Vehicle'
+        const hasRemarks = !!(report.admin_remarks && report.admin_remarks.trim().length > 0)
+
+          return {
+            key: `vehicle-wmr-${report.report_id}`,
+            reportId: `WMR-${report.report_id.toString().padStart(3, '0')}`,
+            itemName: vehicleLabel || 'Vehicle',
+            type: 'Vehicle',
+            reason,
+            status,
+            location,
+            dateReported: report.date_reported,
+            hasRemarks,
+            rowType: 'vehicle' as const,
+            item: null as InventoryRow | null,
+            vehicleLabel: vehicleLabel || 'Vehicle',
+            report,
+          }
+        }),
+      ].sort((a, b) => {
+        const aTime = a.dateReported ? new Date(a.dateReported).getTime() : 0
+        const bTime = b.dateReported ? new Date(b.dateReported).getTime() : 0
+
+        if (Number.isNaN(aTime) && Number.isNaN(bTime)) return a.key.localeCompare(b.key)
+        if (Number.isNaN(aTime)) return 1
+        if (Number.isNaN(bTime)) return -1
+
+        return bTime - aTime
+      }),
+    [filteredWasteItems, filteredVehicleWmrReports, wmrReports, departments],
+  )
+
+  const wmrTotalPages = Math.max(1, Math.ceil(combinedWmrRows.length / wmrPageSize))
+
+  useEffect(() => {
+    setWmrPage(1)
+  }, [wmrSearchQuery, wmrTypeFilter, wmrDepartmentFilter, wmrStatusFilter])
+
+  useEffect(() => {
+    if (wmrPage > wmrTotalPages) {
+      setWmrPage(wmrTotalPages)
+    }
+  }, [wmrPage, wmrTotalPages])
+
+  const paginatedWmrRows = useMemo(() => {
+    const start = (wmrPage - 1) * wmrPageSize
+    return combinedWmrRows.slice(start, start + wmrPageSize)
+  }, [combinedWmrRows, wmrPage, wmrPageSize])
+
+  const visibleWmrPageNumbers = useMemo(() => {
+    const maxVisiblePages = 5
+    if (wmrTotalPages <= maxVisiblePages) {
+      return Array.from({ length: wmrTotalPages }, (_, index) => index + 1)
+    }
+
+    const halfWindow = Math.floor(maxVisiblePages / 2)
+    let start = Math.max(1, wmrPage - halfWindow)
+    let end = Math.min(wmrTotalPages, start + maxVisiblePages - 1)
+
+    if (end - start + 1 < maxVisiblePages) {
+      start = Math.max(1, end - maxVisiblePages + 1)
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  }, [wmrPage, wmrTotalPages])
+
   return (
     <div className="wmr-layout">
       <header className="dashboard-header">
@@ -136,137 +258,161 @@ function WmrSection({
                 <th scope="col">Location</th>
                 <th scope="col">Date Reported</th>
                 <th scope="col">Remarks</th>
+                <th scope="col">Action</th>
               </tr>
             </thead>
             <tbody>
               {inventoryLoading ? (
                 <tr>
-                  <td colSpan={8}>Loading waste materials…</td>
+                  <td colSpan={9}>Loading waste materials…</td>
                 </tr>
               ) : combinedFilteredWmrCount === 0 ? (
                 <tr>
-                  <td colSpan={8}>No waste materials reported.</td>
+                  <td colSpan={9}>No waste materials reported.</td>
                 </tr>
               ) : (
                 <>
-                  {filteredWasteItems.map((item) => {
-                    const report = wmrReports.find((r) => r.item_id === item.item_id) || null
-                    const reportId = report
-                      ? `WMR-${report.report_id.toString().padStart(3, '0')}`
-                      : `WMR-${item.item_id.toString().padStart(3, '0')}`
-                    const status = report?.status?.trim() || null
-                    const reason = report?.reason_damage?.trim() || ''
-                    const department =
-                      report?.location?.trim() ||
-                      (item.department_id != null
-                        ? departments.find((dept) => dept.id === item.department_id)?.name ?? ''
-                        : '')
-                    const dateReported = report?.date_reported ?? item.created_at ?? item.date_acquired
-                    const hasRemarks = !!(report && report.admin_remarks && report.admin_remarks.trim().length > 0)
-
-                    return (
-                      <tr key={item.item_id}>
-                        <td>{reportId}</td>
-                        <td>{item.item_name}</td>
-                        <td>{item.item_type}</td>
-                        <td>{reason || '—'}</td>
-                        <td>
-                          {status ? (
-                            <span
-                              className={`badge ${
-                                status === 'Pending'
-                                  ? 'badge-status-pending'
-                                  : status === 'For Disposal'
-                                    ? 'badge-status-disposal'
-                                    : status === 'Disposed'
-                                      ? 'badge-status-disposed'
-                                    : status === 'For Repair'
-                                      ? 'badge-status-repair'
-                                      : status === 'Repaired'
-                                        ? 'badge-status-repaired'
-                                        : ''
-                              }`}
-                            >
-                              {status}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td>{department || '—'}</td>
-                        <td>{formatDisplayDate(dateReported)}</td>
-                        <td>
+                  {paginatedWmrRows.map((row) => (
+                    <tr key={row.key}>
+                      <td>{row.reportId}</td>
+                      <td>{row.itemName || '—'}</td>
+                      <td>{row.type}</td>
+                      <td>{row.reason || '—'}</td>
+                      <td>
+                        {row.status ? (
+                          <span className={`badge ${getWmrStatusBadgeClass(row.status)}`}>{row.status}</span>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td>{row.location || '—'}</td>
+                      <td>{formatDisplayDate(row.dateReported)}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="wmr-remarks-button"
+                          onClick={() => {
+                            if (row.rowType === 'waste' && row.item) {
+                              openWmrRemarksModal(row.item)
+                            } else if (row.rowType === 'vehicle' && row.report) {
+                              openVehicleWmrRemarksModal(row.report, row.vehicleLabel || 'Vehicle')
+                            }
+                          }}
+                        >
+                          {row.hasRemarks ? 'View remarks' : 'Add remarks'}
+                        </button>
+                      </td>
+                      <td className="inventory-row-actions">
+                        <div className="inventory-actions-grid">
                           <button
                             type="button"
-                            className="wmr-remarks-button"
-                            onClick={() => openWmrRemarksModal(item)}
+                            aria-label="Archive item"
+                            title="Archive item"
+                            className="inventory-icon-button"
+                            onClick={() => {
+                              if (row.rowType === 'waste' && row.item) {
+                                onArchiveWasteItem(row.item, row.report)
+                              } else if (row.rowType === 'vehicle' && row.report) {
+                                onArchiveVehicleReport(row.report)
+                              }
+                            }}
                           >
-                            {hasRemarks ? 'View remarks' : 'Add remarks'}
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path
+                                d="M4 6h16v4H4z"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              <path
+                                d="M6 10h12v9H6z"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.6"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                              <path
+                                d="M9 13h6M12 13v4"
+                                fill="none"
+                                stroke="currentColor"
+                                strokeWidth="1.4"
+                                strokeLinecap="round"
+                              />
+                            </svg>
                           </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
-
-                  {filteredVehicleWmrReports.map((report) => {
-                    const reportId = `WMR-${report.report_id.toString().padStart(3, '0')}`
-                    const status = report.status?.trim() || null
-                    const reason = report.reason_damage?.trim() || ''
-                    const location = report.location?.trim() || 'Vehicle Registry'
-                    const itemName = report.location?.startsWith('Vehicle Registry - ')
-                      ? report.location.slice('Vehicle Registry - '.length)
-                      : 'Vehicle'
-                    const hasRemarks = !!(report.admin_remarks && report.admin_remarks.trim().length > 0)
-
-                    return (
-                      <tr key={`vehicle-wmr-${report.report_id}`}>
-                        <td>{reportId}</td>
-                        <td>{itemName || 'Vehicle'}</td>
-                        <td>Vehicle</td>
-                        <td>{reason || '—'}</td>
-                        <td>
-                          {status ? (
-                            <span
-                              className={`badge ${
-                                status === 'Pending'
-                                  ? 'badge-status-pending'
-                                  : status === 'For Disposal'
-                                    ? 'badge-status-disposal'
-                                    : status === 'Disposed'
-                                      ? 'badge-status-disposed'
-                                    : status === 'For Repair'
-                                      ? 'badge-status-repair'
-                                      : status === 'Repaired'
-                                        ? 'badge-status-repaired'
-                                        : ''
-                              }`}
-                            >
-                              {status}
-                            </span>
-                          ) : (
-                            '—'
-                          )}
-                        </td>
-                        <td>{location}</td>
-                        <td>{formatDisplayDate(report.date_reported)}</td>
-                        <td>
-                          <button
-                            type="button"
-                            className="wmr-remarks-button"
-                            onClick={() => openVehicleWmrRemarksModal(report, itemName || 'Vehicle')}
-                          >
-                            {hasRemarks ? 'View remarks' : 'Add remarks'}
-                          </button>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
                 </>
               )}
             </tbody>
           </table>
+
         </div>
       </section>
+
+      {!inventoryLoading && wmrTotalPages > 1 && (
+        <div className="inventory-pagination" aria-label="WMR pagination">
+          <div className="inventory-pagination-controls">
+            <button
+              type="button"
+              className="inventory-pagination-button inventory-pagination-circle"
+              onClick={() => setWmrPage((prev) => Math.max(1, prev - 1))}
+              disabled={wmrPage === 1}
+              aria-label="Previous page"
+            >
+              <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                <path
+                  d="M15 6l-6 6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+
+            {visibleWmrPageNumbers.map((pageNumber) => (
+              <button
+                key={pageNumber}
+                type="button"
+                className={`inventory-pagination-button inventory-pagination-circle ${
+                  pageNumber === wmrPage ? 'inventory-pagination-circle-active' : ''
+                }`}
+                onClick={() => setWmrPage(pageNumber)}
+                aria-label={`Page ${pageNumber}`}
+                aria-current={pageNumber === wmrPage ? 'page' : undefined}
+              >
+                {pageNumber}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              className="inventory-pagination-button inventory-pagination-circle"
+              onClick={() => setWmrPage((prev) => Math.min(wmrTotalPages, prev + 1))}
+              disabled={wmrPage === wmrTotalPages}
+              aria-label="Next page"
+            >
+              <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                <path
+                  d="M9 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

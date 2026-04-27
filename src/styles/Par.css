@@ -44,7 +44,7 @@
 }
 
 .par-modal {
-  width: min(920px, calc(100vw - 32px));
+  width: min(1180px, calc(100vw - 32px));
   max-height: calc(100vh - 40px);
   overflow: auto;
   background: #ffffff;
@@ -57,18 +57,33 @@
 .par-view-table-wrap {
   border: 1px solid #e5e7eb;
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 
 .par-meta-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 2px 16px;
+  gap: 10px 16px;
   margin-bottom: 10px;
+}
+
+.par-meta-grid .wmr-modal-text {
+  margin: 0;
 }
 
 .par-view-table tbody td {
   white-space: nowrap;
+}
+
+.par-view-table {
+  min-width: 980px;
+}
+
+.par-view-table thead th,
+.par-view-table tbody td {
+  padding-left: 14px;
+  padding-right: 14px;
 }
 
 @media (max-width: 960px) {
@@ -79,4 +94,64 @@
   .par-meta-grid {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* PAR draft table */
+.par-draft-table-wrap {
+  overflow-x: auto;
+}
+
+.par-draft-table {
+  table-layout: fixed;
+  width: 100%;
+  min-width: 900px;
+}
+
+.par-draft-no-col    { width: 4%; text-align: left; padding: 0 6px; }
+.par-draft-item-col  { width: 20%; text-align: left; }
+.par-draft-qty-col   { width: 7%; text-align: left; }
+.par-draft-unit-col  { width: 9%; text-align: left; }
+.par-draft-cost-col  { width: 10%; text-align: left; }
+.par-draft-total-col { width: 10%; text-align: left; }
+.par-draft-desc-col  { width: 18%; text-align: left; }
+.par-draft-photo-col { width: 12%; text-align: left; }
+.par-draft-action-col { width: 6%; text-align: left; padding: 0 8px; }
+
+.par-draft-select,
+.par-draft-qty-input,
+.par-draft-desc-input {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+.par-draft-readonly {
+  color: #374151;
+  font-size: 13px;
+  white-space: nowrap;
+  padding: 0 8px;
+}
+
+.par-draft-photo-button {
+  padding: 4px 8px;
+  font-size: 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: #f9fafb;
+  color: #374151;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.par-draft-photo-button:hover {
+  background: #f3f4f6;
+}
+
+.par-draft-photo-preview {
+  width: 40px;
+  height: 40px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid #d1d5db;
+  cursor: pointer;
 }

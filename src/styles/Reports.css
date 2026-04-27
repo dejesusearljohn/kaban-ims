@@ -117,6 +117,8 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  margin-top: auto;
+  align-self: flex-end;
 }
 
 .reports-print-button:disabled {

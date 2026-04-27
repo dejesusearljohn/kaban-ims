@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { QRCodeSVG } from 'qrcode.react'
+import { QRCodeCanvas } from 'qrcode.react'
 import {
   Bar,
   BarChart,
@@ -20,7 +20,7 @@ import InventorySection from './InventorySection'
 import StockpileSection from './StockpileSection'
 import WmrSection from './WmrSection'
 import VehiclesSection from './VehiclesSection'
-import ParSection from './ParSection'
+import ParSection, { type ParDraftItem } from './ParSection'
 import ReportsSection, { type ReportPeriod } from './ReportsSection'
 import type { SidebarSection } from './Sidebar'
 import '../styles/DashboardPage.css'
@@ -50,7 +50,7 @@ type DepartmentOverview = {
 
 type InventoryRow = Tables<'inventory'>
 type InventoryPhotoRow = Tables<'inventory_photos'>
-type StockpileRow = Tables<'stockpile'>
+type StockpileRow = Tables<'stockpile'> & { status?: string | null }
 type DistributionLogRow = Tables<'distribution_logs'>
 type WmrReportRow = Tables<'wmr_reports'>
 type ParRecordRow = Tables<'par_records'>
@@ -65,6 +65,70 @@ type StockpileReleaseLog = {
   quantity: number
 }
 
+type StockpileReleaseDraftItem = {
+  stockpileId: string
+  quantity: string
+}
+
+type ArchiveModalConfig = {
+  kind: 'inventory' | 'department' | 'staff' | 'vehicle' | 'wmr' | 'par'
+  title: string
+  text: string
+  subtext: string
+  onConfirm: () => Promise<void> | void
+}
+
+const STAFF_PAGE_SIZE = 5
+const DEPARTMENT_PAGE_SIZE = 10
+
+const getVisiblePageNumbers = (currentPage: number, totalPages: number, maxVisiblePages = 5) => {
+  if (totalPages <= maxVisiblePages) {
+    return Array.from({ length: totalPages }, (_, index) => index + 1)
+  }
+
+  const halfWindow = Math.floor(maxVisiblePages / 2)
+  let start = Math.max(1, currentPage - halfWindow)
+  let end = Math.min(totalPages, start + maxVisiblePages - 1)
+
+  if (end - start + 1 < maxVisiblePages) {
+    start = Math.max(1, end - maxVisiblePages + 1)
+  }
+
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+}
+
+const mapInventoryItemToStockpileRow = (item: InventoryRow): StockpileRow => ({
+  stockpile_id: item.item_id,
+  item_name: item.item_name,
+  category: item.acquisition_mode,
+  quantity_on_hand: item.quantity,
+  unit_of_measure: item.unit_of_measure,
+  packed_date: item.date_acquired,
+  expiration_date: item.expiration_date,
+  archived_at: null,
+  is_archived: false,
+  status: item.status,
+  uid: item.uid,
+})
+
+const useAutoDismissMessage = (
+  message: string | null,
+  clearMessage: () => void,
+  delay = 5000,
+) => {
+  useEffect(() => {
+    if (!message) return
+
+    const timeoutId = window.setTimeout(() => {
+      clearMessage()
+    }, delay)
+
+    return () => {
+      window.clearTimeout(timeoutId)
+    }
+  }, [message, clearMessage, delay])
+}
+
 const DEFAULT_ITEM_TYPES = [
   'Office Equipment',
   'Water Equipment',
@@ -75,10 +139,23 @@ const DEFAULT_ITEM_TYPES = [
   'Hand Tools',
   'Furniture',
   'Vehicle',
+  'Stockpile',
   'Gadgets',
   'Medicine',
   'Perishables',
 ]
+
+const isLoanableParItem = (item: InventoryRow) => {
+  const normalizedType = item.item_type.trim().toLowerCase()
+  const isEquipment = normalizedType.includes('equipment') && normalizedType !== 'office equipment'
+
+  return (
+    isEquipment ||
+    normalizedType === 'hand tools' ||
+    normalizedType === 'power tools' ||
+    normalizedType === 'gadgets'
+  )
+}
 
 const DEFAULT_UNITS_OF_MEASURE = [
   'Piece(s)',
@@ -95,21 +172,6 @@ const DEFAULT_UNITS_OF_MEASURE = [
   'Meter',
 ]
 
-const DEFAULT_STOCKPILE_CATEGORIES = [
-  'Food Packs',
-  'Drinking Water',
-  'Medicines & First Aid',
-  'Hygiene & Sanitation',
-  'Shelter & Sleeping Kits',
-  'Infant Care',
-  'Senior & PWD Support',
-  'Emergency Tools & Equipment',
-  'PPE & Protective Gear',
-  'Rescue & Evacuation Supplies',
-  'Communication & Power',
-  'Non-Food Relief Items',
-]
-
 const INVENTORY_PHOTO_BUCKET = 'inventory-photos'
 const TYPE_CHART_COLORS = ['#059669', '#0284c7', '#d97706', '#7c3aed', '#e11d48']
 const STOCKPILE_STATUS_COLORS: Record<string, string> = {
@@ -120,6 +182,48 @@ const STOCKPILE_STATUS_COLORS: Record<string, string> = {
 }
 
 const DEFAULT_STAFF_INITIAL_PASSWORD = '123456'
+
+const parseFullName = (fullName: string) => {
+  const normalizedName = fullName.trim().replace(/\s+/g, ' ')
+
+  if (!normalizedName) {
+    return { firstName: '', lastName: '' }
+  }
+
+  const nameParts = normalizedName.split(' ')
+
+  if (nameParts.length === 1) {
+    return { firstName: nameParts[0], lastName: '' }
+  }
+
+  if (nameParts.length === 2) {
+    return { firstName: nameParts[0], lastName: nameParts[1] }
+  }
+
+  const lowerParts = nameParts.map((part) => part.toLowerCase())
+  const twoWordSurnamePrefixes = new Set(['de', 'del', 'dela', 'de la', 'de los', 'de las', 'da', 'dos', 'das'])
+  const penultimate = lowerParts[lowerParts.length - 2]
+  const antepenultimate = lowerParts[lowerParts.length - 3]
+
+  if (antepenultimate === 'de' && (penultimate === 'la' || penultimate === 'los' || penultimate === 'las')) {
+    return {
+      firstName: nameParts.slice(0, -3).join(' '),
+      lastName: nameParts.slice(-3).join(' '),
+    }
+  }
+
+  if (twoWordSurnamePrefixes.has(penultimate)) {
+    return {
+      firstName: nameParts.slice(0, -2).join(' '),
+      lastName: nameParts.slice(-2).join(' '),
+    }
+  }
+
+  return {
+    firstName: nameParts.slice(0, -1).join(' '),
+    lastName: nameParts.slice(-1).join(' '),
+  }
+}
 
 function DashboardPage() {
   // [STATE] Navigation and dashboard overview
@@ -135,6 +239,7 @@ function DashboardPage() {
   const [departments, setDepartments] = useState<DepartmentOverview[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [realtimeTick, setRealtimeTick] = useState(0)
   const [newDepartmentName, setNewDepartmentName] = useState('')
   const [newDepartmentCode, setNewDepartmentCode] = useState('')
   const [addingDepartment, setAddingDepartment] = useState(false)
@@ -144,30 +249,44 @@ function DashboardPage() {
   const [departmentError, setDepartmentError] = useState<string | null>(null)
   const [departmentSuccess, setDepartmentSuccess] = useState<string | null>(null)
   const [currentAdminName, setCurrentAdminName] = useState('Super Admin')
+  const [currentAdminPosition, setCurrentAdminPosition] = useState('')
+  const [currentAdminFirstName, setCurrentAdminFirstName] = useState('')
+  const [currentAdminLastName, setCurrentAdminLastName] = useState('')
+  const [currentUserRole, setCurrentUserRole] = useState('')
   const [settingsProfileLoading, setSettingsProfileLoading] = useState(false)
   const [settingsUserId, setSettingsUserId] = useState<string | null>(null)
-  const [settingsEmail, setSettingsEmail] = useState('')
   const [settingsStaffId, setSettingsStaffId] = useState('')
   const [settingsNameInput, setSettingsNameInput] = useState('')
+  const [settingsFirstNameInput, setSettingsFirstNameInput] = useState('')
+  const [settingsLastNameInput, setSettingsLastNameInput] = useState('')
   const [settingsPositionInput, setSettingsPositionInput] = useState('')
   const [settingsNameSaving, setSettingsNameSaving] = useState(false)
   const [settingsPasswordInput, setSettingsPasswordInput] = useState('')
   const [settingsConfirmPasswordInput, setSettingsConfirmPasswordInput] = useState('')
   const [settingsPasswordSaving, setSettingsPasswordSaving] = useState(false)
+  const [settingsTab, setSettingsTab] = useState<'profile' | 'archive'>('profile')
+  const [archiveTableSelector, setArchiveTableSelector] = useState<
+    'inventory' | 'wmr' | 'par' | 'vehicles' | 'staff' | 'departments'
+  >('inventory')
   const [settingsSuccessMessage, setSettingsSuccessMessage] = useState<string | null>(null)
   const [settingsErrorMessage, setSettingsErrorMessage] = useState<string | null>(null)
   const [staffDepartmentFilter, setStaffDepartmentFilter] = useState('all')
+  const [staffPage, setStaffPage] = useState(1)
+  const [departmentPage, setDepartmentPage] = useState(1)
   const [departmentStaffMode, setDepartmentStaffMode] = useState<
     'add-staff' | 'add-department' | 'manage-staff' | 'manage-department'
   >('manage-staff')
   const [staffFormMode, setStaffFormMode] = useState<'add' | 'edit'>('add')
   const [staffFormTargetId, setStaffFormTargetId] = useState<string | null>(null)
   const [staffFormDepartmentId, setStaffFormDepartmentId] = useState('')
-  const [staffFormName, setStaffFormName] = useState('')
+  const [staffFormLastName, setStaffFormLastName] = useState('')
+  const [staffFormFirstName, setStaffFormFirstName] = useState('')
   const [staffFormStaffId, setStaffFormStaffId] = useState('')
   const [staffFormPosition, setStaffFormPosition] = useState('')
   const [staffFormRole, setStaffFormRole] = useState('Staff')
   const [staffFormContact, setStaffFormContact] = useState('')
+  const [staffFormEmergencyContact, setStaffFormEmergencyContact] = useState('')
+  const [staffFormRecoveryEmail, setStaffFormRecoveryEmail] = useState('')
   const [staffSaving, setStaffSaving] = useState(false)
   const [staffUpdatingId, setStaffUpdatingId] = useState<string | null>(null)
   const [staffError, setStaffError] = useState<string | null>(null)
@@ -176,16 +295,44 @@ function DashboardPage() {
 
   const normalizeStaffRole = (role: string | null | undefined) => {
     const trimmedRole = role?.trim() || 'Staff'
-    if (trimmedRole.toLowerCase() === 'staff') {
+    const normalizedRole = trimmedRole.toLowerCase()
+
+    if (normalizedRole === 'staff') {
       return 'Staff'
     }
-    return trimmedRole.toLowerCase() === 'admin' || trimmedRole.toLowerCase() === 'super admin'
-      ? 'Super Admin'
-      : trimmedRole
+
+    if (normalizedRole === 'admin') {
+      return 'Admin'
+    }
+
+    if (normalizedRole === 'super admin') {
+      return 'Super Admin'
+    }
+
+    return trimmedRole
   }
 
-  const mapStaffRoleToOption = (role: string | null | undefined) =>
-    normalizeStaffRole(role) === 'Super Admin' ? 'Admin' : 'Staff'
+  const mapStaffRoleToOption = (role: string | null | undefined) => {
+    const normalizedRole = normalizeStaffRole(role)
+    if (normalizedRole === 'Super Admin') return 'Super Admin'
+    if (normalizedRole === 'Admin') return 'Admin'
+    return 'Staff'
+  }
+
+  const isSuperAdminRole = (role: string | null | undefined) =>
+    normalizeStaffRole(role) === 'Super Admin'
+
+  const isCurrentUserAdmin = normalizeStaffRole(currentUserRole) === 'Admin'
+  const isCurrentUserSuperAdmin = normalizeStaffRole(currentUserRole) === 'Super Admin'
+  const canEditUser = (user: UserRow) => !(isCurrentUserAdmin && isSuperAdminRole(user.role))
+
+  useAutoDismissMessage(error, () => setError(null))
+  useAutoDismissMessage(departmentError, () => setDepartmentError(null))
+  useAutoDismissMessage(departmentSuccess, () => setDepartmentSuccess(null))
+  useAutoDismissMessage(settingsErrorMessage, () => setSettingsErrorMessage(null))
+  useAutoDismissMessage(settingsSuccessMessage, () => setSettingsSuccessMessage(null))
+  useAutoDismissMessage(staffError, () => setStaffError(null))
+  useAutoDismissMessage(staffSuccess, () => setStaffSuccess(null))
 
   const buildStaffEmail = (staffId: string) => {
     const normalizedStaffId = staffId.trim().toLowerCase().replace(/\s+/g, '')
@@ -216,13 +363,14 @@ function DashboardPage() {
     return `${departmentCode}${String(nextNumber).padStart(3, '0')}`
   }
 
+  const DEPT_CODE_SKIP_WORDS = new Set(['AND', 'OF', 'THE', 'FOR', 'IN', 'AT', 'BY', 'TO', 'A', 'AN'])
   const buildDepartmentCode = (departmentName: string) =>
     departmentName
       .trim()
       .toUpperCase()
       .replace(/[^A-Z0-9 ]/g, '')
       .split(/\s+/)
-      .filter((part) => part.length > 0)
+      .filter((part) => part.length > 0 && !DEPT_CODE_SKIP_WORDS.has(part))
       .map((part) => part[0])
       .join('')
       .slice(0, 8)
@@ -233,11 +381,13 @@ function DashboardPage() {
   const [inventoryError, setInventoryError] = useState<string | null>(null)
   const [newItemName, setNewItemName] = useState('')
   const [newItemType, setNewItemType] = useState('')
+  const [newCondition, setNewCondition] = useState('')
   const [newItemDepartmentId, setNewItemDepartmentId] = useState('')
   const [newQuantity, setNewQuantity] = useState('')
   const [newUnitOfMeasure, setNewUnitOfMeasure] = useState('')
   const [newUnitCost, setNewUnitCost] = useState('')
   const [newDateAcquired, setNewDateAcquired] = useState('')
+  const [newExpirationDate, setNewExpirationDate] = useState('')
   const [newSource, setNewSource] = useState('')
   const [newPhotoFiles, setNewPhotoFiles] = useState<File[]>([])
   const [addingItem, setAddingItem] = useState(false)
@@ -246,6 +396,7 @@ function DashboardPage() {
   const [wmrSearchQuery, setWmrSearchQuery] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
   const [departmentFilter, setDepartmentFilter] = useState('all')
+  const [sourceFilter, setSourceFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
   const [wmrTypeFilter, setWmrTypeFilter] = useState('all')
   const [wmrDepartmentFilter, setWmrDepartmentFilter] = useState('all')
@@ -261,9 +412,10 @@ function DashboardPage() {
   const [editExpirationDate, setEditExpirationDate] = useState('')
   const [editSource, setEditSource] = useState('')
   const [editStatus, setEditStatus] = useState('')
+  const [editCondition, setEditCondition] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editDeleting, setEditDeleting] = useState(false)
-  const [deleteTargetItem, setDeleteTargetItem] = useState<InventoryRow | null>(null)
+  const [archiveModalConfig, setArchiveModalConfig] = useState<ArchiveModalConfig | null>(null)
   const [viewImageItem, setViewImageItem] = useState<InventoryRow | null>(null)
   const [viewImageIndex, setViewImageIndex] = useState(0)
   const [viewQrItem, setViewQrItem] = useState<InventoryRow | null>(null)
@@ -339,23 +491,21 @@ function DashboardPage() {
   const [stockpileItems, setStockpileItems] = useState<StockpileRow[]>([])
   const [stockpileLoading, setStockpileLoading] = useState(false)
   const [stockpileError, setStockpileError] = useState<string | null>(null)
-  const [stockpileMode, setStockpileMode] = useState<'list' | 'add' | 'logs' | 'expired'>('list')
-  const [newStockpileItemName, setNewStockpileItemName] = useState('')
-  const [newStockpileCategory, setNewStockpileCategory] = useState('')
-  const [newStockpileQuantity, setNewStockpileQuantity] = useState('')
-  const [newStockpileUnitOfMeasure, setNewStockpileUnitOfMeasure] = useState('')
-  const [newStockpilePackedDate, setNewStockpilePackedDate] = useState('')
-  const [newStockpileExpirationDate, setNewStockpileExpirationDate] = useState('')
-  const [addingStockpile, setAddingStockpile] = useState(false)
-  const [stockpileSearchQuery, setStockpileSearchQuery] = useState('')
-  const [stockpileCategoryFilter, setStockpileCategoryFilter] = useState('all')
+  const [stockpileMode, setStockpileMode] = useState<'list' | 'logs' | 'expired' | 'release'>('list')
   const [stockpileReleaseLogs, setStockpileReleaseLogs] = useState<DistributionLogRow[]>([])
   const [stockpileReleaseLoading, setStockpileReleaseLoading] = useState(false)
-  const [activeReleaseStockpile, setActiveReleaseStockpile] = useState<StockpileRow | null>(null)
-  const [releaseQtyInput, setReleaseQtyInput] = useState('')
-  const [releaseIssuedToInput, setReleaseIssuedToInput] = useState('')
-  const [releaseReasonInput, setReleaseReasonInput] = useState('')
+  const [stockpileReleaseItems, setStockpileReleaseItems] = useState<StockpileReleaseDraftItem[]>([
+    { stockpileId: '', quantity: '' },
+  ])
+  const [stockpileReleaseIssuedToInput, setStockpileReleaseIssuedToInput] = useState('')
+  const [stockpileReleaseReasonInput, setStockpileReleaseReasonInput] = useState('')
   const [releasingStockpile, setReleasingStockpile] = useState(false)
+
+  useAutoDismissMessage(inventoryError, () => setInventoryError(null))
+  useAutoDismissMessage(wmrError, () => setWmrError(null))
+  useAutoDismissMessage(parError, () => setParError(null))
+  useAutoDismissMessage(vehicleError, () => setVehicleError(null))
+  useAutoDismissMessage(stockpileError, () => setStockpileError(null))
 
   const resetDepartmentForm = () => {
     setDepartmentFormMode('add')
@@ -424,7 +574,7 @@ function DashboardPage() {
                   }
                 : dept,
             )
-            .sort((a, b) => a.id - b.id),
+            .sort((a, b) => b.id - a.id),
         )
       }
 
@@ -454,7 +604,7 @@ function DashboardPage() {
 
     if (data) {
       setDepartments((prev) =>
-        [...prev, { id: data.id, name: data.dept_name, code: data.dept_code, totalItems: 0, serviceable: 0, unserviceable: 0, staffCount: 0, onlineCount: 0 }].sort((a, b) => a.id - b.id),
+        [...prev, { id: data.id, name: data.dept_name, code: data.dept_code, totalItems: 0, serviceable: 0, unserviceable: 0, staffCount: 0, onlineCount: 0 }].sort((a, b) => b.id - a.id),
       )
     }
 
@@ -463,26 +613,18 @@ function DashboardPage() {
     setAddingDepartment(false)
   }
 
-  const handleDeleteDepartment = async (department: DepartmentOverview) => {
-    if (typeof window !== 'undefined') {
-      const proceed = window.confirm(
-        `Delete ${department.name}? This only works if no staff or inventory items are linked to this department.`,
-      )
-      if (!proceed) return
-    }
-
+  const handleArchiveDepartment = async (department: DepartmentOverview) => {
     setDepartmentUpdatingId(department.id)
     setDepartmentError(null)
     setDepartmentSuccess(null)
 
-    const { error: deleteError } = await supabase.from('departments').delete().eq('id', department.id)
+    const { error: archiveError } = await supabase
+      .from('departments')
+      .update({ is_archived: true, archived_at: new Date().toISOString() } as never)
+      .eq('id', department.id)
 
-    if (deleteError) {
-      if (deleteError.code === '23503') {
-        setDepartmentError('Cannot delete this department because it is still assigned to staff or inventory items.')
-      } else {
-        setDepartmentError(deleteError.message)
-      }
+    if (archiveError) {
+      setDepartmentError(archiveError.message)
       setDepartmentUpdatingId(null)
       return
     }
@@ -497,8 +639,9 @@ function DashboardPage() {
       resetDepartmentForm()
     }
 
-    setDepartmentSuccess('Department deleted successfully.')
+    setDepartmentSuccess('Department archived successfully.')
     setDepartmentUpdatingId(null)
+    setArchiveModalConfig(null)
   }
 
   // [EFFECTS] Initial data loading
@@ -510,8 +653,16 @@ function DashboardPage() {
       try {
         const [totalRes, serviceableRes, unserviceableRes, expiredRes] = await Promise.all([
           supabase.from('inventory').select('*', { count: 'exact', head: true }),
-          supabase.from('inventory').select('*', { count: 'exact', head: true }).eq('status', 'Serviceable'),
-          supabase.from('inventory').select('*', { count: 'exact', head: true }).eq('status', 'Unserviceable'),
+          supabase
+            .from('inventory')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'Serviceable')
+            .neq('item_type', 'Stockpile'),
+          supabase
+            .from('inventory')
+            .select('*', { count: 'exact', head: true })
+            .eq('status', 'Unserviceable')
+            .neq('item_type', 'Stockpile'),
           supabase.from('inventory').select('*', { count: 'exact', head: true }).eq('status', 'Expired'),
         ])
 
@@ -529,7 +680,7 @@ function DashboardPage() {
         const { data: deptRows, error: deptError } = await supabase
           .from('departments')
           .select('id, dept_name, dept_code')
-          .order('id', { ascending: true })
+          .order('id', { ascending: false })
 
         if (deptError) throw deptError
 
@@ -545,12 +696,14 @@ function DashboardPage() {
               .from('inventory')
               .select('*', { count: 'exact', head: true })
               .eq('department_id', dept.id)
-              .eq('status', 'Serviceable'),
+              .eq('status', 'Serviceable')
+              .neq('item_type', 'Stockpile'),
             supabase
               .from('inventory')
               .select('*', { count: 'exact', head: true })
               .eq('department_id', dept.id)
-              .eq('status', 'Unserviceable'),
+              .eq('status', 'Unserviceable')
+              .neq('item_type', 'Stockpile'),
             supabase
               .from('users')
               .select('*', { count: 'exact', head: true })
@@ -600,7 +753,7 @@ function DashboardPage() {
     }
 
     void fetchDashboardData()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchInventory = async () => {
@@ -608,7 +761,7 @@ function DashboardPage() {
       setInventoryError(null)
 
       const { data, error: invError } = await supabase.from('inventory').select('*').order('item_id', {
-        ascending: true,
+        ascending: false,
       })
 
       if (invError) {
@@ -621,7 +774,7 @@ function DashboardPage() {
     }
 
     void fetchInventory()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchWmrReports = async () => {
@@ -643,7 +796,7 @@ function DashboardPage() {
     }
 
     void fetchWmrReports()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchInventoryPhotos = async () => {
@@ -660,7 +813,7 @@ function DashboardPage() {
     }
 
     void fetchInventoryPhotos()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     if (viewImageItem) {
@@ -689,13 +842,14 @@ function DashboardPage() {
     }
 
     void fetchParRecords()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchParUsers = async () => {
       const { data, error: parUsersError } = await supabase
         .from('users')
         .select('*')
+        .neq('role', 'Super Admin')
         .order('full_name', { ascending: true })
 
       if (parUsersError) {
@@ -706,7 +860,7 @@ function DashboardPage() {
     }
 
     void fetchParUsers()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchSettingsProfile = async () => {
@@ -734,7 +888,7 @@ function DashboardPage() {
 
       const { data: userRow, error: userRowError } = await supabase
         .from('users')
-        .select('id, full_name, email, staff_id, position')
+        .select('id, full_name, email, staff_id, position, role')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -742,10 +896,17 @@ function DashboardPage() {
         setSettingsErrorMessage(userRowError.message)
       } else {
         setSettingsNameInput(userRow?.full_name ?? '')
-        setSettingsEmail(userRow?.email ?? user.email ?? '')
+        const rawFullName = userRow?.full_name ?? ''
+        const parsedName = parseFullName(rawFullName)
+        setSettingsFirstNameInput(parsedName.firstName)
+        setSettingsLastNameInput(parsedName.lastName)
         setSettingsStaffId(userRow?.staff_id ?? '')
         setSettingsPositionInput(userRow?.position ?? '')
-        setCurrentAdminName(userRow?.full_name?.trim() || 'Super Admin')
+        setCurrentAdminPosition(userRow?.position ?? '')
+        setCurrentAdminName(userRow?.full_name?.trim() || 'Admin')
+        setCurrentAdminFirstName(parsedName.firstName)
+        setCurrentAdminLastName(parsedName.lastName)
+        setCurrentUserRole(userRow?.role ?? '')
       }
 
       setSettingsProfileLoading(false)
@@ -761,7 +922,7 @@ function DashboardPage() {
 
       const [{ data: vehicleRows, error: vehiclesFetchError }, { data: repairRows, error: repairsFetchError }] =
         await Promise.all([
-          supabase.from('vehicles').select('*').order('id', { ascending: true }),
+          supabase.from('vehicles').select('*').order('id', { ascending: false }),
           supabase.from('vehicle_repairs').select('*').order('repair_id', { ascending: false }),
         ])
 
@@ -776,7 +937,7 @@ function DashboardPage() {
     }
 
     void fetchVehiclesData()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchStockpiles = async () => {
@@ -784,21 +945,22 @@ function DashboardPage() {
       setStockpileError(null)
 
       const { data, error: stockpileFetchError } = await supabase
-        .from('stockpile')
+        .from('inventory')
         .select('*')
-        .order('stockpile_id', { ascending: true })
+        .eq('item_type', 'Stockpile')
+        .order('item_id', { ascending: false })
 
       if (stockpileFetchError) {
         setStockpileError(stockpileFetchError.message)
       } else {
-        setStockpileItems(data ?? [])
+        setStockpileItems((data ?? []).map(mapInventoryItemToStockpileRow))
       }
 
       setStockpileLoading(false)
     }
 
     void fetchStockpiles()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     const fetchStockpileReleaseLogs = async () => {
@@ -819,7 +981,7 @@ function DashboardPage() {
     }
 
     void fetchStockpileReleaseLogs()
-  }, [])
+  }, [realtimeTick])
 
   useEffect(() => {
     if (!parItemId) {
@@ -838,11 +1000,46 @@ function DashboardPage() {
     setParUnitInput(selectedItem.unit_of_measure ?? '')
     setParDescriptionInput(selectedItem.item_name ?? '')
     setParPropertyNoInput(
-      selectedItem.property_no ?? selectedItem.qr_code ?? `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
+      selectedItem.property_no ?? `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
     )
     setParDateAcquiredInput(selectedItem.date_acquired ?? '')
     setParCostInput(selectedItem.unit_cost != null ? String(selectedItem.unit_cost) : '')
   }, [parItemId, inventoryItems])
+
+  // [EFFECTS] Realtime background refresh
+  useEffect(() => {
+    const channel = supabase
+      .channel('realtime-dashboard')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'wmr_reports' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_repairs' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'par_records' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'distribution_logs' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_photos' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
+  }, [])
 
   // [HELPERS] Formatting and utility functions
   const formatValue = (value: number) => (loading ? '—' : value.toString())
@@ -875,6 +1072,26 @@ function DashboardPage() {
       day: '2-digit',
     })
   }
+  const formatInventoryDate = (value: string | null | undefined) => {
+    if (!value) return '—'
+
+    const trimmed = value.trim()
+    const dateOnlyMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed)
+
+    const parsedDate = dateOnlyMatch
+      ? new Date(Number(dateOnlyMatch[1]), Number(dateOnlyMatch[2]) - 1, Number(dateOnlyMatch[3]))
+      : new Date(trimmed)
+
+    if (Number.isNaN(parsedDate.getTime())) {
+      return value
+    }
+
+    const year = parsedDate.getFullYear()
+    const month = String(parsedDate.getMonth() + 1).padStart(2, '0')
+    const day = String(parsedDate.getDate()).padStart(2, '0')
+
+    return `${year}/${month}/${day}`
+  }
   const parseNumericInput = (value: string) => {
     const parsed = value.trim() ? Number(value) : null
     return parsed != null && Number.isFinite(parsed) ? parsed : null
@@ -890,6 +1107,33 @@ function DashboardPage() {
       : new Date(trimmed)
 
     return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
+  }
+  const getInventoryStatus = (item: InventoryRow) => {
+    const explicitStatus = item.status?.trim() || null
+    if (explicitStatus === 'Archived') return 'Archived'
+
+    if (item.item_type.trim().toLowerCase() === 'stockpile') {
+      const expirationDate = parseDateLikeValue(item.expiration_date)
+      const now = new Date()
+      now.setHours(0, 0, 0, 0)
+
+      if (expirationDate) {
+        expirationDate.setHours(0, 0, 0, 0)
+        return expirationDate < now ? 'Expired' : 'Valid'
+      }
+
+      return 'Valid'
+    }
+
+    return explicitStatus
+  }
+  const isArchivedRow = (row: unknown) => {
+    if (!row || typeof row !== 'object') return false
+
+    const statusValue = (row as { status?: string | null }).status
+    if ((statusValue ?? '').trim() === 'Archived') return true
+
+    return (row as { is_archived?: boolean | null }).is_archived === true
   }
   const getReportPeriodBounds = (period: ReportPeriod) => {
     const now = new Date()
@@ -1038,6 +1282,7 @@ function DashboardPage() {
         .map((type) => [type.toLowerCase(), type] as const),
     ).values(),
   ).sort((a, b) => a.localeCompare(b))
+  const loanableParItems = inventoryItems.filter(isLoanableParItem)
   const unitOfMeasureOptions = Array.from(
     new Map(
       [
@@ -1053,20 +1298,20 @@ function DashboardPage() {
   const dynamicStatusOptions = Array.from(
     new Set(
       inventoryItems
-        .map((item) => item.status)
+        .map((item) => getInventoryStatus(item))
         .filter((s): s is string => !!s)
         .filter((status) => status.trim() !== 'Archived'),
     ),
   )
   const statusOptions = Array.from(
-    new Set<string>(['Serviceable', 'Unserviceable', ...dynamicStatusOptions]),
+    new Set<string>(['Serviceable', 'Unserviceable', 'Valid', 'Expired', ...dynamicStatusOptions]),
   ).sort()
   const acquisitionModeOptions = Array.from(
-    new Set(inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)),
+    new Set(['Purchased', 'Donated', ...inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)]),
   ).sort()
 
-  const wasteInventoryItems = inventoryItems.filter((item) => item.status?.trim() === 'Unserviceable')
-  const vehicleWmrReports = wmrReports.filter((report) => report.item_id == null)
+  const wasteInventoryItems = inventoryItems.filter((item) => getInventoryStatus(item) === 'Unserviceable')
+  const vehicleWmrReports = wmrReports.filter((report) => report.item_id == null && !isArchivedRow(report))
 
   const filteredWasteItems = wasteInventoryItems.filter((item) => {
     const reportId = `WMR-${item.item_id.toString().padStart(3, '0')}`
@@ -1141,9 +1386,10 @@ function DashboardPage() {
   })
 
   const combinedFilteredWmrCount = filteredWasteItems.length + filteredVehicleWmrReports.length
+  const activeVehicles = vehicles.filter((vehicle) => !isArchivedRow(vehicle))
 
   const filteredInventoryItems = inventoryItems.filter((item) => {
-    if ((item.status ?? '').trim() === 'Archived') {
+    if (getInventoryStatus(item) === 'Archived') {
       return false
     }
 
@@ -1158,21 +1404,78 @@ function DashboardPage() {
     const matchesDepartment =
       departmentFilter === 'all' || (item.department_id !== null && String(item.department_id) === departmentFilter)
 
-    const matchesStatus = statusFilter === 'all' || item.status === statusFilter
+    const matchesSource =
+      sourceFilter === 'all' || (item.acquisition_mode ?? '').trim() === sourceFilter
 
-    return matchesSearch && matchesType && matchesDepartment && matchesStatus
-  })
+    const derivedStatus = getInventoryStatus(item)
+    const matchesStatus = statusFilter === 'all' || derivedStatus === statusFilter
 
-  const archivedInventoryItems = inventoryItems.filter((item) => (item.status ?? '').trim() === 'Archived')
+    return matchesSearch && matchesType && matchesDepartment && matchesSource && matchesStatus
+  }).sort((a, b) => b.item_id - a.item_id)
+
+  const archivedInventoryItems = inventoryItems.filter((item) => getInventoryStatus(item) === 'Archived')
+  const archivedWmrReports = wmrReports
+    .filter((report) => isArchivedRow(report) || (report.status ?? '').trim() === 'Archived')
+    .slice()
+    .sort((a, b) => b.report_id - a.report_id)
+  const archivedParRecords = parRecords
+    .filter((record) => isArchivedRow(record))
+    .slice()
+    .sort((a, b) => b.par_id - a.par_id)
+  const archivedVehicles = vehicles
+    .filter((vehicle) => isArchivedRow(vehicle))
+    .slice()
+    .sort((a, b) => b.id - a.id)
+  const archivedStaff = parUsers
+    .filter((user) => isArchivedRow(user))
+    .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
+    .slice()
+    .sort((a, b) => {
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+      const safeATime = Number.isNaN(aTime) ? 0 : aTime
+      const safeBTime = Number.isNaN(bTime) ? 0 : bTime
+      return safeBTime - safeATime
+    })
+  const archivedDepartments = departments
+    .filter((department) => {
+      const departmentRow = (department as unknown as { is_archived?: boolean | null })
+      return departmentRow.is_archived === true
+    })
+    .slice()
+    .sort((a, b) => b.id - a.id)
+  const showArchiveTable = (tableKey: 'inventory' | 'wmr' | 'par' | 'vehicles' | 'staff' | 'departments') =>
+    archiveTableSelector === tableKey
   const filteredDepartmentStaff = parUsers
+    .filter((user) => !isArchivedRow(user))
     .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
     .filter((user) => {
       if (staffDepartmentFilter === 'all') return true
       return user.department_id != null && String(user.department_id) === staffDepartmentFilter
     })
-    .sort((a, b) => (a.full_name ?? '').localeCompare(b.full_name ?? ''))
+    .sort((a, b) => {
+      const aTime = a.created_at ? new Date(a.created_at).getTime() : 0
+      const bTime = b.created_at ? new Date(b.created_at).getTime() : 0
+      const safeATime = Number.isNaN(aTime) ? 0 : aTime
+      const safeBTime = Number.isNaN(bTime) ? 0 : bTime
+      return safeBTime - safeATime
+    })
+  const staffTotalPages = Math.max(1, Math.ceil(filteredDepartmentStaff.length / STAFF_PAGE_SIZE))
+  const paginatedDepartmentStaff = filteredDepartmentStaff.slice(
+    (staffPage - 1) * STAFF_PAGE_SIZE,
+    (staffPage - 1) * STAFF_PAGE_SIZE + STAFF_PAGE_SIZE,
+  )
+  const visibleStaffPageNumbers = getVisiblePageNumbers(staffPage, staffTotalPages)
+
+  const departmentTotalPages = Math.max(1, Math.ceil(departments.length / DEPARTMENT_PAGE_SIZE))
+  const paginatedDepartments = departments.slice(
+    (departmentPage - 1) * DEPARTMENT_PAGE_SIZE,
+    (departmentPage - 1) * DEPARTMENT_PAGE_SIZE + DEPARTMENT_PAGE_SIZE,
+  )
+  const visibleDepartmentPageNumbers = getVisiblePageNumbers(departmentPage, departmentTotalPages)
 
   const departmentStaffCountMap = parUsers
+    .filter((user) => !isArchivedRow(user))
     .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
     .reduce((acc, user) => {
       if (user.department_id == null) return acc
@@ -1181,6 +1484,34 @@ function DashboardPage() {
     }, new Map<number, number>())
 
   const today = new Date()
+
+  useEffect(() => {
+    if (departmentStaffMode !== 'manage-staff') {
+      return
+    }
+
+    setStaffPage(1)
+  }, [departmentStaffMode, staffDepartmentFilter])
+
+  useEffect(() => {
+    if (staffPage > staffTotalPages) {
+      setStaffPage(staffTotalPages)
+    }
+  }, [staffPage, staffTotalPages])
+
+  useEffect(() => {
+    if (departmentStaffMode !== 'manage-department') {
+      return
+    }
+
+    setDepartmentPage(1)
+  }, [departmentStaffMode])
+
+  useEffect(() => {
+    if (departmentPage > departmentTotalPages) {
+      setDepartmentPage(departmentTotalPages)
+    }
+  }, [departmentPage, departmentTotalPages])
   const stockpileStatusCountMap = stockpileItems.reduce((acc, item) => {
     const quantity = Number(item.quantity_on_hand ?? 0)
     const expiration = item.expiration_date ? new Date(item.expiration_date) : null
@@ -1210,6 +1541,11 @@ function DashboardPage() {
   // Reflect both inventory-expired and stockpile-expired totals on the dashboard metric.
   const dashboardExpiredCount = summary.expired + (stockpileStatusCountMap.get('Expired') ?? 0)
 
+  const purchasedCount = inventoryItems.filter(
+    (item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'purchased',
+  ).length
+  const donatedCount = inventoryItems.filter((item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'donated').length
+
   const itemTypeCountMap = inventoryItems.reduce((acc, item) => {
     const type = item.item_type.trim()
     if (!type) return acc
@@ -1222,7 +1558,9 @@ function DashboardPage() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 5)
 
-  const groupedParByStaff = parRecords.reduce(
+  const groupedParByStaff = parRecords
+    .filter((record) => !isArchivedRow(record))
+    .reduce(
     (acc, record) => {
       if (!record.issued_to_id) return acc
 
@@ -1235,8 +1573,8 @@ function DashboardPage() {
 
       return acc
     },
-    new Map<string, ParRecordRow[]>(),
-  )
+      new Map<string, ParRecordRow[]>(),
+    )
 
   const filteredParSummaries = Array.from(groupedParByStaff.entries())
     .map(([staffId, records]) => {
@@ -1344,6 +1682,24 @@ function DashboardPage() {
     activeParReceiver?.department_id != null
       ? departments.find((dept) => dept.id === activeParReceiver.department_id)?.name ?? '—'
       : '—'
+  const activeParCostTotals = activeParRecords.map((record) => {
+    const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
+
+    if (record.cost_snapshot != null) {
+      return calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot)
+    }
+
+    if (item?.unit_cost != null) {
+      return calculateTotalCost(record.quantity_issued ?? null, item.unit_cost)
+    }
+
+    return null
+  })
+  const activeParHasCost = activeParCostTotals.some((value) => value != null)
+  let activeParTotalCost = 0
+  for (const value of activeParCostTotals) {
+    activeParTotalCost += value ?? 0
+  }
   const activeVehicle =
     activeVehicleLogsId != null ? vehicles.find((vehicle) => vehicle.id === activeVehicleLogsId) ?? null : null
   const activeVehicleRepairs =
@@ -1401,7 +1757,7 @@ function DashboardPage() {
     frameDoc.close()
   }
 
-  const handlePrintParForStaff = (staffId: string, period?: ReportPeriod, startDate?: string, endDate?: string) => {
+  const handlePrintParForStaff = (staffId: string, startDate?: string, endDate?: string) => {
     if (!staffId) return
 
     const rangeStart = startDate ?? reportStartDate
@@ -1411,6 +1767,7 @@ function DashboardPage() {
       return isDateWithinReportRange(record.issue_date, rangeStart, rangeEnd)
     })
     const receiver = parUsers.find((user) => user.id === staffId) ?? null
+    const issuedByName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
     const parNo = receiver?.staff_id ? `PAR-${receiver.staff_id}` : `PAR-${staffId.slice(0, 8)}`
     const departmentName =
       receiver?.department_id != null
@@ -1422,6 +1779,12 @@ function DashboardPage() {
       .sort((a, b) => a.par_id - b.par_id)
       .map((record) => {
         const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
+        const lineTotalAmount =
+          record.cost_snapshot != null
+            ? calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot)
+            : item?.unit_cost != null
+              ? calculateTotalCost(record.quantity_issued ?? null, item.unit_cost)
+              : null
 
         return {
           quantity: String(record.quantity_issued ?? 0),
@@ -1430,24 +1793,21 @@ function DashboardPage() {
           propertyNo:
             record.property_no_snapshot ??
             item?.property_no ??
-            item?.qr_code ??
             (record.item_id != null ? `ITEM-${record.item_id.toString().padStart(3, '0')}` : '—'),
-          issuedDate: formatDisplayDate(record.issue_date),
-          dateAcquired: record.date_acquired_snapshot ?? item?.date_acquired ?? '—',
+          issuedDate: formatInventoryDate(record.issue_date),
+          dateAcquired: formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired),
           cost:
             record.cost_snapshot != null
               ? formatCurrency(record.cost_snapshot)
               : item?.unit_cost != null
                 ? formatCurrency(item.unit_cost)
                 : 'N/A',
-          lineTotal:
-            record.cost_snapshot != null
-              ? formatCurrency(calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot))
-              : item?.unit_cost != null
-                ? formatCurrency(calculateTotalCost(record.quantity_issued ?? null, item.unit_cost))
-                : 'N/A',
+          lineTotalAmount,
         }
       })
+
+    const totalCostAmount = rows.reduce((sum, row) => sum + (row.lineTotalAmount ?? 0), 0)
+    const totalCostDisplay = rows.some((row) => row.lineTotalAmount != null) ? formatCurrency(totalCostAmount) : 'N/A'
 
     const rowsMarkup = rows
       .map(
@@ -1460,10 +1820,15 @@ function DashboardPage() {
             <td>${escapeHtml(row.issuedDate)}</td>
             <td>${escapeHtml(row.dateAcquired)}</td>
             <td>${escapeHtml(row.cost)}</td>
-            <td>${escapeHtml(row.lineTotal)}</td>
           </tr>`,
       )
       .join('')
+    const totalRowMarkup = rows.some((row) => row.lineTotalAmount != null)
+      ? `<tr>
+            <td colspan="6" style="text-align:right;"><strong>Total Cost</strong></td>
+            <td><strong>${escapeHtml(totalCostDisplay)}</strong></td>
+          </tr>`
+      : ''
 
     const printDocument = `
       <!doctype html>
@@ -1480,7 +1845,10 @@ function DashboardPage() {
             th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
             th { background: #f3f4f6; font-weight: 600; }
             .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
-            .sign-line { margin-top: 48px; border-top: 1px solid #111827; padding-top: 6px; font-size: 12px; }
+            .signatures > div { width: 220px; }
+            .sign-line { margin-top: 48px; width: 100%; }
+            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
+            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 100%; text-align: left; }
             @media print { body { margin: 10mm; } }
           </style>
         </head>
@@ -1491,8 +1859,6 @@ function DashboardPage() {
             <p><strong>Department:</strong> ${escapeHtml(departmentName)}</p>
             <p><strong>PAR No:</strong> ${escapeHtml(parNo)}</p>
             <p><strong>Date Printed:</strong> ${escapeHtml(new Date().toISOString().slice(0, 10))}</p>
-            ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
-            <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
           </div>
 
           <table>
@@ -1505,20 +1871,22 @@ function DashboardPage() {
                 <th>Issue Date</th>
                 <th>Date Acquired</th>
                 <th>Unit Cost</th>
-                <th>Line Total</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsMarkup || '<tr><td colspan="8">No PAR items found.</td></tr>'}
+              ${rowsMarkup || '<tr><td colspan="7">No PAR items found.</td></tr>'}
+              ${totalRowMarkup}
             </tbody>
           </table>
 
           <div class="signatures">
             <div>
-              <div class="sign-line">Received by (Employee)</div>
+              <div class="sign-line"><span class="sign-name">${escapeHtml(receiver?.full_name ?? staffId)}</span></div>
+              <div class="sign-role">Received by</div>
             </div>
             <div>
-              <div class="sign-line">Issued by (Property Custodian)</div>
+              <div class="sign-line"><span class="sign-name">${escapeHtml(issuedByName)}</span></div>
+              <div class="sign-role">Issued by</div>
             </div>
           </div>
         </body>
@@ -1551,6 +1919,11 @@ function DashboardPage() {
 
     if (!selectedItem) {
       setParError('Selected item was not found in inventory.')
+      return
+    }
+
+    if (!isLoanableParItem(selectedItem)) {
+      setParError('Only equipment, hand tools, power tools, and gadgets can be issued through PAR.')
       return
     }
 
@@ -1613,7 +1986,6 @@ function DashboardPage() {
             property_no_snapshot:
               parPropertyNoInput ||
               selectedItem.property_no ||
-              selectedItem.qr_code ||
               `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
             date_acquired_snapshot: parDateAcquiredInput || selectedItem.date_acquired,
             cost_snapshot: costSnapshot ?? selectedItem.unit_cost ?? null,
@@ -1643,6 +2015,101 @@ function DashboardPage() {
     setParPropertyNoInput('')
     setParDateAcquiredInput('')
     setParCostInput('')
+    setParSaving(false)
+  }
+
+  const handleCreateParRecordsBatch = async (draftItems: ParDraftItem[], issuedToId: string, issueDate: string) => {
+    if (!issuedToId) {
+      setParError('Issued To is required.')
+      return
+    }
+    const validItems = draftItems.filter((row) => row.itemId !== '')
+    if (validItems.length === 0) {
+      setParError('At least one item must be selected.')
+      return
+    }
+
+    setParSaving(true)
+    setParError(null)
+
+    const selectedUser = parUsers.find((user) => user.id === issuedToId)
+
+    for (const row of validItems) {
+      const selectedItem = inventoryItems.find((item) => String(item.item_id) === row.itemId)
+      if (!selectedItem) continue
+
+      if (!isLoanableParItem(selectedItem)) {
+        setParError('Only equipment, hand tools, power tools, and gadgets can be issued through PAR.')
+        setParSaving(false)
+        return
+      }
+
+      const quantityValue = Number(row.quantity)
+      if (!Number.isFinite(quantityValue) || quantityValue <= 0) continue
+
+      const existingRecord = parRecords.find(
+        (record) => record.issued_to_id === issuedToId && record.item_id === selectedItem.item_id,
+      )
+
+      if (existingRecord) {
+        const nextQuantity = (existingRecord.quantity_issued ?? 0) + quantityValue
+        const { data, error: updateError } = await supabase
+          .from('par_records')
+          .update({
+            quantity_issued: nextQuantity,
+            issue_date: issueDate || existingRecord.issue_date || null,
+            contact_snapshot: selectedUser?.contact_info ?? existingRecord.contact_snapshot ?? null,
+            unit_snapshot: row.unit || existingRecord.unit_snapshot || null,
+            description_snapshot: row.description || existingRecord.description_snapshot || selectedItem.item_name,
+            cost_snapshot: row.costSnapshot ?? existingRecord.cost_snapshot ?? null,
+          })
+          .eq('par_id', existingRecord.par_id)
+          .select('*')
+
+        if (updateError) {
+          setParError(updateError.message)
+          setParSaving(false)
+          return
+        }
+
+        const updatedRecord = (data?.[0] ?? null) as ParRecordRow | null
+        if (updatedRecord) {
+          setParRecords((prev) => prev.map((r) => (r.par_id === updatedRecord.par_id ? updatedRecord : r)))
+        }
+      } else {
+        const { data, error: insertError } = await supabase
+          .from('par_records')
+          .insert([
+            {
+              item_id: selectedItem.item_id,
+              issued_to_id: issuedToId,
+              quantity_issued: quantityValue,
+              issue_date: issueDate || null,
+              contact_snapshot: selectedUser?.contact_info ?? null,
+              unit_snapshot: row.unit || selectedItem.unit_of_measure || null,
+              description_snapshot: row.description || selectedItem.item_name,
+              property_no_snapshot:
+                selectedItem.property_no ||
+                `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
+              date_acquired_snapshot: selectedItem.date_acquired,
+              cost_snapshot: row.costSnapshot ?? selectedItem.unit_cost ?? null,
+            },
+          ])
+          .select('*')
+
+        if (insertError) {
+          setParError(insertError.message)
+          setParSaving(false)
+          return
+        }
+
+        const createdRecord = (data?.[0] ?? null) as ParRecordRow | null
+        if (createdRecord) {
+          setParRecords((prev) => [createdRecord, ...prev])
+        }
+      }
+    }
+
     setParSaving(false)
   }
 
@@ -1681,7 +2148,7 @@ function DashboardPage() {
     const insertedVehicle = (data?.[0] ?? null) as VehicleRow | null
 
     if (insertedVehicle) {
-      setVehicles((prev) => [...prev, insertedVehicle].sort((a, b) => a.id - b.id))
+      setVehicles((prev) => [...prev, insertedVehicle].sort((a, b) => b.id - a.id))
     }
 
     setNewVehicleMakeModel('')
@@ -1944,14 +2411,15 @@ function DashboardPage() {
     setEditDateAcquired(item.date_acquired)
     setEditExpirationDate(item.expiration_date ?? '')
     setEditSource(item.acquisition_mode ?? '')
-    setEditStatus(item.status ?? '')
+    setEditStatus(getInventoryStatus(item) ?? '')
+    setEditCondition(item.condition ?? '')
   }
 
   const handleSaveEdit = async () => {
     if (!editingItem) return
 
-    if (!editItemName || !editItemType || !editDateAcquired || !editDepartmentId) {
-      setInventoryError('Item name, type, department, and date acquired are required.')
+    if (!editItemName || !editItemType || !editDepartmentId) {
+      setInventoryError('Item name, type, and department are required.')
       return
     }
 
@@ -1960,6 +2428,17 @@ function DashboardPage() {
 
     const quantityNumber = editQuantity ? Number(editQuantity) : null
     const unitCostNumber = editUnitCost ? Number(editUnitCost) : null
+    const isStockpileType = editItemType.trim().toLowerCase() === 'stockpile'
+    const editExpirationValue = parseDateLikeValue(editExpirationDate)
+    const todayStart = new Date()
+    todayStart.setHours(0, 0, 0, 0)
+    const stockpileStatusToSave =
+      editExpirationValue && (() => {
+        editExpirationValue.setHours(0, 0, 0, 0)
+        return editExpirationValue < todayStart
+      })()
+        ? 'Expired'
+        : 'Valid'
 
     // Prevent manual quantity decrease from the edit form.
     if (
@@ -1982,10 +2461,11 @@ function DashboardPage() {
         quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
         unit_of_measure: editUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
-        date_acquired: editDateAcquired,
+        date_acquired: editDateAcquired ? editDateAcquired : new Date().toISOString().split('T')[0],
         expiration_date: editExpirationDate || null,
         acquisition_mode: editSource || null,
-        status: editStatus || null,
+        status: isStockpileType ? stockpileStatusToSave : editStatus || null,
+        condition: editCondition || null,
       })
       .eq('item_id', editingItem.item_id)
 
@@ -1998,7 +2478,7 @@ function DashboardPage() {
     // Reload inventory list from database
     setInventoryLoading(true)
     const { data, error: reloadError } = await supabase.from('inventory').select('*').order('item_id', {
-      ascending: true,
+      ascending: false,
     })
 
     if (reloadError) {
@@ -2013,7 +2493,102 @@ function DashboardPage() {
   }
 
   const openArchiveConfirmation = (item: InventoryRow) => {
-    setDeleteTargetItem(item)
+    setArchiveModalConfig({
+      kind: 'inventory',
+      title: 'Archive Item',
+      text: `Are you sure you want to archive ${item.item_name}?`,
+      subtext: 'This item will be removed from the main list.',
+      onConfirm: () => handleArchiveItem(item),
+    })
+  }
+
+  const isArchiveModalBusy =
+    archiveModalConfig?.kind === 'inventory'
+      ? editDeleting
+      : archiveModalConfig?.kind === 'department'
+        ? departmentUpdatingId != null
+        : archiveModalConfig?.kind === 'staff'
+          ? staffUpdatingId != null
+          : archiveModalConfig?.kind === 'vehicle'
+            ? vehicleSaving
+            : archiveModalConfig?.kind === 'wmr'
+              ? wmrSaving
+              : archiveModalConfig?.kind === 'par'
+                ? parSaving
+                : false
+
+  const closeArchiveModal = () => {
+    if (isArchiveModalBusy) return
+    setArchiveModalConfig(null)
+  }
+
+  const openArchiveDepartmentConfirmation = (department: DepartmentOverview) => {
+    setArchiveModalConfig({
+      kind: 'department',
+      title: 'Archive Department',
+      text: `Are you sure you want to archive ${department.name}?`,
+      subtext: 'This department will be removed from the main list.',
+      onConfirm: () => handleArchiveDepartment(department),
+    })
+  }
+
+  const openArchiveStaffConfirmation = (user: UserRow) => {
+    setArchiveModalConfig({
+      kind: 'staff',
+      title: 'Archive Staff',
+      text: `Are you sure you want to archive ${user.full_name}?`,
+      subtext: 'This staff account will be removed from the main list.',
+      onConfirm: () => handleArchiveStaff(user),
+    })
+  }
+
+  const openArchiveVehicleConfirmation = (vehicle: VehicleRow) => {
+    const vehicleLabel = vehicle.make_model ?? `VEH-${vehicle.id}`
+    setArchiveModalConfig({
+      kind: 'vehicle',
+      title: 'Archive Vehicle',
+      text: `Are you sure you want to archive ${vehicleLabel}?`,
+      subtext: 'This vehicle will be removed from the main list.',
+      onConfirm: () => handleArchiveVehicle(vehicle),
+    })
+  }
+
+  const openArchiveWasteWmrConfirmation = (item: InventoryRow, report: WmrReportRow | null) => {
+    if (!report) {
+      setWmrError(`No WMR report exists for ${item.item_name}. Archive the WMR report only after remarks/report data has been created.`)
+      return
+    }
+
+    setArchiveModalConfig({
+      kind: 'wmr',
+      title: 'Archive WMR Report',
+      text: `Are you sure you want to archive report WMR-${report.report_id.toString().padStart(3, '0')}?`,
+      subtext: 'This report will be removed from the main list.',
+      onConfirm: () => handleArchiveWasteItemFromWmr(item, report),
+    })
+  }
+
+  const openArchiveVehicleWmrConfirmation = (report: WmrReportRow) => {
+    setArchiveModalConfig({
+      kind: 'wmr',
+      title: 'Archive WMR Report',
+      text: `Are you sure you want to archive report WMR-${report.report_id.toString().padStart(3, '0')}?`,
+      subtext: 'This report will be removed from the main list.',
+      onConfirm: () => handleArchiveVehicleReportFromWmr(report),
+    })
+  }
+
+  const openArchiveParSummaryConfirmation = (staffId: string) => {
+    const receiver = parUsers.find((user) => user.id === staffId)
+    const targetLabel = receiver?.full_name ?? staffId
+
+    setArchiveModalConfig({
+      kind: 'par',
+      title: 'Archive PAR Summary',
+      text: `Are you sure you want to archive the PAR record for ${targetLabel}?`,
+      subtext: 'This record will be removed from the main list.',
+      onConfirm: () => handleArchiveParSummary(staffId),
+    })
   }
 
   const handleArchiveItem = async (itemToArchive?: InventoryRow) => {
@@ -2038,14 +2613,15 @@ function DashboardPage() {
       prev.map((item) => (item.item_id === targetItem.item_id ? { ...item, status: 'Archived' } : item)),
     )
     setEditDeleting(false)
-    setDeleteTargetItem(null)
+    setArchiveModalConfig(null)
     if (editingItem?.item_id === targetItem.item_id) {
       setEditingItem(null)
     }
   }
 
   const handleSaveSettingsName = async () => {
-    const trimmedName = settingsNameInput.trim()
+    const combinedName = (settingsFirstNameInput.trim() + ' ' + settingsLastNameInput.trim()).trim()
+    const trimmedName = combinedName || settingsNameInput.trim()
     const trimmedPosition = settingsPositionInput.trim()
 
     if (!settingsUserId) {
@@ -2081,6 +2657,9 @@ function DashboardPage() {
       ),
     )
     setCurrentAdminName(trimmedName)
+    setCurrentAdminPosition(trimmedPosition)
+    setCurrentAdminLastName(settingsLastNameInput.trim())
+    setCurrentAdminFirstName(settingsFirstNameInput.trim())
     setSettingsSuccessMessage('Profile updated successfully.')
     setSettingsNameSaving(false)
   }
@@ -2158,22 +2737,40 @@ function DashboardPage() {
     setStaffFormMode('add')
     setStaffFormTargetId(null)
     setStaffFormDepartmentId('')
-    setStaffFormName('')
+    setStaffFormLastName('')
+    setStaffFormFirstName('')
     setStaffFormStaffId('')
     setStaffFormPosition('')
     setStaffFormRole('Staff')
     setStaffFormContact('')
+    setStaffFormEmergencyContact('')
+    setStaffFormRecoveryEmail('')
+  }
+
+  const handleCancelStaffEdit = () => {
+    resetStaffForm()
+    setDepartmentStaffMode('manage-staff')
   }
 
   const startEditStaff = (user: UserRow) => {
+    if (!canEditUser(user)) {
+      setStaffError('Admins cannot edit Super Admin account information.')
+      setStaffSuccess(null)
+      return
+    }
+
     setStaffFormMode('edit')
     setStaffFormTargetId(user.id)
     setStaffFormDepartmentId(user.department_id != null ? String(user.department_id) : '')
-    setStaffFormName(user.full_name)
+    const parsedName = parseFullName(user.full_name ?? '')
+    setStaffFormFirstName(parsedName.firstName)
+    setStaffFormLastName(parsedName.lastName)
     setStaffFormStaffId(user.staff_id)
     setStaffFormPosition(user.position ?? '')
     setStaffFormRole(mapStaffRoleToOption(user.role))
     setStaffFormContact(user.contact_info ?? '')
+    setStaffFormEmergencyContact(user.emergency_contact ?? '')
+    setStaffFormRecoveryEmail(user.recovery_email ?? '')
     setStaffError(null)
     setStaffSuccess(null)
   }
@@ -2195,15 +2792,40 @@ function DashboardPage() {
   }
 
   const handleSaveStaff = async () => {
-    const trimmedName = staffFormName.trim()
+    const trimmedName = `${staffFormFirstName.trim()} ${staffFormLastName.trim()}`.trim()
     const trimmedStaffId = staffFormStaffId.trim()
     const derivedEmail = buildStaffEmail(trimmedStaffId)
     const derivedQrCode = buildStaffQrCode(trimmedStaffId)
-    const trimmedRole = staffFormRole === 'Admin' ? 'Super Admin' : 'Staff'
+    const normalizedFormRole = staffFormRole.trim().toLowerCase()
+    const trimmedRole =
+      normalizedFormRole === 'super admin'
+        ? 'Super Admin'
+        : normalizedFormRole === 'admin'
+          ? 'Admin'
+          : 'Staff'
     const deptId = staffFormDepartmentId ? Number(staffFormDepartmentId) : null
+    const existingStaffRecord = staffFormTargetId
+      ? parUsers.find((user) => user.id === staffFormTargetId) ?? null
+      : null
+
+    if (isCurrentUserAdmin && trimmedRole === 'Super Admin') {
+      setStaffError('Only Super Admin can assign the Super Admin role.')
+      return
+    }
+
+    if (existingStaffRecord && !canEditUser(existingStaffRecord)) {
+      setStaffError('Admins cannot edit Super Admin account information.')
+      return
+    }
 
     if (!trimmedName || !derivedEmail || !trimmedStaffId || deptId == null || Number.isNaN(deptId)) {
       setStaffError('Department and name are required.')
+      return
+    }
+
+    const trimmedRecoveryEmail = staffFormRecoveryEmail.trim()
+    if (staffFormMode === 'add' && !trimmedRecoveryEmail) {
+      setStaffError('A real email address is required for password recovery.')
       return
     }
 
@@ -2219,10 +2841,13 @@ function DashboardPage() {
           full_name: trimmedName,
           email: derivedEmail,
           staff_id: trimmedStaffId,
-          qr_code: derivedQrCode,
+          qr_code: existingStaffRecord?.uid ?? derivedQrCode,
+          uid: existingStaffRecord?.uid ?? undefined,
           position: staffFormPosition.trim() || null,
           role: trimmedRole,
           contact_info: staffFormContact.trim() || null,
+          emergency_contact: staffFormEmergencyContact.trim() || null,
+          recovery_email: staffFormRecoveryEmail.trim() || null,
         })
         .eq('id', staffFormTargetId)
         .select('*')
@@ -2242,8 +2867,11 @@ function DashboardPage() {
     }
 
     const transientAuthClient = createTransientSupabaseClient()
+    // Auth is registered with the real recovery_email so password reset emails work.
+    // The fake system email (staffId@kaban.com) lives only in the users table.
+    const authEmail = trimmedRecoveryEmail
     const { data: signUpData, error: signUpError } = await transientAuthClient.auth.signUp({
-      email: derivedEmail,
+      email: authEmail,
       password: DEFAULT_STAFF_INITIAL_PASSWORD,
       options: {
         data: {
@@ -2254,46 +2882,90 @@ function DashboardPage() {
       },
     })
 
+    let authUserId = signUpData.user?.id ?? null
+
     if (signUpError) {
-      setStaffError(signUpError.message)
-      setStaffSaving(false)
-      return
+      const normalizedAuthError = signUpError.message.trim().toLowerCase()
+      const alreadyRegistered =
+        normalizedAuthError.includes('already registered') ||
+        normalizedAuthError.includes('already exists')
+
+      if (!alreadyRegistered) {
+        setStaffError(signUpError.message)
+        setStaffSaving(false)
+        return
+      }
+
+      const { data: existingAuthData, error: existingAuthError } =
+        await transientAuthClient.auth.signInWithPassword({
+          email: authEmail,
+          password: DEFAULT_STAFF_INITIAL_PASSWORD,
+        })
+
+      if (existingAuthError || !existingAuthData.user?.id) {
+        setStaffError('This sign-in account already exists. Please remove the old auth user or reset its password before trying again.')
+        setStaffSaving(false)
+        return
+      }
+
+      authUserId = existingAuthData.user.id
     }
 
-    const authUserId = signUpData.user?.id
     if (!authUserId) {
       setStaffError('Auth account was not created. Please check authentication settings and try again.')
       setStaffSaving(false)
       return
     }
 
+    const staffUid = crypto.randomUUID()
+
     const { data: createdUser, error: createError } = await supabase
       .from('users')
-      .insert([
+      .upsert([
         {
           id: authUserId,
+          uid: staffUid,
           department_id: deptId,
           full_name: trimmedName,
           email: derivedEmail,
           staff_id: trimmedStaffId,
-          qr_code: derivedQrCode,
+          qr_code: staffUid,
           position: staffFormPosition.trim() || null,
           role: trimmedRole,
           contact_info: staffFormContact.trim() || null,
+          emergency_contact: staffFormEmergencyContact.trim() || null,
+          recovery_email: staffFormRecoveryEmail.trim() || null,
           is_locked: false,
           is_online: false,
         },
-      ])
+      ], { onConflict: 'id' })
       .select('*')
       .single()
 
     if (createError) {
-      setStaffError(
-        `${createError.message} Auth account may already exist. If needed, remove the auth user in Supabase and retry.`,
-      )
+      // .single() can fail even when the upsert succeeded (e.g. PGRST116 / no row returned).
+      // Try fetching the row directly before giving up.
+      const { data: refetchedUser, error: refetchError } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', authUserId)
+        .single()
+
+      if (refetchedUser && !refetchError) {
+        void transientAuthClient.auth.signOut()
+        setParUsers((prev) => [refetchedUser, ...prev])
+        setStaffSuccess('Staff added successfully. Authentication account was created.')
+        resetStaffForm()
+        setStaffSaving(false)
+        return
+      }
+
+      setStaffError(createError.message)
       setStaffSaving(false)
       return
     }
+
+    void transientAuthClient.auth.signOut()
 
     setParUsers((prev) => [createdUser, ...prev])
     setStaffSuccess('Staff added successfully. Authentication account was created.')
@@ -2355,35 +3027,167 @@ function DashboardPage() {
     setStaffUpdatingId(null)
   }
 
-  const handleDeleteStaff = async (user: UserRow) => {
-    if (typeof window !== 'undefined') {
-      const proceed = window.confirm(`Delete ${user.full_name}? This removes the staff record.`)
-      if (!proceed) return
-    }
-
+  const handleArchiveStaff = async (user: UserRow) => {
     setStaffUpdatingId(user.id)
     setStaffError(null)
     setStaffSuccess(null)
 
-    const { error: deleteError } = await supabase.from('users').delete().eq('id', user.id)
+    const { error: archiveError } = await supabase
+      .from('users')
+      .update({ is_archived: true, archived_at: new Date().toISOString() } as never)
+      .eq('id', user.id)
 
-    if (deleteError) {
-      setStaffError(deleteError.message)
+    if (archiveError) {
+      setStaffError(archiveError.message)
       setStaffUpdatingId(null)
       return
     }
 
-    setParUsers((prev) => prev.filter((current) => current.id !== user.id))
-    setStaffSuccess('Staff deleted successfully.')
+    setParUsers((prev) => prev.map((current) => (current.id === user.id ? ({ ...current, is_archived: true } as UserRow) : current)))
+    setStaffSuccess('Staff archived successfully.')
     if (staffFormTargetId === user.id) {
       resetStaffForm()
     }
     setStaffUpdatingId(null)
+    setArchiveModalConfig(null)
+  }
+
+  const handleArchiveVehicle = async (vehicle: VehicleRow) => {
+    setVehicleSaving(true)
+    setVehicleError(null)
+
+    const { error: archiveError } = await supabase
+      .from('vehicles')
+      .update({ is_archived: true, archived_at: new Date().toISOString() } as never)
+      .eq('id', vehicle.id)
+
+    if (archiveError) {
+      setVehicleError(archiveError.message)
+      setVehicleSaving(false)
+      return
+    }
+
+    setVehicles((prev) => prev.map((current) => (current.id === vehicle.id ? ({ ...current, is_archived: true } as VehicleRow) : current)))
+    if (activeVehicleLogsId === vehicle.id) {
+      setActiveVehicleLogsId(null)
+    }
+    if (editingVehicle?.id === vehicle.id) {
+      closeVehicleEditModal()
+    }
+
+    setVehicleSaving(false)
+    setArchiveModalConfig(null)
+  }
+
+  const handleArchiveWasteItemFromWmr = async (item: InventoryRow, report: WmrReportRow | null) => {
+    if (!report) {
+      setWmrError(`No WMR report exists for ${item.item_name}. Archive the WMR report only after remarks/report data has been created.`)
+      return
+    }
+
+    setWmrSaving(true)
+    setWmrError(null)
+
+    const { error: archiveError } = await supabase
+      .from('wmr_reports')
+      .update({ status: 'Archived', is_archived: true, archived_at: new Date().toISOString() } as never)
+      .eq('report_id', report.report_id)
+
+    if (archiveError) {
+      setWmrError(archiveError.message)
+      setWmrSaving(false)
+      return
+    }
+
+    setWmrReports((prev) =>
+      prev.map((current) =>
+        current.report_id === report.report_id
+          ? ({ ...current, status: 'Archived', is_archived: true } as WmrReportRow)
+          : current,
+      ),
+    )
+
+    setWmrSaving(false)
+    setArchiveModalConfig(null)
+  }
+
+  const handleArchiveVehicleReportFromWmr = async (report: WmrReportRow) => {
+    setWmrSaving(true)
+    setWmrError(null)
+
+    const { error: archiveError } = await supabase
+      .from('wmr_reports')
+      .update({ status: 'Archived', is_archived: true, archived_at: new Date().toISOString() } as never)
+      .eq('report_id', report.report_id)
+
+    if (archiveError) {
+      setWmrError(archiveError.message)
+      setWmrSaving(false)
+      return
+    }
+
+    setWmrReports((prev) =>
+      prev.map((current) =>
+        current.report_id === report.report_id
+          ? ({ ...current, status: 'Archived', is_archived: true } as WmrReportRow)
+          : current,
+      ),
+    )
+
+    setWmrSaving(false)
+    setArchiveModalConfig(null)
+  }
+
+  const handleArchiveParSummary = async (staffId: string) => {
+    setParSaving(true)
+    setParError(null)
+
+    const { error: archiveError } = await supabase
+      .from('par_records')
+      .update({ is_archived: true, archived_at: new Date().toISOString() } as never)
+      .eq('issued_to_id', staffId)
+
+    if (archiveError) {
+      setParError(archiveError.message)
+      setParSaving(false)
+      return
+    }
+
+    setParRecords((prev) =>
+      prev.map((record) =>
+        record.issued_to_id === staffId ? ({ ...record, is_archived: true } as ParRecordRow) : record,
+      ),
+    )
+
+    if (activeParStaffId === staffId) {
+      setActiveParStaffId(null)
+    }
+
+    setParSaving(false)
+    setArchiveModalConfig(null)
   }
 
   const handleAddItem = async () => {
-    if (!newItemName || !newItemType || !newDateAcquired || !newItemDepartmentId) {
-      setInventoryError('Item name, type, department, and date acquired are required.')
+    const normalizedSource = newSource.trim().toLowerCase()
+    const isStockpileType = newItemType.trim().toLowerCase() === 'stockpile'
+    const addExpirationValue = parseDateLikeValue(newExpirationDate)
+    const addTodayStart = new Date()
+    addTodayStart.setHours(0, 0, 0, 0)
+    const stockpileStatusToInsert =
+      addExpirationValue && (() => {
+        addExpirationValue.setHours(0, 0, 0, 0)
+        return addExpirationValue < addTodayStart
+      })()
+        ? 'Expired'
+        : 'Valid'
+
+    if (!newItemName || !newItemType || !newItemDepartmentId) {
+      setInventoryError('Item name, type, and department are required.')
+      return
+    }
+
+    if (normalizedSource === 'purchased' && !newUnitCost.trim()) {
+      setInventoryError('Unit cost is required for purchased items.')
       return
     }
 
@@ -2391,17 +3195,23 @@ function DashboardPage() {
     setInventoryError(null)
 
     const quantityNumber = newQuantity ? Number(newQuantity) : null
-    const unitCostNumber = newUnitCost ? Number(newUnitCost) : null
+    const unitCostNumber = normalizedSource === 'purchased' ? Number(newUnitCost) : null
+    const itemUid = crypto.randomUUID()
     const { data: insertedItems, error: insertError } = await supabase.from('inventory').insert([
       {
+        uid: itemUid,
         item_name: newItemName,
         item_type: newItemType,
         department_id: Number(newItemDepartmentId),
         quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
         unit_of_measure: newUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
-        date_acquired: newDateAcquired,
+        date_acquired: newDateAcquired || new Date().toISOString().split('T')[0],
+        expiration_date: isStockpileType ? newExpirationDate || null : null,
         acquisition_mode: newSource || null,
+        status: isStockpileType ? stockpileStatusToInsert : null,
+        condition: newCondition || null,
+        qr_code: itemUid,
       },
     ]).select('*')
 
@@ -2419,12 +3229,21 @@ function DashboardPage() {
       return
     }
 
+    const { error: qrUpdateError } = await supabase
+      .from('inventory')
+      .update({ qr_code: insertedItem.uid ?? itemUid })
+      .eq('item_id', insertedItem.item_id)
+
+    if (qrUpdateError) {
+      setInventoryError((prev) => prev ?? qrUpdateError.message)
+    }
+
     const uploadedPhotoUrls: string[] = []
 
     for (const file of newPhotoFiles) {
       const fileExt = file.name.split('.').pop() || 'jpg'
       const fileName = `item-${insertedItem.item_id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
-      const filePath = `items/${insertedItem.item_id}/${fileName}`
+      const filePath = `items/${insertedItem.uid ?? insertedItem.item_id}/${fileName}`
 
       const { error: uploadError } = await supabase.storage
         .from(INVENTORY_PHOTO_BUCKET)
@@ -2481,18 +3300,28 @@ function DashboardPage() {
     // Clear form
     setNewItemName('')
     setNewItemType('')
+    setNewCondition('')
     setNewItemDepartmentId('')
     setNewQuantity('')
     setNewUnitOfMeasure('')
     setNewUnitCost('')
     setNewDateAcquired('')
+    setNewExpirationDate('')
     setNewSource('')
     setNewPhotoFiles([])
+
+    // Auto-register vehicle in vehicles table
+    if (newItemType.trim().toLowerCase() === 'vehicle') {
+      await supabase.from('vehicles').insert([{
+        make_model: newItemName,
+        is_serviceable: newCondition.trim().toLowerCase() !== 'defective',
+      }])
+    }
 
     // Reload inventory list
     setInventoryLoading(true)
     const { data, error: reloadError } = await supabase.from('inventory').select('*').order('item_id', {
-      ascending: true,
+      ascending: false,
     })
 
     if (reloadError) {
@@ -2514,7 +3343,7 @@ function DashboardPage() {
     setQrGeneratingId(item.item_id)
     setInventoryError(null)
 
-    const qrValue = `ITEM-${item.item_id.toString().padStart(3, '0')}`
+    const qrValue = item.uid ?? `ITEM-${item.item_id.toString().padStart(3, '0')}`
 
     const { data, error: qrError } = await supabase
       .from('inventory')
@@ -2535,165 +3364,141 @@ function DashboardPage() {
     setQrGeneratingId(null)
   }
 
-  // [HANDLERS] Stockpile actions
-  const handleAddStockpile = async () => {
-    if (!newStockpileItemName || !newStockpileCategory || !newStockpileQuantity || !newStockpileUnitOfMeasure) {
-      setStockpileError('Item name, category, quantity, and unit are required.')
-      return
-    }
-
-    setAddingStockpile(true)
-    setStockpileError(null)
-
-    const quantityNumber = Number(newStockpileQuantity)
-
-    if (Number.isNaN(quantityNumber) || quantityNumber <= 0) {
-      setStockpileError('Quantity must be a positive number.')
-      setAddingStockpile(false)
-      return
-    }
-
-    const { error: insertError } = await supabase
-      .from('stockpile')
-      .insert([
-        {
-          item_name: newStockpileItemName,
-          category: newStockpileCategory,
-          quantity_on_hand: quantityNumber,
-          unit_of_measure: newStockpileUnitOfMeasure,
-          packed_date: newStockpilePackedDate || null,
-          expiration_date: newStockpileExpirationDate || null,
-        },
-      ])
-
-    if (insertError) {
-      setStockpileError(insertError.message)
-      setAddingStockpile(false)
-      return
-    }
-
-    // Clear form
-    setNewStockpileItemName('')
-    setNewStockpileCategory('')
-    setNewStockpileQuantity('')
-    setNewStockpileUnitOfMeasure('')
-    setNewStockpilePackedDate('')
-    setNewStockpileExpirationDate('')
-    setStockpileMode('list')
-
-    // Reload stockpile list
-    setStockpileLoading(true)
-    const { data, error: reloadError } = await supabase
-      .from('stockpile')
-      .select('*')
-      .order('stockpile_id', { ascending: true })
-
-    if (reloadError) {
-      setStockpileError(reloadError.message)
-    } else {
-      setStockpileItems(data ?? [])
-    }
-
-    setStockpileLoading(false)
-    setAddingStockpile(false)
-  }
-
-  const openStockpileReleaseModal = () => {
-    const targetItem = stockpileItems[0] ?? null
-
-    if (!targetItem) {
-      setStockpileError('No stockpile item available for release.')
-      return
-    }
-
-    setActiveReleaseStockpile(targetItem)
-    setReleaseQtyInput('')
-    setReleaseIssuedToInput('')
-    setReleaseReasonInput('')
-  }
-
-  const closeStockpileReleaseModal = () => {
+  const closeStockpileReleasePage = () => {
     if (releasingStockpile) return
-    setActiveReleaseStockpile(null)
+    setStockpileMode('list')
+  }
+
+  const openStockpileReleasePage = () => {
+    setStockpileError(null)
+    setStockpileReleaseItems([{ stockpileId: '', quantity: '' }])
+    setStockpileReleaseIssuedToInput('')
+    setStockpileReleaseReasonInput('')
+    setStockpileMode('release')
+  }
+
+  const addStockpileReleaseItem = () => {
+    setStockpileReleaseItems((prev) => [...prev, { stockpileId: '', quantity: '' }])
+  }
+
+  const updateStockpileReleaseItem = (index: number, field: keyof StockpileReleaseDraftItem, value: string) => {
+    setStockpileReleaseItems((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)))
+  }
+
+  const removeStockpileReleaseItem = (index: number) => {
+    setStockpileReleaseItems((prev) => (prev.length === 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index)))
   }
 
   const handleReleaseStockpile = async () => {
-    if (!activeReleaseStockpile) return
+    const validReleaseItems = stockpileReleaseItems
+      .map((item, index) => ({ ...item, index }))
+      .filter((item) => item.stockpileId.trim() && item.quantity.trim())
 
-    const expiration = activeReleaseStockpile.expiration_date
-      ? new Date(activeReleaseStockpile.expiration_date)
-      : null
-    const isExpired = expiration != null && !Number.isNaN(expiration.getTime()) && expiration < new Date()
-    const availableQty = Number(activeReleaseStockpile.quantity_on_hand ?? 0)
-
-    if (isExpired) {
-      setStockpileError('Item is not available for release because it is already expired.')
+    if (!stockpileReleaseIssuedToInput.trim() || !stockpileReleaseReasonInput.trim()) {
+      setStockpileError('Issued to and reason are required.')
       return
     }
 
-    if (!Number.isFinite(availableQty) || availableQty <= 0) {
-      setStockpileError('Item is not available for release because there is no quantity on hand.')
+    if (validReleaseItems.length === 0) {
+      setStockpileError('Add at least one stockpile item to release.')
       return
     }
 
-    if (!releaseIssuedToInput.trim() || !releaseReasonInput.trim() || !releaseQtyInput.trim()) {
-      setStockpileError('Release quantity, issued to, and reason are required.')
-      return
-    }
+    const groupedReleases = new Map<number, { quantity: number; row: StockpileRow }>()
 
-    const qtyToRelease = Number(releaseQtyInput)
-    const currentQty = Number(activeReleaseStockpile.quantity_on_hand ?? 0)
+    for (const item of validReleaseItems) {
+      const stockpileId = Number(item.stockpileId)
+      const releaseQty = Number(item.quantity)
 
-    if (Number.isNaN(qtyToRelease) || qtyToRelease <= 0) {
-      setStockpileError('Release quantity must be a positive number.')
-      return
-    }
+      if (!Number.isInteger(stockpileId)) {
+        setStockpileError(`Line ${item.index + 1}: select a stockpile item.`)
+        return
+      }
 
-    if (qtyToRelease > currentQty) {
-      setStockpileError('Release quantity cannot exceed quantity on hand.')
-      return
+      if (Number.isNaN(releaseQty) || releaseQty <= 0) {
+        setStockpileError(`Line ${item.index + 1}: release quantity must be a positive number.`)
+        return
+      }
+
+      const row = stockpileItems.find((entry) => entry.stockpile_id === stockpileId)
+      if (!row) {
+        setStockpileError(`Line ${item.index + 1}: selected stockpile item was not found.`)
+        return
+      }
+
+      const expiration = row.expiration_date ? new Date(row.expiration_date) : null
+      const isExpired =
+        row.status?.trim() === 'Expired' ||
+        (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < new Date())
+
+      if (isExpired) {
+        setStockpileError(`Line ${item.index + 1}: expired stockpiles cannot be released.`)
+        return
+      }
+
+      const nextQuantity = (groupedReleases.get(stockpileId)?.quantity ?? 0) + releaseQty
+      const availableQty = Number(row.quantity_on_hand ?? 0)
+
+      if (!Number.isFinite(availableQty) || availableQty <= 0) {
+        setStockpileError(`Line ${item.index + 1}: selected item has no quantity on hand.`)
+        return
+      }
+
+      if (nextQuantity > availableQty) {
+        setStockpileError(`Line ${item.index + 1}: release quantity exceeds quantity on hand.`)
+        return
+      }
+
+      groupedReleases.set(stockpileId, { quantity: nextQuantity, row })
     }
 
     setReleasingStockpile(true)
     setStockpileError(null)
 
-    const updatedQty = currentQty - qtyToRelease
+    const updates = Array.from(groupedReleases.entries()).map(async ([stockpileId, entry]) => {
+      const updatedQty = Number(entry.row.quantity_on_hand ?? 0) - entry.quantity
+      const result = await supabase.from('inventory').update({ quantity: updatedQty }).eq('item_id', stockpileId)
+      return { stockpileId, updatedQty, error: result.error }
+    })
 
-    const { error: updateStockpileError } = await supabase
-      .from('stockpile')
-      .update({ quantity_on_hand: updatedQty })
-      .eq('stockpile_id', activeReleaseStockpile.stockpile_id)
+    const updateResults = await Promise.all(updates)
+    const failedUpdate = updateResults.find((result) => result.error)
 
-    if (updateStockpileError) {
-      setStockpileError(updateStockpileError.message)
+    if (failedUpdate) {
+      await Promise.all(
+        updateResults
+          .filter((result) => !result.error)
+          .map((result) => supabase.from('inventory').update({ quantity: groupedReleases.get(result.stockpileId)?.row.quantity_on_hand ?? 0 }).eq('item_id', result.stockpileId)),
+      )
+      setStockpileError(failedUpdate.error?.message ?? 'Unable to update stockpile quantities.')
       setReleasingStockpile(false)
       return
     }
 
-    const { error: insertLogError } = await supabase
-      .from('distribution_logs')
-      .insert([
-        {
-          operation_date: new Date().toISOString().slice(0, 10),
-          calamity_name: releaseReasonInput.trim(),
-          recipient_info: releaseIssuedToInput.trim(),
-          items_distributed: [
-            {
-              stockpile_id: activeReleaseStockpile.stockpile_id,
-              item_name: activeReleaseStockpile.item_name,
-              quantity: qtyToRelease,
-              unit_of_measure: activeReleaseStockpile.unit_of_measure,
-            },
-          ],
-        },
-      ])
+    const { error: insertLogError } = await supabase.from('distribution_logs').insert([
+      {
+        operation_date: new Date().toISOString().slice(0, 10),
+        calamity_name: stockpileReleaseReasonInput.trim(),
+        recipient_info: stockpileReleaseIssuedToInput.trim(),
+        items_distributed: Array.from(groupedReleases.values()).map((entry) => ({
+          item_id: entry.row.stockpile_id,
+          stockpile_id: entry.row.stockpile_id,
+          item_name: entry.row.item_name,
+          quantity: entry.quantity,
+          unit_of_measure: entry.row.unit_of_measure,
+        })),
+      },
+    ])
 
     if (insertLogError) {
-      // Best-effort rollback for stock quantity if log insert fails.
-      await supabase
-        .from('stockpile')
-        .update({ quantity_on_hand: currentQty })
-        .eq('stockpile_id', activeReleaseStockpile.stockpile_id)
+      await Promise.all(
+        updateResults.map((result) =>
+          supabase
+            .from('inventory')
+            .update({ quantity: groupedReleases.get(result.stockpileId)?.row.quantity_on_hand ?? 0 })
+            .eq('item_id', result.stockpileId),
+        ),
+      )
       setStockpileError(insertLogError.message)
       setReleasingStockpile(false)
       return
@@ -2701,14 +3506,18 @@ function DashboardPage() {
 
     const [{ data: reloadedStockpiles, error: reloadStockpileError }, { data: reloadedLogs, error: reloadLogsError }] =
       await Promise.all([
-        supabase.from('stockpile').select('*').order('stockpile_id', { ascending: true }),
+        supabase
+          .from('inventory')
+          .select('*')
+          .eq('item_type', 'Stockpile')
+          .order('item_id', { ascending: false }),
         supabase.from('distribution_logs').select('*').order('log_id', { ascending: false }),
       ])
 
     if (reloadStockpileError) {
       setStockpileError(reloadStockpileError.message)
     } else {
-      setStockpileItems(reloadedStockpiles ?? [])
+      setStockpileItems((reloadedStockpiles ?? []).map(mapInventoryItemToStockpileRow))
     }
 
     if (reloadLogsError) {
@@ -2718,27 +3527,28 @@ function DashboardPage() {
     }
 
     setReleasingStockpile(false)
-    setActiveReleaseStockpile(null)
-  }
-
-  const handleReleaseItemSelection = (stockpileId: string) => {
-    const selected = stockpileItems.find((item) => item.stockpile_id === Number(stockpileId)) ?? null
-    setActiveReleaseStockpile(selected)
-    setReleaseQtyInput('')
+    setStockpileMode('logs')
+    setStockpileReleaseItems([{ stockpileId: '', quantity: '' }])
+    setStockpileReleaseIssuedToInput('')
+    setStockpileReleaseReasonInput('')
   }
 
   const handlePrintStockpileReleaseLogs = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
     const rangeStart = startDate ?? reportStartDate
     const rangeEnd = endDate ?? reportEndDate
+    const reportSignerName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
 
     const rows = parsedStockpileReleaseLogs
       .filter((entry) => {
+        if (isArchivedRow(entry.log)) {
+          return false
+        }
         return isDateWithinReportRange(entry.log.operation_date, rangeStart, rangeEnd)
       })
       .slice()
-      .sort((a, b) => a.log.log_id - b.log.log_id)
+      .sort((a, b) => b.log.log_id - a.log.log_id)
       .map((entry) => ({
-        date: formatDisplayDate(entry.log.operation_date),
+        date: formatInventoryDate(entry.log.operation_date),
         item: entry.itemName || '—',
         quantity: String(entry.quantity),
         unit: entry.unit || '—',
@@ -2774,7 +3584,9 @@ function DashboardPage() {
             th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
             th { background: #f3f4f6; font-weight: 600; }
             .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
-            .sign-line { margin-top: 48px; border-top: 1px solid #111827; padding-top: 6px; font-size: 12px; width: 280px; }
+            .sign-line { margin-top: 48px; width: 280px; }
+            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
+            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
             @media print { body { margin: 10mm; } }
           </style>
         </head>
@@ -2801,7 +3613,8 @@ function DashboardPage() {
 
           <div class="signatures">
             <div>
-              <div class="sign-line">Issued by</div>
+              <div class="sign-line"><span class="sign-name">${escapeHtml(reportSignerName)}</span></div>
+              <div class="sign-role">Issued by</div>
             </div>
           </div>
         </body>
@@ -2811,12 +3624,135 @@ function DashboardPage() {
     printHtmlViaIframe(printDocument, setStockpileError)
   }
 
+  const handlePrintInventoryReport = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
+    const rangeStart = startDate ?? reportStartDate
+    const rangeEnd = endDate ?? reportEndDate
+    const reportSignerName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
+
+    const inventoryRows = inventoryItems
+      .filter((item) => {
+        if (isArchivedRow(item) || getInventoryStatus(item) === 'Archived') {
+          return false
+        }
+
+        return isDateWithinReportRange(item.date_acquired ?? item.created_at, rangeStart, rangeEnd)
+      })
+      .slice()
+      .sort((a, b) => a.item_id - b.item_id)
+      .map((item) => ({
+        itemNo: `ITEM-${item.item_id.toString().padStart(3, '0')}`,
+        item: item.item_name,
+        type: item.item_type,
+        quantity: String(item.quantity ?? '—'),
+        unit: item.unit_of_measure ?? '—',
+        source: item.acquisition_mode ?? '—',
+        condition: item.condition ?? '—',
+        status:
+          item.item_type.trim().toLowerCase() === 'stockpile'
+            ? (() => {
+                const expirationDate = item.expiration_date ? new Date(item.expiration_date) : null
+                const isExpired = expirationDate != null && !Number.isNaN(expirationDate.getTime()) && expirationDate < new Date()
+                return isExpired ? 'Expired' : 'Valid'
+              })()
+            : item.status ?? '—',
+      }))
+
+    const inventoryRowsMarkup = inventoryRows
+      .map(
+        (row) =>
+          `<tr>
+            <td>${escapeHtml(row.itemNo)}</td>
+            <td>${escapeHtml(row.item)}</td>
+            <td>${escapeHtml(row.type)}</td>
+            <td>${escapeHtml(row.quantity)}</td>
+            <td>${escapeHtml(row.unit)}</td>
+            <td>${escapeHtml(row.source)}</td>
+            <td>${escapeHtml(row.condition)}</td>
+            <td>${escapeHtml(row.status)}</td>
+          </tr>`,
+      )
+      .join('')
+
+    const printDocument = `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>Inventory Report</title>
+          <style>
+            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+            h1 { margin: 0 0 8px; font-size: 20px; }
+            h2 { margin: 20px 0 8px; font-size: 16px; }
+            p { margin: 0 0 14px; color: #4b5563; font-size: 13px; }
+            table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
+            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; vertical-align: top; }
+            th { background: #f3f4f6; font-weight: 600; }
+            .section { margin-top: 18px; }
+            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
+            .sign-line { margin-top: 48px; width: 280px; }
+            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
+            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
+            @media print { body { margin: 10mm; } }
+          </style>
+        </head>
+        <body>
+          <h1>Inventory Report</h1>
+          <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
+          ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
+          <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
+
+          <div class="section">
+            <h2>Inventory Items</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Item No.</th>
+                  <th>Item</th>
+                  <th>Type</th>
+                  <th>Qty</th>
+                  <th>Unit</th>
+                  <th>Source</th>
+                  <th>Condition</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${inventoryRowsMarkup || '<tr><td colspan="8">No inventory items found.</td></tr>'}
+              </tbody>
+            </table>
+          </div>
+
+          <div class="signatures">
+            <div>
+              <div class="sign-line"><span class="sign-name">${escapeHtml(reportSignerName)}</span></div>
+              <div class="sign-role">Prepared by</div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `
+
+    printHtmlViaIframe(printDocument, setInventoryError)
+  }
+
   const handlePrintWmrSummary = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
     const rangeStart = startDate ?? reportStartDate
     const rangeEnd = endDate ?? reportEndDate
+    const reportSignerName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
 
     const allRows = wmrReports
       .filter((report) => {
+        if (isArchivedRow(report) || (report.status ?? '').trim() === 'Archived') {
+          return false
+        }
+
+        if (report.item_id != null) {
+          const mappedItem = inventoryItems.find((item) => item.item_id === report.item_id) ?? null
+          if (mappedItem && (isArchivedRow(mappedItem) || getInventoryStatus(mappedItem) === 'Archived')) {
+            return false
+          }
+        }
+
         const fallbackDate =
           report.item_id != null
             ? inventoryItems.find((item) => item.item_id === report.item_id)?.created_at ??
@@ -2842,7 +3778,7 @@ function DashboardPage() {
               ? departments.find((dept) => dept.id === mappedItem.department_id)?.name ?? '—'
               : '—'),
           status: report.status?.trim() || 'Pending',
-          dateReported: formatDisplayDate(report.date_reported ?? mappedItem?.created_at ?? mappedItem?.date_acquired),
+          dateReported: formatInventoryDate(report.date_reported ?? mappedItem?.created_at ?? mappedItem?.date_acquired),
         }
       })
 
@@ -2873,6 +3809,10 @@ function DashboardPage() {
             table { width: 100%; border-collapse: collapse; font-size: 13px; }
             th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
             th { background: #f3f4f6; font-weight: 600; }
+            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
+            .sign-line { margin-top: 48px; width: 280px; }
+            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
+            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
             @media print { body { margin: 10mm; } }
           </style>
         </head>
@@ -2896,6 +3836,12 @@ function DashboardPage() {
               ${rowsMarkup || '<tr><td colspan="6">No WMR entries found.</td></tr>'}
             </tbody>
           </table>
+          <div class="signatures">
+            <div>
+              <div class="sign-line"><span class="sign-name">${escapeHtml(reportSignerName)}</span></div>
+              <div class="sign-role">Prepared by</div>
+            </div>
+          </div>
         </body>
       </html>
     `
@@ -2906,28 +3852,48 @@ function DashboardPage() {
   const handlePrintVehicleRepairLogs = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
     const rangeStart = startDate ?? reportStartDate
     const rangeEnd = endDate ?? reportEndDate
+    const reportSignerName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
 
     const rows = vehicleRepairs
       .filter((repair) => {
+        if (isArchivedRow(repair)) {
+          return false
+        }
+
+        const mappedVehicle = repair.vehicle_id != null
+          ? vehicles.find((vehicle) => vehicle.id === repair.vehicle_id) ?? null
+          : null
+        if (mappedVehicle && isArchivedRow(mappedVehicle)) {
+          return false
+        }
+
         return isDateWithinReportRange(repair.date_repaired, rangeStart, rangeEnd)
       })
       .slice()
-      .sort((a, b) => a.repair_id - b.repair_id)
+      .sort((a, b) => b.repair_id - a.repair_id)
       .map((repair) => {
         const vehicle = vehicles.find((entry) => entry.id === repair.vehicle_id) ?? null
-        const admin = parUsers.find((user) => user.id === repair.admin_id) ?? null
+        const amountValue = Number(repair.amount ?? 0)
 
         return {
           repairNo: `VR-${repair.repair_id.toString().padStart(3, '0')}`,
           vehicle: vehicle?.make_model ?? `Vehicle ${repair.vehicle_id ?? '—'}`,
-          date: formatDisplayDate(repair.date_repaired),
+          date: formatInventoryDate(repair.date_repaired),
           jobOrder: repair.job_order_number ?? '—',
           serviceCenter: repair.service_center ?? '—',
           remarks: getRepairDescription(repair.repair_id, vehicle?.repair_history_log ?? null),
-          amount: formatCurrency(Number(repair.amount ?? 0)),
-          issuedTo: admin?.full_name ?? repair.admin_id ?? '—',
+          amount: formatCurrency(amountValue),
+          amountValue,
         }
       })
+
+    const totalRepairCost = rows.reduce((sum, row) => sum + (Number.isFinite(row.amountValue) ? row.amountValue : 0), 0)
+    const totalRowMarkup = rows.length
+      ? `<tr>
+            <td colspan="6" style="text-align:right;"><strong>Total Cost</strong></td>
+            <td><strong>${escapeHtml(formatCurrency(totalRepairCost))}</strong></td>
+          </tr>`
+      : ''
 
     const rowsMarkup = rows
       .map(
@@ -2940,7 +3906,6 @@ function DashboardPage() {
             <td>${escapeHtml(row.serviceCenter)}</td>
             <td>${escapeHtml(row.remarks)}</td>
             <td>${escapeHtml(row.amount)}</td>
-            <td>${escapeHtml(row.issuedTo)}</td>
           </tr>`,
       )
       .join('')
@@ -2958,6 +3923,10 @@ function DashboardPage() {
             table { width: 100%; border-collapse: collapse; font-size: 13px; }
             th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
             th { background: #f3f4f6; font-weight: 600; }
+            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
+            .sign-line { margin-top: 48px; width: 280px; }
+            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
+            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
             @media print { body { margin: 10mm; } }
           </style>
         </head>
@@ -2976,13 +3945,19 @@ function DashboardPage() {
                 <th>Service Center</th>
                 <th>Remarks</th>
                 <th>Cost</th>
-                <th>Issued To</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsMarkup || '<tr><td colspan="8">No repair logs found.</td></tr>'}
+              ${rowsMarkup || '<tr><td colspan="7">No repair logs found.</td></tr>'}
+              ${totalRowMarkup}
             </tbody>
           </table>
+          <div class="signatures">
+            <div>
+              <div class="sign-line"><span class="sign-name">${escapeHtml(reportSignerName)}</span></div>
+              <div class="sign-role">Prepared by</div>
+            </div>
+          </div>
         </body>
       </html>
     `
@@ -2990,46 +3965,32 @@ function DashboardPage() {
     printHtmlViaIframe(printDocument, setVehicleError)
   }
 
-  const dynamicStockpileCategories = Array.from(
-    new Set(stockpileItems.map((item) => item.category?.trim()).filter((cat): cat is string => !!cat)),
-  )
-
-  const categoryOptions = Array.from(
-    new Set([...DEFAULT_STOCKPILE_CATEGORIES, ...dynamicStockpileCategories]),
-  )
-
   const filteredStockpileItems = stockpileItems.filter((item) => {
-    if (!item.expiration_date) {
-      const matchesSearch =
-        !stockpileSearchQuery ||
-        (item.item_name ?? '').toLowerCase().includes(stockpileSearchQuery.toLowerCase())
-      const matchesCategory = stockpileCategoryFilter === 'all' || item.category === stockpileCategoryFilter
-      return matchesSearch && matchesCategory
-    }
-
-    const expiration = new Date(item.expiration_date)
-    const isExpired = !Number.isNaN(expiration.getTime()) && expiration < today
-    if (isExpired) return false
-
-    const matchesSearch =
-      !stockpileSearchQuery ||
-      (item.item_name ?? '').toLowerCase().includes(stockpileSearchQuery.toLowerCase())
-    const matchesCategory = stockpileCategoryFilter === 'all' || item.category === stockpileCategoryFilter
-    return matchesSearch && matchesCategory
-  })
+    const explicitStatus = item.status?.trim() || null
+    const expiration = item.expiration_date ? new Date(item.expiration_date) : null
+    const isExpired =
+      explicitStatus === 'Expired' ||
+      (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
+    return !isExpired
+  }).sort((a, b) => b.stockpile_id - a.stockpile_id)
 
   const filteredExpiredStockpileItems = stockpileItems.filter((item) => {
-    if (!item.expiration_date) return false
+    const explicitStatus = item.status?.trim() || null
+    const expiration = item.expiration_date ? new Date(item.expiration_date) : null
+    const isExpired =
+      explicitStatus === 'Expired' ||
+      (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
 
-    const expiration = new Date(item.expiration_date)
-    if (Number.isNaN(expiration.getTime())) return false
+    return isExpired
+  }).sort((a, b) => b.stockpile_id - a.stockpile_id)
 
-    const matchesSearch =
-      !stockpileSearchQuery ||
-      (item.item_name ?? '').toLowerCase().includes(stockpileSearchQuery.toLowerCase())
-    const matchesCategory = stockpileCategoryFilter === 'all' || item.category === stockpileCategoryFilter
-
-    return expiration < today && matchesSearch && matchesCategory
+  const availableReleaseStockpileItems = stockpileItems.filter((item) => {
+    const explicitStatus = item.status?.trim() || null
+    const expiration = item.expiration_date ? new Date(item.expiration_date) : null
+    return !(
+      explicitStatus === 'Expired' ||
+      (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
+    )
   })
 
   const parsedStockpileReleaseLogs: StockpileReleaseLog[] = stockpileReleaseLogs.flatMap((log) => {
@@ -3054,13 +4015,29 @@ function DashboardPage() {
         },
       ]
     })
-  })
+  }).sort((a, b) => b.log.log_id - a.log.log_id)
 
-  const reportStockpileLogCount = parsedStockpileReleaseLogs.filter((entry) =>
-    isDateWithinReportRange(entry.log.operation_date, reportStartDate, reportEndDate),
-  ).length
+  const reportInventoryCount =
+    inventoryItems.filter((item) => {
+      if (isArchivedRow(item) || getInventoryStatus(item) === 'Archived') {
+        return false
+      }
+
+      return isDateWithinReportRange(item.date_acquired ?? item.created_at, reportStartDate, reportEndDate)
+    }).length
 
   const reportWmrCount = wmrReports.filter((report) => {
+    if (isArchivedRow(report) || (report.status ?? '').trim() === 'Archived') {
+      return false
+    }
+
+    if (report.item_id != null) {
+      const mappedItem = inventoryItems.find((item) => item.item_id === report.item_id) ?? null
+      if (mappedItem && (isArchivedRow(mappedItem) || getInventoryStatus(mappedItem) === 'Archived')) {
+        return false
+      }
+    }
+
     const fallbackDate =
       report.item_id != null
         ? inventoryItems.find((item) => item.item_id === report.item_id)?.created_at ??
@@ -3071,8 +4048,24 @@ function DashboardPage() {
     return isDateWithinReportRange(report.date_reported ?? fallbackDate, reportStartDate, reportEndDate)
   }).length
 
-  const reportVehicleRepairCount = vehicleRepairs.filter((repair) =>
-    isDateWithinReportRange(repair.date_repaired, reportStartDate, reportEndDate),
+  const reportVehicleRepairCount = vehicleRepairs.filter((repair) => {
+    if (isArchivedRow(repair)) {
+      return false
+    }
+
+    const mappedVehicle = repair.vehicle_id != null
+      ? vehicles.find((vehicle) => vehicle.id === repair.vehicle_id) ?? null
+      : null
+    if (mappedVehicle && isArchivedRow(mappedVehicle)) {
+      return false
+    }
+
+    return isDateWithinReportRange(repair.date_repaired, reportStartDate, reportEndDate)
+  }).length
+
+  const reportStockpileReleaseCount = parsedStockpileReleaseLogs.filter((entry) =>
+    !isArchivedRow(entry.log) &&
+    isDateWithinReportRange(entry.log.operation_date, reportStartDate, reportEndDate),
   ).length
 
   const parsedReportStartDate = parseDateLikeValue(reportStartDate)
@@ -3105,7 +4098,7 @@ function DashboardPage() {
         onChangeSection={setActiveSection}
         isCollapsed={isSidebarCollapsed}
         onToggleCollapse={() => setIsSidebarCollapsed((prev) => !prev)}
-        displayName={currentAdminName}
+        displayName={currentAdminPosition || currentAdminName}
       />
 
       <main className="dashboard-main">
@@ -3114,7 +4107,7 @@ function DashboardPage() {
             <header className="dashboard-header">
               <div>
                 <h2>Dashboard</h2>
-                <p>Welcome back, {currentAdminName}</p>
+                <p>Welcome back, {currentAdminFirstName || currentAdminLastName ? `${currentAdminFirstName} ${currentAdminLastName}`.trim() : currentAdminName}</p>
               </div>
             </header>
 
@@ -3132,7 +4125,7 @@ function DashboardPage() {
                       d="M7 8l5-3 5 3-5 3-5-3Z M7 8v6l5 3 5-3V8 M7 14l5 3 5-3 M12 11v6"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.5"
+                      strokeWidth="1.4"
                       strokeLinejoin="round"
                     />
                   </svg>
@@ -3150,7 +4143,7 @@ function DashboardPage() {
                       d="M8.5 12.5l2.2 2.2L15.5 10"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.8"
+                      strokeWidth="1.4"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
@@ -3164,24 +4157,60 @@ function DashboardPage() {
                 </div>
                 <div className="metric-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M8 8l8 8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                    <path d="M8 8l8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
                   </svg>
                 </div>
               </article>
-              <article className="metric-card">
+              <article className="metric-card dashboard-source-card dashboard-source-card-purchased">
+                <div className="metric-text">
+                  <div className="dashboard-source-card-label">Purchased</div>
+                  <div className="dashboard-source-card-value">{formatValue(purchasedCount)}</div>
+                </div>
+                <div className="metric-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="M6 8.5h12l-1 10.5H7L6 8.5Zm2.2 0V7.2A3.8 3.8 0 0 1 12 3.4a3.8 3.8 0 0 1 3.8 3.8v1.3"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+              </article>
+              <article className="metric-card dashboard-source-card dashboard-source-card-donated">
+                <div className="metric-text">
+                  <div className="dashboard-source-card-label">Donated</div>
+                  <div className="dashboard-source-card-value">{formatValue(donatedCount)}</div>
+                </div>
+                <div className="metric-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="M12 21s-6.8-4.3-9-8.8C1.2 8.9 3.2 5.5 6.8 5.2c1.9-.2 3.8.8 5.2 2.5 1.4-1.7 3.3-2.7 5.2-2.5 3.6.3 5.6 3.7 3.8 7-2.2 4.5-9 8.8-9 8.8Z"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+              </article>
+              <article className="metric-card metric-card-unserviceable">
                 <div className="metric-text">
                   <div className="metric-label">Expired Items</div>
                   <div className="metric-value">{formatValue(dashboardExpiredCount)}</div>
                 </div>
                 <div className="metric-icon" aria-hidden="true">
                   <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
                     <path
                       d="M12 8v4l3 2"
                       fill="none"
                       stroke="currentColor"
-                      strokeWidth="1.8"
+                      strokeWidth="1.4"
                       strokeLinecap="round"
                       strokeLinejoin="round"
                     />
@@ -3189,56 +4218,6 @@ function DashboardPage() {
                 </div>
               </article>
             </section>
-
-            <section className="dashboard-actions" aria-label="Key actions">
-              <button
-                type="button"
-                className="action-card action-card-item"
-                onClick={() => setActiveSection('inventory')}
-              >
-            <span className="action-card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <rect x="5" y="8" width="14" height="10" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M5 11h14" fill="none" stroke="currentColor" strokeWidth="1.6" />
-              </svg>
-            </span>
-            <div className="action-card-body">
-              <h3>Item Management</h3>
-              <p>Add and manage inventory items</p>
-            </div>
-          </button>
-          <button type="button" className="action-card action-card-staff">
-            <span className="action-card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <circle cx="9" cy="10" r="2.4" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                <circle cx="16" cy="11" r="2" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                <path d="M5.5 18c.6-2 1.9-3 3.5-3s2.9 1 3.5 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <path d="M13.8 18c.4-1.3 1.3-2 2.3-2 1 0 1.9.6 2.3 1.7" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-              </svg>
-            </span>
-            <div className="action-card-body">
-              <h3>Staff Management</h3>
-              <p>Manage departments and staff</p>
-            </div>
-          </button>
-          <button
-            type="button"
-            className="action-card action-card-wmr"
-            onClick={() => setActiveSection('wmr')}
-          >
-            <span className="action-card-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d="M12 4L3 19h18L12 4z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M12 9v5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                <circle cx="12" cy="16" r="0.9" fill="currentColor" />
-              </svg>
-            </span>
-            <div className="action-card-body">
-              <h3>Waste Material Reports</h3>
-              <p>View WMR cases</p>
-            </div>
-          </button>
-          </section>
 
           <section className="dashboard-row" aria-label="Charts">
           <article className="panel" aria-label="Stockpile Status">
@@ -3349,14 +4328,19 @@ function DashboardPage() {
             setTypeFilter={setTypeFilter}
             departmentFilter={departmentFilter}
             setDepartmentFilter={setDepartmentFilter}
+            sourceFilter={sourceFilter}
+            setSourceFilter={setSourceFilter}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             typeOptions={typeOptions}
             departments={departments.map((dept) => ({ id: dept.id, name: dept.name }))}
+            sourceOptions={acquisitionModeOptions}
             statusOptions={statusOptions}
             inventoryLoading={inventoryLoading}
             filteredInventoryItems={filteredInventoryItems}
+            getItemStatus={getInventoryStatus}
             getItemPhotoUrls={getItemPhotoUrls}
+            formatInventoryDate={formatInventoryDate}
             openEditItem={openEditItem}
             setViewImageItem={setViewImageItem}
             setViewImageIndex={setViewImageIndex}
@@ -3370,6 +4354,8 @@ function DashboardPage() {
             setNewItemName={setNewItemName}
             newItemType={newItemType}
             setNewItemType={setNewItemType}
+            newCondition={newCondition}
+            setNewCondition={setNewCondition}
             newItemDepartmentId={newItemDepartmentId}
             setNewItemDepartmentId={setNewItemDepartmentId}
             newQuantity={newQuantity}
@@ -3380,6 +4366,8 @@ function DashboardPage() {
             setNewUnitCost={setNewUnitCost}
             newDateAcquired={newDateAcquired}
             setNewDateAcquired={setNewDateAcquired}
+            newExpirationDate={newExpirationDate}
+            setNewExpirationDate={setNewExpirationDate}
             newSource={newSource}
             setNewSource={setNewSource}
             newPhotoFiles={newPhotoFiles}
@@ -3394,70 +4382,106 @@ function DashboardPage() {
         )}
 
         {activeSection === 'settings' && (
-          <section className="dashboard-row" aria-label="Settings overview">
-            <article className="panel panel-wide">
-              <header className="panel-header">
-                <h3>Settings</h3>
-              </header>
-              <div className="panel-body">
-                <div style={{ display: 'grid', gap: 16 }}>
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>Profile</h4>
+          <div className="inventory-layout" aria-label="Settings">
+            <header className="dashboard-header">
+              <div>
+                <h2>Settings</h2>
+                <p>Manage your profile and account settings</p>
+              </div>
+            </header>
+
+            <section className="inventory-toolbar" aria-label="Settings sections">
+              <button
+                type="button"
+                className={settingsTab === 'profile' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                onClick={() => setSettingsTab('profile')}
+              >
+                Profile
+              </button>
+              <button
+                type="button"
+                className={settingsTab === 'archive' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                onClick={() => setSettingsTab('archive')}
+              >
+                Archive
+              </button>
+            </section>
+
+            {settingsErrorMessage && <p className="dashboard-error">{settingsErrorMessage}</p>}
+            {settingsSuccessMessage && <p style={{ color: '#15803d', fontSize: 13 }}>{settingsSuccessMessage}</p>}
+
+            {settingsTab === 'profile' && (
+              <>
+                <section className="inventory-add-section" aria-label="Profile settings">
+                  <div className="inventory-add-card">
+                    <h3 className="inventory-add-title">Profile</h3>
                     {settingsProfileLoading ? (
                       <p style={{ margin: 0, color: '#6b7280', fontSize: 13 }}>Loading profile…</p>
                     ) : (
                       <>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10, marginBottom: 12 }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Email</label>
-                            <input className="inventory-input" value={settingsEmail || '—'} readOnly />
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                          {/* Row 1: First Name | Last Name */}
+                          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                            <div className="inventory-field" style={{ width: 200 }}>
+                              <label htmlFor="settings-first-name">First Name</label>
+                              <input
+                                id="settings-first-name"
+                                className="inventory-input"
+                                value={settingsFirstNameInput}
+                                onChange={(e) => setSettingsFirstNameInput(e.target.value)}
+                                placeholder="First name"
+                              />
+                            </div>
+                            <div className="inventory-field" style={{ width: 200 }}>
+                              <label htmlFor="settings-last-name">Last Name</label>
+                              <input
+                                id="settings-last-name"
+                                className="inventory-input"
+                                value={settingsLastNameInput}
+                                onChange={(e) => setSettingsLastNameInput(e.target.value)}
+                                placeholder="Last name"
+                              />
+                            </div>
                           </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Staff ID</label>
-                            <input className="inventory-input" value={settingsStaffId || '—'} readOnly />
+                          {/* Row 2: Position | User ID */}
+                          <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                            <div className="inventory-field" style={{ width: 200 }}>
+                              <label htmlFor="settings-position">Position</label>
+                              <input
+                                id="settings-position"
+                                className="inventory-input"
+                                value={settingsPositionInput}
+                                onChange={(e) => setSettingsPositionInput(e.target.value)}
+                                placeholder="Enter position"
+                              />
+                            </div>
+                            <div className="inventory-field" style={{ width: 200 }}>
+                              <label>User ID</label>
+                              <input className="inventory-input" value={settingsStaffId || '—'} readOnly style={{ background: '#f8fafc' }} />
+                            </div>
                           </div>
                         </div>
-                        <div style={{ display: 'grid', gap: 8 }}>
-                          <label htmlFor="settings-full-name" style={{ fontSize: 12, color: '#6b7280' }}>Change Name</label>
-                          <input
-                            id="settings-full-name"
-                            className="inventory-input"
-                            value={settingsNameInput}
-                            onChange={(e) => setSettingsNameInput(e.target.value)}
-                            placeholder="Enter full name"
-                          />
-                          <label htmlFor="settings-position" style={{ fontSize: 12, color: '#6b7280' }}>Position</label>
-                          <input
-                            id="settings-position"
-                            className="inventory-input"
-                            value={settingsPositionInput}
-                            onChange={(e) => setSettingsPositionInput(e.target.value)}
-                            placeholder="Enter position"
-                          />
-                          <div>
-                            <button
-                              type="button"
-                              className="wmr-modal-button-save"
-                              onClick={() => {
-                                void handleSaveSettingsName()
-                              }}
-                              disabled={settingsNameSaving || settingsProfileLoading}
-                            >
-                              {settingsNameSaving ? 'Saving…' : 'Save Profile'}
-                            </button>
-                          </div>
+                        <div className="inventory-add-actions">
+                          <button
+                            type="button"
+                            className="inventory-add-submit"
+                            onClick={() => { void handleSaveSettingsName() }}
+                            disabled={settingsNameSaving || settingsProfileLoading}
+                          >
+                            {settingsNameSaving ? 'Saving…' : 'Save Profile'}
+                          </button>
                         </div>
                       </>
                     )}
-                  </section>
+                  </div>
+                </section>
 
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>Change Password</h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 }}>
-                      <div>
-                        <label htmlFor="settings-new-password" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
-                          New Password
-                        </label>
+                <section className="inventory-add-section" aria-label="Change password">
+                  <div className="inventory-add-card">
+                    <h3 className="inventory-add-title">Change Password</h3>
+                    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                      <div className="inventory-field" style={{ width: 200 }}>
+                        <label htmlFor="settings-new-password">New Password</label>
                         <input
                           id="settings-new-password"
                           type="password"
@@ -3467,10 +4491,8 @@ function DashboardPage() {
                           placeholder="At least 8 characters"
                         />
                       </div>
-                      <div>
-                        <label htmlFor="settings-confirm-password" style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
-                          Confirm Password
-                        </label>
+                      <div className="inventory-field" style={{ width: 200 }}>
+                        <label htmlFor="settings-confirm-password">Confirm Password</label>
                         <input
                           id="settings-confirm-password"
                           type="password"
@@ -3481,525 +4503,958 @@ function DashboardPage() {
                         />
                       </div>
                     </div>
-                    <div style={{ marginTop: 10 }}>
+                    <div className="inventory-add-actions">
                       <button
                         type="button"
-                        className="wmr-modal-button-save"
-                        onClick={() => {
-                          void handleChangeSettingsPassword()
-                        }}
+                        className="inventory-add-submit"
+                        onClick={() => { void handleChangeSettingsPassword() }}
                         disabled={settingsPasswordSaving || settingsProfileLoading}
                       >
                         {settingsPasswordSaving ? 'Updating…' : 'Update Password'}
                       </button>
                     </div>
-                  </section>
+                  </div>
+                </section>
+              </>
+            )}
 
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
-                      Archived Inventory ({archivedInventoryItems.length})
-                    </h4>
-                    {archivedInventoryItems.length === 0 ? (
-                      <p style={{ margin: 0, color: '#6b7280', fontSize: 13 }}>No archived inventory items.</p>
-                    ) : (
-                      <div style={{ overflowX: 'auto' }}>
-                        <table className="inventory-table">
-                          <thead>
-                            <tr>
-                              <th scope="col">ID</th>
-                              <th scope="col">Name</th>
-                              <th scope="col">Type</th>
-                              <th scope="col">Qty</th>
-                              <th scope="col">Date Acquired</th>
-                              <th scope="col">Status</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {archivedInventoryItems.map((item) => (
-                              <tr key={`archived-${item.item_id}`}>
-                                <td>{`ITEM-${item.item_id.toString().padStart(3, '0')}`}</td>
-                                <td>{item.item_name}</td>
-                                <td>{item.item_type}</td>
-                                <td>{item.quantity ?? '—'}</td>
-                                <td>{formatDisplayDate(item.date_acquired)}</td>
-                                <td>
-                                  <span className="badge">Archived</span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </section>
-
-                  {settingsErrorMessage && <p className="dashboard-error" style={{ margin: 0 }}>{settingsErrorMessage}</p>}
-                  {settingsSuccessMessage && (
-                    <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{settingsSuccessMessage}</p>
-                  )}
-                </div>
-              </div>
-            </article>
-          </section>
-        )}
-
-        {activeSection === 'departments-staff' && (
-          <section className="dashboard-row" aria-label="Departments and staff management">
-            <article className="panel panel-wide">
-              <header className="panel-header">
-                <h3>Departments &amp; Staff</h3>
-              </header>
-              <div className="panel-body" style={{ display: 'grid', gap: 16 }}>
-                <section className="inventory-toolbar" aria-label="Departments and staff actions">
+            {settingsTab === 'archive' && (
+              <div style={{ display: 'grid', gap: 14 }}>
+                <section className="archive-bookmark-strip" aria-label="Archive table selector" role="tablist">
                   <button
                     type="button"
-                    className={departmentStaffMode === 'add-staff' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-                    onClick={() => {
-                      setDepartmentStaffMode('add-staff')
-                      setStaffFormMode('add')
-                    }}
+                    role="tab"
+                    aria-selected={archiveTableSelector === 'inventory'}
+                    className={`archive-bookmark-tab ${archiveTableSelector === 'inventory' ? 'archive-bookmark-tab-active' : ''}`}
+                    onClick={() => setArchiveTableSelector('inventory')}
                   >
-                    Add Staff
+                    Inventory
                   </button>
                   <button
                     type="button"
-                    className={departmentStaffMode === 'add-department' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-                    onClick={() => {
-                      setDepartmentStaffMode('add-department')
-                      resetDepartmentForm()
-                    }}
+                    role="tab"
+                    aria-selected={archiveTableSelector === 'wmr'}
+                    className={`archive-bookmark-tab ${archiveTableSelector === 'wmr' ? 'archive-bookmark-tab-active' : ''}`}
+                    onClick={() => setArchiveTableSelector('wmr')}
                   >
-                    Add Department
+                    WMR
                   </button>
                   <button
                     type="button"
-                    className={departmentStaffMode === 'manage-staff' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-                    onClick={() => setDepartmentStaffMode('manage-staff')}
+                    role="tab"
+                    aria-selected={archiveTableSelector === 'par'}
+                    className={`archive-bookmark-tab ${archiveTableSelector === 'par' ? 'archive-bookmark-tab-active' : ''}`}
+                    onClick={() => setArchiveTableSelector('par')}
                   >
-                    Manage Staff
+                    PAR
                   </button>
                   <button
                     type="button"
-                    className={departmentStaffMode === 'manage-department' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-                    onClick={() => setDepartmentStaffMode('manage-department')}
+                    role="tab"
+                    aria-selected={archiveTableSelector === 'vehicles'}
+                    className={`archive-bookmark-tab ${archiveTableSelector === 'vehicles' ? 'archive-bookmark-tab-active' : ''}`}
+                    onClick={() => setArchiveTableSelector('vehicles')}
                   >
-                    Manage Department
+                    Vehicles
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={archiveTableSelector === 'staff'}
+                    className={`archive-bookmark-tab ${archiveTableSelector === 'staff' ? 'archive-bookmark-tab-active' : ''}`}
+                    onClick={() => setArchiveTableSelector('staff')}
+                  >
+                    Staff
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={archiveTableSelector === 'departments'}
+                    className={`archive-bookmark-tab ${archiveTableSelector === 'departments' ? 'archive-bookmark-tab-active' : ''}`}
+                    onClick={() => setArchiveTableSelector('departments')}
+                  >
+                    Departments
                   </button>
                 </section>
 
-                {departmentStaffMode === 'add-department' && (
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
-                      {departmentFormMode === 'edit' ? 'Edit Department' : 'Add Department'}
-                    </h4>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 240px))', gap: 10, justifyContent: 'start' }}>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department Name</label>
-                        <input
-                          className="inventory-input"
-                          value={newDepartmentName}
-                          onChange={(e) => setNewDepartmentName(e.target.value)}
-                          placeholder="e.g. Rescue Department"
-                        />
+                {showArchiveTable('inventory') && (
+                  <section className="inventory-table-section inventory-table-section-compact archive-table-panel" aria-label="Archived inventory">
+                    <div className="inventory-table-card">
+                      <div className="inventory-table-title">
+                        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Archived Inventory ({archivedInventoryItems.length})</h4>
                       </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department Code</label>
-                        <input
-                          className="inventory-input"
-                          value={newDepartmentCode}
-                          onChange={(e) => setNewDepartmentCode(e.target.value)}
-                          placeholder="Auto-generated if blank"
-                        />
-                      </div>
-                    </div>
-                    <div style={{ marginTop: 12, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <button
-                        type="button"
-                        className="wmr-modal-button-save"
-                        onClick={() => {
-                          void handleSaveDepartment()
-                        }}
-                        disabled={addingDepartment}
-                      >
-                        {addingDepartment
-                          ? departmentFormMode === 'edit'
-                            ? 'Saving…'
-                            : 'Adding…'
-                          : departmentFormMode === 'edit'
-                            ? 'Save Department'
-                            : 'Add Department'}
-                      </button>
-                      {departmentFormMode === 'edit' && (
-                        <button
-                          type="button"
-                          className="wmr-modal-button-secondary"
-                          onClick={resetDepartmentForm}
-                          disabled={addingDepartment}
-                        >
-                          Cancel
-                        </button>
+                      {archivedInventoryItems.length === 0 ? (
+                        <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived inventory items.</p>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">ID</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Type</th>
+                                <th scope="col">Qty</th>
+                                <th scope="col">Date Acquired</th>
+                                <th scope="col">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {archivedInventoryItems.map((item) => (
+                                <tr key={`archived-${item.item_id}`}>
+                                  <td>{`ITEM-${item.item_id.toString().padStart(3, '0')}`}</td>
+                                  <td>{item.item_name}</td>
+                                  <td>{item.item_type}</td>
+                                  <td>{item.quantity ?? '—'}</td>
+                                  <td>{formatDisplayDate(item.date_acquired)}</td>
+                                  <td><span className="badge">Archived</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
                     </div>
                   </section>
                 )}
 
-                {departmentStaffMode === 'add-staff' && (
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>
-                      {staffFormMode === 'edit' ? 'Edit Staff' : 'Add Staff'}
-                    </h4>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 240px))',
-                        gap: 10,
-                        justifyContent: 'start',
-                      }}
+                {showArchiveTable('wmr') && (
+                  <section className="inventory-table-section inventory-table-section-compact archive-table-panel" aria-label="Archived WMR reports">
+                    <div className="inventory-table-card">
+                      <div className="inventory-table-title">
+                        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Archived WMR Reports ({archivedWmrReports.length})</h4>
+                      </div>
+                      {archivedWmrReports.length === 0 ? (
+                        <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived WMR reports.</p>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Report ID</th>
+                                <th scope="col">Item</th>
+                                <th scope="col">Type</th>
+                                <th scope="col">Location</th>
+                                <th scope="col">Date Reported</th>
+                                <th scope="col">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {archivedWmrReports.map((report) => {
+                                const mappedItem = report.item_id != null
+                                  ? inventoryItems.find((item) => item.item_id === report.item_id)
+                                  : null
+                                const itemLabel = report.item_id == null
+                                  ? report.location?.replace('Vehicle Registry - ', '') || 'Vehicle'
+                                  : mappedItem?.item_name ?? '—'
+
+                                return (
+                                  <tr key={`archived-wmr-${report.report_id}`}>
+                                    <td>{`WMR-${report.report_id.toString().padStart(3, '0')}`}</td>
+                                    <td>{itemLabel}</td>
+                                    <td>{report.item_id == null ? 'Vehicle' : mappedItem?.item_type ?? 'Inventory Item'}</td>
+                                    <td>{report.location ?? '—'}</td>
+                                    <td>{formatDisplayDate(report.date_reported)}</td>
+                                    <td><span className="badge">Archived</span></td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {showArchiveTable('par') && (
+                  <section className="inventory-table-section inventory-table-section-compact archive-table-panel" aria-label="Archived PAR records">
+                    <div className="inventory-table-card">
+                      <div className="inventory-table-title">
+                        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Archived PAR Records ({archivedParRecords.length})</h4>
+                      </div>
+                      {archivedParRecords.length === 0 ? (
+                        <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived PAR records.</p>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">PAR ID</th>
+                                <th scope="col">Issued To</th>
+                                <th scope="col">Item</th>
+                                <th scope="col">Quantity</th>
+                                <th scope="col">Issue Date</th>
+                                <th scope="col">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {archivedParRecords.map((record) => {
+                                const issuedTo = parUsers.find((user) => user.id === record.issued_to_id)
+                                const mappedItem = inventoryItems.find((item) => item.item_id === record.item_id)
+
+                                return (
+                                  <tr key={`archived-par-${record.par_id}`}>
+                                    <td>{`PAR-${record.par_id.toString().padStart(3, '0')}`}</td>
+                                    <td>{issuedTo?.full_name ?? record.issued_to_id ?? '—'}</td>
+                                    <td>{record.description_snapshot ?? mappedItem?.item_name ?? '—'}</td>
+                                    <td>{record.quantity_issued ?? 0}</td>
+                                    <td>{formatDisplayDate(record.issue_date)}</td>
+                                    <td><span className="badge">Archived</span></td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {showArchiveTable('vehicles') && (
+                  <section className="inventory-table-section inventory-table-section-compact archive-table-panel" aria-label="Archived vehicles">
+                    <div className="inventory-table-card">
+                      <div className="inventory-table-title">
+                        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Archived Vehicles ({archivedVehicles.length})</h4>
+                      </div>
+                      {archivedVehicles.length === 0 ? (
+                        <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived vehicles.</p>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Vehicle ID</th>
+                                <th scope="col">Make / Model</th>
+                                <th scope="col">Year</th>
+                                <th scope="col">CR Number</th>
+                                <th scope="col">Engine Number</th>
+                                <th scope="col">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {archivedVehicles.map((vehicle) => (
+                                <tr key={`archived-veh-${vehicle.id}`}>
+                                  <td>{`VEH-${vehicle.id.toString().padStart(3, '0')}`}</td>
+                                  <td>{vehicle.make_model ?? '—'}</td>
+                                  <td>{vehicle.year_model ?? '—'}</td>
+                                  <td>{vehicle.cr_number ?? '—'}</td>
+                                  <td>{vehicle.engine_number ?? '—'}</td>
+                                  <td><span className="badge">Archived</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {showArchiveTable('staff') && (
+                  <section className="inventory-table-section inventory-table-section-compact archive-table-panel" aria-label="Archived staff">
+                    <div className="inventory-table-card">
+                      <div className="inventory-table-title">
+                        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Archived Staff ({archivedStaff.length})</h4>
+                      </div>
+                      {archivedStaff.length === 0 ? (
+                        <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived staff records.</p>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Staff ID</th>
+                                <th scope="col">Name</th>
+                                <th scope="col">Email</th>
+                                <th scope="col">Department</th>
+                                <th scope="col">Position</th>
+                                <th scope="col">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {archivedStaff.map((staff) => (
+                                <tr key={`archived-staff-${staff.id}`}>
+                                  <td>{staff.staff_id}</td>
+                                  <td>{staff.full_name}</td>
+                                  <td>{staff.email}</td>
+                                  <td>{departments.find((dept) => dept.id === staff.department_id)?.name ?? 'Unassigned'}</td>
+                                  <td>{staff.position ?? '—'}</td>
+                                  <td><span className="badge">Archived</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+
+                {showArchiveTable('departments') && (
+                  <section className="inventory-table-section inventory-table-section-compact archive-table-panel" aria-label="Archived departments">
+                    <div className="inventory-table-card">
+                      <div className="inventory-table-title">
+                        <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Archived Departments ({archivedDepartments.length})</h4>
+                      </div>
+                      {archivedDepartments.length === 0 ? (
+                        <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived departments.</p>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table className="inventory-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">Department Code</th>
+                                <th scope="col">Department Name</th>
+                                <th scope="col">Total Items</th>
+                                <th scope="col">Serviceable</th>
+                                <th scope="col">Unserviceable</th>
+                                <th scope="col">Status</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {archivedDepartments.map((dept) => (
+                                <tr key={`archived-dept-${dept.id}`}>
+                                  <td>{dept.code}</td>
+                                  <td>{dept.name}</td>
+                                  <td>{formatValue(dept.totalItems)}</td>
+                                  <td>{formatValue(dept.serviceable)}</td>
+                                  <td>{formatValue(dept.unserviceable)}</td>
+                                  <td><span className="badge">Archived</span></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                )}
+              </div>
+            )}
+
+          </div>
+        )}
+
+        {activeSection === 'departments-staff' && (
+          <div className="inventory-layout" aria-label="Departments and staff management">
+            <header className="dashboard-header">
+              <div>
+                <h2>Departments &amp; Staff</h2>
+                <p>{loading ? 'Loading…' : `${formatValue(parUsers.length)} total staff registered`}</p>
+              </div>
+            </header>
+
+            {departmentError && <p className="dashboard-error">{departmentError}</p>}
+            {departmentSuccess && <p style={{ color: '#15803d', fontSize: 13 }}>{departmentSuccess}</p>}
+            {staffError && <p className="dashboard-error">{staffError}</p>}
+            {staffSuccess && <p style={{ color: '#15803d', fontSize: 13 }}>{staffSuccess}</p>}
+
+            <section className="inventory-toolbar" aria-label="Departments and staff actions">
+              <button
+                type="button"
+                className={departmentStaffMode === 'manage-staff' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                onClick={() => setDepartmentStaffMode('manage-staff')}
+              >
+                Manage Staff
+              </button>
+              <button
+                type="button"
+                className={departmentStaffMode === 'manage-department' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                onClick={() => setDepartmentStaffMode('manage-department')}
+              >
+                Manage Department
+              </button>
+              <button
+                type="button"
+                className={departmentStaffMode === 'add-staff' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                onClick={() => {
+                  setDepartmentStaffMode('add-staff')
+                  resetStaffForm()
+                }}
+              >
+                Add Staff
+              </button>
+              <button
+                type="button"
+                className={departmentStaffMode === 'add-department' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+                onClick={() => {
+                  setDepartmentStaffMode('add-department')
+                  resetDepartmentForm()
+                }}
+              >
+                Add Department
+              </button>
+            </section>
+
+            {departmentStaffMode === 'add-department' && (
+              <section className="inventory-add-section" aria-label="Add or edit department">
+                <div className="inventory-add-card">
+                  <h3 className="inventory-add-title">
+                    {departmentFormMode === 'edit' ? 'Edit Department' : 'Add Department'}
+                  </h3>
+                  <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <div className="inventory-field" style={{ width: 240 }}>
+                      <label>Department Name</label>
+                      <input
+                        className="inventory-input"
+                        value={newDepartmentName}
+                        onChange={(e) => {
+                          setNewDepartmentName(e.target.value)
+                          setNewDepartmentCode(buildDepartmentCode(e.target.value))
+                        }}
+                        placeholder="e.g. Rescue Department"
+                      />
+                    </div>
+                    <div className="inventory-field" style={{ width: 140 }}>
+                      <label>Department Code</label>
+                      <input
+                        className="inventory-input"
+                        value={newDepartmentCode}
+                        onChange={(e) => setNewDepartmentCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
+                        placeholder="Auto-generated"
+                        style={{ fontWeight: 600, letterSpacing: '0.05em' }}
+                      />
+                    </div>
+                  </div>
+                  <div className="inventory-add-actions">
+                    <button
+                      type="button"
+                      className="inventory-add-submit"
+                      onClick={() => { void handleSaveDepartment() }}
+                      disabled={addingDepartment}
                     >
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Department</label>
-                        <select
-                          className="inventory-input"
-                          value={staffFormDepartmentId}
-                          onChange={(e) => handleAddStaffDepartmentChange(e.target.value)}
-                        >
-                          <option value="">Select department</option>
-                          {departments.map((dept) => (
-                            <option key={`staff-dept-${dept.id}`} value={String(dept.id)}>
-                              {dept.name}
-                            </option>
-                          ))}
-                        </select>
+                      {addingDepartment
+                        ? departmentFormMode === 'edit' ? 'Saving…' : 'Adding…'
+                        : departmentFormMode === 'edit' ? 'Save Department' : 'Add Department'}
+                    </button>
+                    {departmentFormMode === 'edit' && (
+                      <button
+                        type="button"
+                        className="inventory-secondary-button"
+                        onClick={resetDepartmentForm}
+                        disabled={addingDepartment}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
+
+            {(departmentStaffMode === 'add-staff' || (departmentStaffMode === 'manage-staff' && staffFormMode === 'edit')) && (
+              <section className="inventory-add-section" aria-label="Add or edit staff">
+                <div className="inventory-add-card">
+                  <h3 className="inventory-add-title">
+                    {staffFormMode === 'edit' ? 'Edit Staff' : 'Add Staff'}
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+                    {/* Section: Personal Information */}
+                    <div>
+                      <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Personal Information</p>
+                      {/* Row 1: First Name | Last Name */}
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>First Name</label>
+                          <input className="inventory-input" value={staffFormFirstName} onChange={(e) => setStaffFormFirstName(e.target.value)} />
+                        </div>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>Last Name</label>
+                          <input className="inventory-input" value={staffFormLastName} onChange={(e) => setStaffFormLastName(e.target.value)} />
+                        </div>
                       </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Full Name</label>
-                        <input className="inventory-input" value={staffFormName} onChange={(e) => setStaffFormName(e.target.value)} />
+                      {/* Row 2: Department | Position | Role */}
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                        <div className="inventory-field" style={{ width: 260 }}>
+                          <label>Department</label>
+                          <select
+                            className="inventory-input"
+                            value={staffFormDepartmentId}
+                            onChange={(e) => handleAddStaffDepartmentChange(e.target.value)}
+                          >
+                            <option value="">Select department</option>
+                            {departments.map((dept) => (
+                              <option key={`staff-dept-${dept.id}`} value={String(dept.id)}>
+                                {dept.name}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>Position</label>
+                          <input className="inventory-input" value={staffFormPosition} onChange={(e) => setStaffFormPosition(e.target.value)} />
+                        </div>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>Role</label>
+                          <select
+                            className="inventory-input"
+                            value={staffFormRole}
+                            onChange={(e) => setStaffFormRole(e.target.value)}
+                          >
+                            <option value="Staff">Staff</option>
+                            <option value="Admin">Admin</option>
+                            {isCurrentUserSuperAdmin && staffFormMode === 'edit' && <option value="Super Admin">Super Admin</option>}
+                          </select>
+                        </div>
                       </div>
-                      {staffFormMode === 'edit' && (
-                        <>
-                          <div>
-                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Email</label>
-                            <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
+                    </div>
+
+                    {/* Section: Contact Information */}
+                    <div>
+                      <p style={{ margin: '0 0 10px', fontSize: 12, fontWeight: 600, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact Information</p>
+                      {/* Row 3: Email | System Email (edit) / Default Password (add) */}
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 16 }}>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>
+                            Email{staffFormMode === 'add' && <span style={{ color: '#dc2626', marginLeft: 2 }}>*</span>}
+                          </label>
+                          <input
+                            type="email"
+                            className="inventory-input"
+                            value={staffFormRecoveryEmail}
+                            onChange={(e) => setStaffFormRecoveryEmail(e.target.value)}
+                          />
+                        </div>
+                        {staffFormMode === 'edit' ? (
+                          <div className="inventory-field" style={{ width: 180 }}>
+                            <label>System Email</label>
+                            <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, lineHeight: 1.4 }}>
                               {buildStaffEmail(staffFormStaffId) || '—'}
                             </div>
                           </div>
-                          <div>
-                            <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Staff ID</label>
-                            <div style={{ padding: '8px 10px', minHeight: 38, color: '#111827', fontSize: 13, fontWeight: 400, lineHeight: 1.4 }}>
-                              {staffFormStaffId || '—'}
-                            </div>
+                        ) : (
+                          <div className="inventory-field" style={{ width: 180 }}>
+                            <label>Default Password</label>
+                            <input
+                              className="inventory-input"
+                              value={DEFAULT_STAFF_INITIAL_PASSWORD}
+                              readOnly
+                              style={{ fontWeight: 500, background: '#f8fafc' }}
+                            />
                           </div>
-                        </>
-                      )}
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Position</label>
-                        <input className="inventory-input" value={staffFormPosition} onChange={(e) => setStaffFormPosition(e.target.value)} />
+                        )}
                       </div>
-                      <div>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Role</label>
-                        <select
-                          className="inventory-input"
-                          value={staffFormRole}
-                          onChange={(e) => setStaffFormRole(e.target.value)}
-                        >
-                          <option value="Staff">Staff</option>
-                          <option value="Admin">Admin</option>
-                        </select>
-                      </div>
-                      {staffFormMode === 'add' && (
-                        <div>
-                          <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>
-                            Default Password
-                          </label>
-                          <input
-                            className="inventory-input"
-                            value={DEFAULT_STAFF_INITIAL_PASSWORD}
-                            readOnly
-                            style={{ maxWidth: 180, fontWeight: 500, background: '#f8fafc' }}
-                          />
+                      {/* Row 4: Contact No. | Emergency Contact */}
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>Contact No.</label>
+                          <input className="inventory-input" value={staffFormContact} onChange={(e) => setStaffFormContact(e.target.value)} />
                         </div>
-                      )}
-                      <div style={{ gridColumn: '1 / -1' }}>
-                        <label style={{ display: 'block', fontSize: 12, color: '#6b7280', marginBottom: 6 }}>Contact Info</label>
-                        <input className="inventory-input" value={staffFormContact} onChange={(e) => setStaffFormContact(e.target.value)} />
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>Emergency Contact</label>
+                          <input className="inventory-input" value={staffFormEmergencyContact} onChange={(e) => setStaffFormEmergencyContact(e.target.value)} />
+                        </div>
                       </div>
                     </div>
-                    <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+
+                  </div>
+                  <div className="inventory-add-actions">
+                    <button
+                      type="button"
+                      className="inventory-add-submit"
+                      onClick={() => { void handleSaveStaff() }}
+                      disabled={staffSaving}
+                    >
+                      {staffSaving ? 'Saving…' : staffFormMode === 'edit' ? 'Save Changes' : 'Add Staff'}
+                    </button>
+                    {staffFormMode === 'edit' && (
                       <button
                         type="button"
-                        className="wmr-modal-button-save"
-                        onClick={() => {
-                          void handleSaveStaff()
-                        }}
+                        className="inventory-add-cancel"
+                        onClick={handleCancelStaffEdit}
                         disabled={staffSaving}
                       >
-                        {staffSaving ? 'Saving…' : staffFormMode === 'edit' ? 'Save Changes' : 'Add Staff'}
+                        Cancel
                       </button>
-                      {staffFormMode === 'edit' && (
-                        <button
-                          type="button"
-                          className="wmr-modal-button-secondary"
-                          onClick={resetStaffForm}
-                          disabled={staffSaving}
-                        >
-                          Cancel Edit
-                        </button>
-                      )}
-                    </div>
-                  </section>
-                )}
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
 
-                {departmentStaffMode === 'manage-staff' && (
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, marginBottom: 12, alignItems: 'center' }}>
-                      <h4 style={{ margin: 0, fontSize: 15, color: '#111827' }}>Manage Staff</h4>
-                      <select
-                        className="inventory-input"
-                        value={staffDepartmentFilter}
-                        onChange={(e) => setStaffDepartmentFilter(e.target.value)}
-                        style={{ maxWidth: 260 }}
-                      >
-                        <option value="all">All Departments</option>
-                        {departments.map((dept) => (
-                          <option key={`staff-filter-${dept.id}`} value={String(dept.id)}>
-                            {dept.name}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+            {departmentStaffMode === 'manage-staff' && (
+              <>
+                <section className="inventory-table-section inventory-table-section-compact" aria-label="Manage staff table">
+                  <div className="inventory-table-card">
+                  <div className="inventory-table-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Staff Information</h4>
+                    <select
+                      className="inventory-input"
+                      value={staffDepartmentFilter}
+                      onChange={(e) => setStaffDepartmentFilter(e.target.value)}
+                      style={{ maxWidth: 260 }}
+                    >
+                      <option value="all">All Departments</option>
+                      {departments.map((dept) => (
+                        <option key={`staff-filter-${dept.id}`} value={String(dept.id)}>
+                          {dept.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <table className="inventory-table staff-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Staff ID</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Email</th>
+                        <th scope="col">Department</th>
+                        <th scope="col">Position</th>
+                        <th scope="col">Role</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredDepartmentStaff.length === 0 ? (
+                        <tr>
+                          <td colSpan={8}>No staff records found for this department.</td>
+                        </tr>
+                      ) : (
+                        paginatedDepartmentStaff.map((user) => {
+                          const departmentName =
+                            departments.find((dept) => dept.id === user.department_id)?.name ?? 'Unassigned'
 
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="inventory-table staff-table">
-                        <thead>
-                          <tr>
-                            <th scope="col">Staff ID</th>
-                            <th scope="col">Name</th>
-                            <th scope="col">Email</th>
-                            <th scope="col">Department</th>
-                            <th scope="col">Position</th>
-                            <th scope="col">Role</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredDepartmentStaff.length === 0 ? (
-                            <tr>
-                              <td colSpan={8}>No staff records found for this department.</td>
-                            </tr>
-                          ) : (
-                            filteredDepartmentStaff.map((user) => {
-                              const departmentName =
-                                departments.find((dept) => dept.id === user.department_id)?.name ?? 'Unassigned'
-
-                              return (
-                                <tr key={`staff-row-${user.id}`}>
-                                  <td>{user.staff_id}</td>
-                                  <td>{user.full_name}</td>
-                                  <td>{user.email}</td>
-                                  <td>{departmentName}</td>
-                                  <td>{user.position ?? '—'}</td>
-                                  <td>{mapStaffRoleToOption(user.role)}</td>
-                                  <td>{user.is_locked ? 'Locked' : 'Active'}</td>
-                                  <td>
-                                    <div className="staff-actions">
-                                      <div className="staff-actions-main">
-                                        <button
-                                          type="button"
-                                          className="staff-action-icon-button"
-                                          title="Edit"
-                                          aria-label="Edit"
-                                          onClick={() => {
-                                            startEditStaff(user)
-                                            setDepartmentStaffMode('add-staff')
-                                          }}
-                                          disabled={staffUpdatingId === user.id}
-                                        >
-                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                            <path
-                                              d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              strokeWidth="1.6"
-                                              strokeLinecap="round"
-                                              strokeLinejoin="round"
-                                            />
-                                            <path
-                                              d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
-                                              fill="none"
-                                              stroke="currentColor"
-                                              strokeWidth="1.6"
-                                              strokeLinecap="round"
-                                              strokeLinejoin="round"
-                                            />
-                                          </svg>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="staff-action-icon-button"
-                                          title="View QR"
-                                          aria-label="View QR"
-                                          onClick={() => {
-                                            void handleStaffQrButtonClick(user)
-                                          }}
-                                          disabled={staffUpdatingId === user.id}
-                                        >
-                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                            <rect x="4" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                            <rect x="14" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                            <rect x="4" y="14" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                            <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
-                                          </svg>
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="staff-action-icon-button"
-                                          title={user.is_locked ? 'Unlock' : 'Lock'}
-                                          aria-label={user.is_locked ? 'Unlock' : 'Lock'}
-                                          onClick={() => {
-                                            void handleToggleStaffLock(user)
-                                          }}
-                                          disabled={staffUpdatingId === user.id}
-                                        >
-                                          {user.is_locked ? (
-                                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                              <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                              <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                              <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                            </svg>
-                                          ) : (
-                                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                              <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                                              <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                              <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-                                            </svg>
-                                          )}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="staff-action-icon-button"
-                                          title="Delete"
-                                          aria-label="Delete"
-                                          onClick={() => {
-                                            void handleDeleteStaff(user)
-                                          }}
-                                          disabled={staffUpdatingId === user.id}
-                                        >
-                                          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                            <path d="M5 7h14M9 7V5h6v2M8 7l.7 11h6.6L16 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                                            <path d="M10.5 11v5M13.5 11v5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                                          </svg>
-                                        </button>
-                                      </div>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                )}
-
-                {departmentStaffMode === 'manage-department' && (
-                  <section style={{ border: '1px solid #e5e7eb', borderRadius: 12, padding: 14 }}>
-                    <h4 style={{ margin: '0 0 12px', fontSize: 15, color: '#111827' }}>Manage Department</h4>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table className="inventory-table">
-                        <thead>
-                          <tr>
-                            <th scope="col">Department Code</th>
-                            <th scope="col">Department Name</th>
-                            <th scope="col">Total Items</th>
-                            <th scope="col">Serviceable</th>
-                            <th scope="col">Unserviceable</th>
-                            <th scope="col">Staff Members</th>
-                            <th scope="col">Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {departments.length === 0 ? (
-                            <tr>
-                              <td colSpan={7}>No departments found.</td>
-                            </tr>
-                          ) : (
-                            departments.map((dept) => (
-                              <tr key={`dept-manage-${dept.id}`}>
-                                <td>{dept.code}</td>
-                                <td>{dept.name}</td>
-                                <td>{formatValue(dept.totalItems)}</td>
-                                <td>{formatValue(dept.serviceable)}</td>
-                                <td>{formatValue(dept.unserviceable)}</td>
-                                <td>{formatValue(departmentStaffCountMap.get(dept.id) ?? 0)}</td>
-                                <td>
-                                  <div className="staff-actions">
-                                    <div className="staff-actions-main">
-                                      <button
-                                        type="button"
-                                        className="staff-action-icon-button"
-                                        title="Edit"
-                                        aria-label="Edit"
-                                        onClick={() => {
-                                          startEditDepartment(dept)
-                                          setDepartmentStaffMode('add-department')
-                                        }}
-                                        disabled={departmentUpdatingId === dept.id}
-                                      >
+                          return (
+                            <tr key={`staff-row-${user.id}`}>
+                              <td>{user.staff_id}</td>
+                              <td>{user.full_name}</td>
+                              <td>{user.email}</td>
+                              <td>{departmentName}</td>
+                              <td>{user.position ?? '—'}</td>
+                              <td>{mapStaffRoleToOption(user.role)}</td>
+                              <td>{user.is_locked ? 'Locked' : 'Active'}</td>
+                              <td>
+                                <div className="staff-actions">
+                                  <div className="staff-actions-main">
+                                    <button
+                                      type="button"
+                                      className="staff-action-icon-button"
+                                      title="Edit"
+                                      aria-label="Edit"
+                                      onClick={() => {
+                                        startEditStaff(user)
+                                        setDepartmentStaffMode('manage-staff')
+                                      }}
+                                      disabled={staffUpdatingId === user.id || !canEditUser(user)}
+                                    >
+                                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path
+                                          d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                        <path
+                                          d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="staff-action-icon-button"
+                                      title="View QR"
+                                      aria-label="View QR"
+                                      onClick={() => {
+                                        void handleStaffQrButtonClick(user)
+                                      }}
+                                      disabled={staffUpdatingId === user.id}
+                                    >
+                                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <rect x="4" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                        <rect x="14" y="4" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                        <rect x="4" y="14" width="6" height="6" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                        <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
+                                      </svg>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="staff-action-icon-button"
+                                      title={user.is_locked ? 'Unlock' : 'Lock'}
+                                      aria-label={user.is_locked ? 'Unlock' : 'Lock'}
+                                      onClick={() => {
+                                        void handleToggleStaffLock(user)
+                                      }}
+                                      disabled={staffUpdatingId === user.id}
+                                    >
+                                      {user.is_locked ? (
                                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                          <path
-                                            d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="1.6"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                          />
-                                          <path
-                                            d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
-                                            fill="none"
-                                            stroke="currentColor"
-                                            strokeWidth="1.6"
-                                            strokeLinecap="round"
-                                            strokeLinejoin="round"
-                                          />
+                                          <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                          <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                          <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                                         </svg>
-                                      </button>
-                                      <button
-                                        type="button"
-                                        className="staff-action-icon-button"
-                                        title="Delete"
-                                        aria-label="Delete"
-                                        onClick={() => {
-                                          void handleDeleteDepartment(dept)
-                                        }}
-                                        disabled={departmentUpdatingId === dept.id}
-                                      >
+                                      ) : (
                                         <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                                          <path d="M5 7h14M9 7V5h6v2M8 7l.7 11h6.6L16 7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-                                          <path d="M10.5 11v5M13.5 11v5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                                          <rect x="5" y="10" width="14" height="9" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                                          <path d="M8 10V8a4 4 0 018 0v2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                                          <path d="M12 13v3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
                                         </svg>
-                                      </button>
-                                    </div>
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="inventory-icon-button"
+                                      title="Archive"
+                                      aria-label="Archive"
+                                      onClick={() => {
+                                          openArchiveStaffConfirmation(user)
+                                      }}
+                                      disabled={staffUpdatingId === user.id}
+                                    >
+                                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                        <path
+                                          d="M4 6h16v4H4z"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                        <path
+                                          d="M6 10h12v9H6z"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.6"
+                                          strokeLinecap="round"
+                                          strokeLinejoin="round"
+                                        />
+                                        <path
+                                          d="M9 13h6M12 13v4"
+                                          fill="none"
+                                          stroke="currentColor"
+                                          strokeWidth="1.4"
+                                          strokeLinecap="round"
+                                        />
+                                      </svg>
+                                    </button>
                                   </div>
-                                </td>
-                              </tr>
-                            ))
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
-                )}
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                  </div>
+                </section>
 
-                {departmentError && <p className="dashboard-error" style={{ margin: 0 }}>{departmentError}</p>}
-                {departmentSuccess && <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{departmentSuccess}</p>}
-                {staffError && <p className="dashboard-error" style={{ margin: 0 }}>{staffError}</p>}
-                {staffSuccess && <p style={{ margin: 0, color: '#15803d', fontSize: 13 }}>{staffSuccess}</p>}
-              </div>
-            </article>
-          </section>
+                {filteredDepartmentStaff.length > STAFF_PAGE_SIZE && (
+                  <div className="inventory-pagination" aria-label="Staff pagination">
+                    <div className="inventory-pagination-controls">
+                      <button
+                        type="button"
+                        className="inventory-pagination-button inventory-pagination-circle"
+                        onClick={() => setStaffPage((prev) => Math.max(1, prev - 1))}
+                        disabled={staffPage === 1}
+                        aria-label="Previous page"
+                      >
+                        <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                          <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+
+                      {visibleStaffPageNumbers.map((pageNumber) => (
+                        <button
+                          key={pageNumber}
+                          type="button"
+                          className={`inventory-pagination-button inventory-pagination-circle ${
+                            pageNumber === staffPage ? 'inventory-pagination-circle-active' : ''
+                          }`}
+                          onClick={() => setStaffPage(pageNumber)}
+                          aria-label={`Page ${pageNumber}`}
+                          aria-current={pageNumber === staffPage ? 'page' : undefined}
+                        >
+                          {pageNumber}
+                        </button>
+                      ))}
+
+                      <button
+                        type="button"
+                        className="inventory-pagination-button inventory-pagination-circle"
+                        onClick={() => setStaffPage((prev) => Math.min(staffTotalPages, prev + 1))}
+                        disabled={staffPage === staffTotalPages}
+                        aria-label="Next page"
+                      >
+                        <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                          <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {departmentStaffMode === 'manage-department' && (
+              <>
+                <section className="inventory-table-section inventory-table-section-compact" aria-label="Manage department table">
+                  <div className="inventory-table-card">
+                  <div className="inventory-table-title">
+                    <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Department Information</h4>
+                  </div>
+                  <table className="inventory-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Department Code</th>
+                        <th scope="col">Department Name</th>
+                        <th scope="col">Total Items</th>
+                        <th scope="col">Serviceable</th>
+                        <th scope="col">Unserviceable</th>
+                        <th scope="col">Staff Members</th>
+                        <th scope="col">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {departments.length === 0 ? (
+                        <tr>
+                          <td colSpan={7}>No departments found.</td>
+                        </tr>
+                      ) : (
+                        paginatedDepartments.map((dept) => (
+                          <tr key={`dept-manage-${dept.id}`}>
+                            <td>{dept.code}</td>
+                            <td>{dept.name}</td>
+                            <td>{formatValue(dept.totalItems)}</td>
+                            <td>{formatValue(dept.serviceable)}</td>
+                            <td>{formatValue(dept.unserviceable)}</td>
+                            <td>{formatValue(departmentStaffCountMap.get(dept.id) ?? 0)}</td>
+                            <td>
+                              <div className="staff-actions">
+                                <div className="staff-actions-main">
+                                  <button
+                                    type="button"
+                                    className="staff-action-icon-button"
+                                    title="Edit"
+                                    aria-label="Edit"
+                                    onClick={() => {
+                                      startEditDepartment(dept)
+                                      setDepartmentStaffMode('add-department')
+                                    }}
+                                    disabled={departmentUpdatingId === dept.id}
+                                  >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                      <path
+                                        d="M5 19l2-0.3 9.1-9.1-1.7-1.7L5.3 17 5 19z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M14.8 6l1.8-1.8a1.4 1.4 0 012 2L18 8"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                    </svg>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="inventory-icon-button"
+                                    title="Archive"
+                                    aria-label="Archive"
+                                    onClick={() => {
+                                      openArchiveDepartmentConfirmation(dept)
+                                    }}
+                                    disabled={departmentUpdatingId === dept.id}
+                                  >
+                                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                                      <path
+                                        d="M4 6h16v4H4z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M6 10h12v9H6z"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.6"
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                      />
+                                      <path
+                                        d="M9 13h6M12 13v4"
+                                        fill="none"
+                                        stroke="currentColor"
+                                        strokeWidth="1.4"
+                                        strokeLinecap="round"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                              </div>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                  </div>
+                </section>
+
+                {departments.length > DEPARTMENT_PAGE_SIZE && (
+                  <div className="inventory-pagination" aria-label="Department pagination">
+                    <div className="inventory-pagination-controls">
+                      <button
+                        type="button"
+                        className="inventory-pagination-button inventory-pagination-circle"
+                        onClick={() => setDepartmentPage((prev) => Math.max(1, prev - 1))}
+                        disabled={departmentPage === 1}
+                        aria-label="Previous page"
+                      >
+                        <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                          <path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+
+                      {visibleDepartmentPageNumbers.map((pageNumber) => (
+                        <button
+                          key={pageNumber}
+                          type="button"
+                          className={`inventory-pagination-button inventory-pagination-circle ${
+                            pageNumber === departmentPage ? 'inventory-pagination-circle-active' : ''
+                          }`}
+                          onClick={() => setDepartmentPage(pageNumber)}
+                          aria-label={`Page ${pageNumber}`}
+                          aria-current={pageNumber === departmentPage ? 'page' : undefined}
+                        >
+                          {pageNumber}
+                        </button>
+                      ))}
+
+                      <button
+                        type="button"
+                        className="inventory-pagination-button inventory-pagination-circle"
+                        onClick={() => setDepartmentPage((prev) => Math.min(departmentTotalPages, prev + 1))}
+                        disabled={departmentPage === departmentTotalPages}
+                        aria-label="Next page"
+                      >
+                        <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                          <path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         )}
 
         {activeSection === 'stockpile' && (
@@ -4010,33 +5465,25 @@ function DashboardPage() {
             stockpileError={stockpileError}
             stockpileMode={stockpileMode}
             setStockpileMode={setStockpileMode}
-            searchQuery={stockpileSearchQuery}
-            setSearchQuery={setStockpileSearchQuery}
-            categoryFilter={stockpileCategoryFilter}
-            setCategoryFilter={setStockpileCategoryFilter}
-            categoryOptions={categoryOptions}
+            openReleasePage={openStockpileReleasePage}
             stockpileLoading={stockpileLoading || stockpileReleaseLoading}
             filteredStockpileItems={filteredStockpileItems}
             filteredExpiredStockpileItems={filteredExpiredStockpileItems}
             stockpileReleaseLogs={parsedStockpileReleaseLogs}
-            openReleaseModal={openStockpileReleaseModal}
+              stockpileReleaseItems={stockpileReleaseItems}
+              setStockpileReleaseIssuedToInput={setStockpileReleaseIssuedToInput}
+              stockpileReleaseIssuedToInput={stockpileReleaseIssuedToInput}
+              setStockpileReleaseReasonInput={setStockpileReleaseReasonInput}
+              stockpileReleaseReasonInput={stockpileReleaseReasonInput}
+              availableReleaseItems={availableReleaseStockpileItems}
+              addStockpileReleaseItem={addStockpileReleaseItem}
+              updateStockpileReleaseItem={updateStockpileReleaseItem}
+              removeStockpileReleaseItem={removeStockpileReleaseItem}
+              closeStockpileReleasePage={closeStockpileReleasePage}
+              handleReleaseStockpile={handleReleaseStockpile}
+              releasingStockpile={releasingStockpile}
             handlePrintReleaseLogs={handlePrintStockpileReleaseLogs}
             formatDisplayDate={formatDisplayDate}
-            newItemName={newStockpileItemName}
-            setNewItemName={setNewStockpileItemName}
-            newCategory={newStockpileCategory}
-            setNewCategory={setNewStockpileCategory}
-            newQuantity={newStockpileQuantity}
-            setNewQuantity={setNewStockpileQuantity}
-            newUnitOfMeasure={newStockpileUnitOfMeasure}
-            setNewUnitOfMeasure={setNewStockpileUnitOfMeasure}
-            newPackedDate={newStockpilePackedDate}
-            setNewPackedDate={setNewStockpilePackedDate}
-            newExpirationDate={newStockpileExpirationDate}
-            setNewExpirationDate={setNewStockpileExpirationDate}
-            addingStockpile={addingStockpile}
-            handleAddStockpile={handleAddStockpile}
-            unitOfMeasureOptions={unitOfMeasureOptions}
           />
         )}
 
@@ -4064,6 +5511,12 @@ function DashboardPage() {
             openWmrRemarksModal={openWmrRemarksModal}
             filteredVehicleWmrReports={filteredVehicleWmrReports}
             openVehicleWmrRemarksModal={openVehicleWmrRemarksModal}
+            onArchiveWasteItem={(item, report) => {
+              openArchiveWasteWmrConfirmation(item, report)
+            }}
+            onArchiveVehicleReport={(report) => {
+              openArchiveVehicleWmrConfirmation(report)
+            }}
           />
         )}
 
@@ -4073,7 +5526,7 @@ function DashboardPage() {
             vehicleError={vehicleError}
             vehicleMode={vehicleMode}
             setVehicleMode={setVehicleMode}
-            vehicles={vehicles}
+            vehicles={activeVehicles}
             vehicleRepairs={vehicleRepairs}
             formatCurrency={formatCurrency}
             setActiveVehicleLogsId={setActiveVehicleLogsId}
@@ -4108,6 +5561,9 @@ function DashboardPage() {
             setNewRepairDescription={setNewRepairDescription}
             parUsers={parUsers}
             handleAddVehicleRepair={handleAddVehicleRepair}
+            handleArchiveVehicle={(vehicle) => {
+              openArchiveVehicleConfirmation(vehicle)
+            }}
           />
         )}
 
@@ -4118,7 +5574,7 @@ function DashboardPage() {
             setParMode={setParMode}
             parItemId={parItemId}
             setParItemId={setParItemId}
-            inventoryItems={inventoryItems}
+            inventoryItems={loanableParItems}
             parIssuedToId={parIssuedToId}
             setParIssuedToId={setParIssuedToId}
             parUsers={parUsers}
@@ -4140,12 +5596,16 @@ function DashboardPage() {
             parDescriptionInput={parDescriptionInput}
             setParDescriptionInput={setParDescriptionInput}
             handleCreateParRecord={handleCreateParRecord}
+            handleCreateParRecordsBatch={handleCreateParRecordsBatch}
             parSaving={parSaving}
             parSearchQuery={parSearchQuery}
             setParSearchQuery={setParSearchQuery}
             parLoading={parLoading}
             filteredParSummaries={filteredParSummaries}
             setActiveParStaffId={setActiveParStaffId}
+            handleArchiveParSummary={(staffId) => {
+              openArchiveParSummaryConfirmation(staffId)
+            }}
           />
         )}
 
@@ -4165,153 +5625,28 @@ function DashboardPage() {
             onPrintPar={() =>
               handlePrintParForStaff(
                 selectedParReportStaffId,
-                selectedReportPeriod,
                 reportStartDate,
                 reportEndDate,
               )
             }
-            onPrintStockpileLogs={() =>
-              handlePrintStockpileReleaseLogs(selectedReportPeriod, reportStartDate, reportEndDate)
+            onPrintInventoryReport={() =>
+              handlePrintInventoryReport(selectedReportPeriod, reportStartDate, reportEndDate)
             }
             onPrintWmrSummary={() => handlePrintWmrSummary(selectedReportPeriod, reportStartDate, reportEndDate)}
             onPrintRepairLogs={() =>
               handlePrintVehicleRepairLogs(selectedReportPeriod, reportStartDate, reportEndDate)
             }
+            onPrintStockpileReleaseLogs={() =>
+              handlePrintStockpileReleaseLogs(selectedReportPeriod, reportStartDate, reportEndDate)
+            }
             parReportCount={reportParOptions.length}
-            stockpileLogCount={reportStockpileLogCount}
+            inventoryReportCount={reportInventoryCount}
             wmrReportCount={reportWmrCount}
             repairLogCount={reportVehicleRepairCount}
+            stockpileReleaseLogCount={reportStockpileReleaseCount}
           />
         )}
       </main>
-
-      {/* [MODAL] Stockpile release */}
-      {activeReleaseStockpile && (
-        <div
-          className="logout-modal-backdrop"
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="stockpile-release-modal-title"
-        >
-          {(() => {
-            const expiration = activeReleaseStockpile.expiration_date
-              ? new Date(activeReleaseStockpile.expiration_date)
-              : null
-            const isExpired = expiration != null && !Number.isNaN(expiration.getTime()) && expiration < new Date()
-            const availableQty = Number(activeReleaseStockpile.quantity_on_hand ?? 0)
-            const isUnavailable = isExpired || !Number.isFinite(availableQty) || availableQty <= 0
-            const releaseUnavailableMessage = isExpired
-              ? 'Item is not available for release because it is already expired.'
-              : !Number.isFinite(availableQty) || availableQty <= 0
-                ? 'Item is not available for release because there is no quantity on hand.'
-                : null
-
-            return (
-              <div className="logout-modal" style={{ maxWidth: 520 }}>
-            <h2 id="stockpile-release-modal-title" className="logout-modal-title">
-              Stockpile Release
-            </h2>
-
-            <p className="logout-modal-text" style={{ marginBottom: 12 }}>
-              <strong>Item:</strong> {activeReleaseStockpile.item_name ?? '—'}
-              <br />
-              <strong>Available:</strong> {activeReleaseStockpile.quantity_on_hand ?? 0} {activeReleaseStockpile.unit_of_measure ?? ''}
-            </p>
-
-            {releaseUnavailableMessage && (
-              <p className="dashboard-error" style={{ marginTop: 0, marginBottom: 10 }}>
-                {releaseUnavailableMessage}
-              </p>
-            )}
-
-            <div className="inventory-add-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
-              <div className="inventory-field inventory-field-full" style={{ gridColumn: '1 / -1' }}>
-                <label htmlFor="stockpile-release-item">
-                  Stockpile Item <span className="inventory-required">*</span>
-                </label>
-                <select
-                  id="stockpile-release-item"
-                  className="inventory-input"
-                  value={String(activeReleaseStockpile.stockpile_id)}
-                  onChange={(e) => handleReleaseItemSelection(e.target.value)}
-                  disabled={releasingStockpile}
-                >
-                  {stockpileItems.map((item) => (
-                    <option key={item.stockpile_id} value={item.stockpile_id}>
-                      {`${item.item_name ?? 'Unnamed'} (${item.quantity_on_hand ?? 0} ${item.unit_of_measure ?? ''})`}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="inventory-field">
-                <label htmlFor="stockpile-release-qty">
-                  Release Quantity <span className="inventory-required">*</span>
-                </label>
-                <input
-                  id="stockpile-release-qty"
-                  type="number"
-                  min="1"
-                  max={activeReleaseStockpile.quantity_on_hand ?? undefined}
-                  className="inventory-input"
-                  value={releaseQtyInput}
-                  onChange={(e) => setReleaseQtyInput(e.target.value)}
-                  disabled={isUnavailable}
-                />
-              </div>
-
-              <div className="inventory-field">
-                <label htmlFor="stockpile-release-issued-to">
-                  Issued To <span className="inventory-required">*</span>
-                </label>
-                <input
-                  id="stockpile-release-issued-to"
-                  type="text"
-                  className="inventory-input"
-                  placeholder="e.g. Barangay Banicain"
-                  value={releaseIssuedToInput}
-                  onChange={(e) => setReleaseIssuedToInput(e.target.value)}
-                />
-              </div>
-
-              <div className="inventory-field inventory-field-full" style={{ gridColumn: '1 / -1' }}>
-                <label htmlFor="stockpile-release-reason">
-                  Reason of Issuance <span className="inventory-required">*</span>
-                </label>
-                <input
-                  id="stockpile-release-reason"
-                  type="text"
-                  className="inventory-input"
-                  placeholder="e.g. Typhoon relief"
-                  value={releaseReasonInput}
-                  onChange={(e) => setReleaseReasonInput(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <div className="logout-modal-actions" style={{ marginTop: 14 }}>
-              <button
-                type="button"
-                className="logout-modal-button-secondary"
-                onClick={closeStockpileReleaseModal}
-                disabled={releasingStockpile}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="wmr-modal-button-save"
-                onClick={handleReleaseStockpile}
-                disabled={releasingStockpile || isUnavailable}
-              >
-                {releasingStockpile ? 'Releasing…' : 'Release'}
-              </button>
-            </div>
-          </div>
-            )
-          })()}
-        </div>
-      )}
 
       {/* [MODAL] PAR details */}
       {activeParStaffId && (
@@ -4339,52 +5674,55 @@ function DashboardPage() {
                     <th scope="col">Unit</th>
                     <th scope="col">Description</th>
                     <th scope="col">Property No.</th>
-                    <th scope="col">Date Acquired</th>
+                    <th scope="col" className="inventory-date-column">Date Acquired</th>
                     <th scope="col">Unit Cost</th>
-                    <th scope="col">Line Total</th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeParRecords.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>No PAR items found.</td>
+                      <td colSpan={6}>No PAR items found.</td>
                     </tr>
                   ) : (
-                    activeParRecords
-                      .slice()
-                      .sort((a, b) => b.par_id - a.par_id)
-                      .map((record) => {
-                        const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
+                    <>
+                      {activeParRecords
+                        .slice()
+                        .sort((a, b) => b.par_id - a.par_id)
+                        .map((record) => {
+                          const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
 
-                        return (
-                          <tr key={record.par_id}>
-                            <td>{record.quantity_issued}</td>
-                            <td>{record.unit_snapshot ?? item?.unit_of_measure ?? 'N/A'}</td>
-                            <td>{record.description_snapshot ?? item?.item_name ?? '—'}</td>
-                            <td>
-                              {record.property_no_snapshot ??
-                                item?.property_no ??
-                                item?.qr_code ??
-                                (record.item_id != null ? `ITEM-${record.item_id.toString().padStart(3, '0')}` : '—')}
-                            </td>
-                            <td>{record.date_acquired_snapshot ?? item?.date_acquired ?? '—'}</td>
-                            <td>
-                              {record.cost_snapshot != null
-                                ? formatCurrency(record.cost_snapshot)
-                                : item?.unit_cost != null
-                                  ? formatCurrency(item.unit_cost)
-                                  : 'N/A'}
-                            </td>
-                            <td>
-                              {record.cost_snapshot != null
-                                ? formatCurrency(calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot))
-                                : item?.unit_cost != null
-                                  ? formatCurrency(calculateTotalCost(record.quantity_issued ?? null, item.unit_cost))
-                                  : 'N/A'}
-                            </td>
-                          </tr>
-                        )
-                      })
+                          return (
+                            <tr key={record.par_id}>
+                              <td>{record.quantity_issued}</td>
+                              <td>{record.unit_snapshot ?? item?.unit_of_measure ?? 'N/A'}</td>
+                              <td>{record.description_snapshot ?? item?.item_name ?? '—'}</td>
+                              <td>
+                                {record.property_no_snapshot ??
+                                  item?.property_no ??
+                                  (record.item_id != null ? `ITEM-${record.item_id.toString().padStart(3, '0')}` : '—')}
+                              </td>
+                              <td className="inventory-date-column">
+                                {formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired)}
+                              </td>
+                              <td>
+                                {record.cost_snapshot != null
+                                  ? formatCurrency(record.cost_snapshot)
+                                  : item?.unit_cost != null
+                                    ? formatCurrency(item.unit_cost)
+                                    : 'N/A'}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: 'right' }}>
+                          <strong>Total Cost</strong>
+                        </td>
+                        <td>
+                          <strong>{activeParHasCost ? formatCurrency(activeParTotalCost) : 'N/A'}</strong>
+                        </td>
+                      </tr>
+                    </>
                   )}
                 </tbody>
               </table>
@@ -4467,35 +5805,31 @@ function DashboardPage() {
                 <thead>
                   <tr>
                     <th scope="col">Repair ID</th>
-                    <th scope="col">Date Repaired</th>
+                    <th scope="col" className="inventory-date-column">Date Repaired</th>
                     <th scope="col">Job Order No.</th>
                     <th scope="col">Service Center</th>
                     <th scope="col">Remarks</th>
                     <th scope="col">Repair Cost</th>
-                    <th scope="col">Issued To</th>
                   </tr>
                 </thead>
                 <tbody>
                   {activeVehicleRepairs.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>No repair logs for this vehicle.</td>
+                      <td colSpan={6}>No repair logs for this vehicle.</td>
                     </tr>
                   ) : (
                     activeVehicleRepairs
                       .slice()
                       .sort((a, b) => b.repair_id - a.repair_id)
                       .map((repair) => {
-                        const repairAdmin = parUsers.find((user) => user.id === repair.admin_id)
-
                         return (
                           <tr key={repair.repair_id}>
                             <td>{`VR-${repair.repair_id.toString().padStart(3, '0')}`}</td>
-                            <td>{formatDisplayDate(repair.date_repaired)}</td>
+                            <td className="inventory-date-column">{formatInventoryDate(repair.date_repaired)}</td>
                             <td>{repair.job_order_number || '—'}</td>
                             <td>{repair.service_center || '—'}</td>
                             <td>{getRepairDescription(repair.repair_id, activeVehicle.repair_history_log)}</td>
                             <td>{formatCurrency(Number(repair.amount ?? 0))}</td>
-                            <td>{repairAdmin?.full_name || repair.admin_id || '—'}</td>
                           </tr>
                         )
                       })
@@ -4538,7 +5872,7 @@ function DashboardPage() {
         >
           <div className="par-modal">
             <h2 id="vehicle-edit-modal-title" className="wmr-modal-title">
-              View Vehicle
+              Vehicle Information
             </h2>
 
             <div className="par-meta-grid">
@@ -4752,25 +6086,13 @@ function DashboardPage() {
                 />
               </div>
               <div className="inventory-field">
-                <label htmlFor="edit-date-acquired">
-                  Date Acquired <span className="inventory-required">*</span>
-                </label>
+                <label htmlFor="edit-date-acquired">Date Acquired</label>
                 <input
                   id="edit-date-acquired"
                   type="date"
                   className="inventory-input"
                   value={editDateAcquired}
                   onChange={(e) => setEditDateAcquired(e.target.value)}
-                />
-              </div>
-              <div className="inventory-field">
-                <label htmlFor="edit-expiration">Expiration Date</label>
-                <input
-                  id="edit-expiration"
-                  type="date"
-                  className="inventory-input"
-                  value={editExpirationDate}
-                  onChange={(e) => setEditExpirationDate(e.target.value)}
                 />
               </div>
               <div className="inventory-field">
@@ -4790,19 +6112,52 @@ function DashboardPage() {
                 </select>
               </div>
               <div className="inventory-field">
-                <label htmlFor="edit-status">Status</label>
-                <select
-                  id="edit-status"
+                <label htmlFor="edit-expiration">Expiration Date</label>
+                <input
+                  id="edit-expiration"
+                  type="date"
                   className="inventory-input"
-                  value={editStatus}
-                  onChange={(e) => setEditStatus(e.target.value)}
+                  value={editExpirationDate}
+                  onChange={(e) => setEditExpirationDate(e.target.value)}
+                />
+              </div>
+              <div className="inventory-field">
+                <label htmlFor="edit-status">Status</label>
+                {editItemType.trim().toLowerCase() === 'stockpile' ? (
+                  <input
+                    id="edit-status"
+                    className="inventory-input"
+                    value={editStatus || 'Valid'}
+                    readOnly
+                  />
+                ) : (
+                  <select
+                    id="edit-status"
+                    className="inventory-input"
+                    value={editStatus}
+                    onChange={(e) => setEditStatus(e.target.value)}
+                  >
+                    <option value="">Select status</option>
+                    {statusOptions.map((statusOption) => (
+                      <option key={statusOption} value={statusOption}>
+                        {statusOption}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+              <div className="inventory-field">
+                <label htmlFor="edit-condition">Condition</label>
+                <select
+                  id="edit-condition"
+                  className="inventory-input"
+                  value={editCondition}
+                  onChange={(e) => setEditCondition(e.target.value)}
                 >
-                  <option value="">Select status</option>
-                  {statusOptions.map((statusOption) => (
-                    <option key={statusOption} value={statusOption}>
-                      {statusOption}
-                    </option>
-                  ))}
+                  <option value="">Select condition</option>
+                  <option value="Good">Good</option>
+                  <option value="Fully Functional">Fully Functional</option>
+                  <option value="Defective">Defective</option>
                 </select>
               </div>
             </div>
@@ -4827,8 +6182,8 @@ function DashboardPage() {
         </div>
       )}
 
-      {/* [MODAL] Inventory delete confirmation */}
-      {deleteTargetItem && (
+      {/* [MODAL] Shared archive confirmation */}
+      {archiveModalConfig && (
         <div
           className="inventory-delete-modal-backdrop"
           role="dialog"
@@ -4837,22 +6192,20 @@ function DashboardPage() {
         >
           <div className="inventory-delete-modal">
             <h2 id="inventory-delete-modal-title" className="inventory-delete-modal-title">
-              Archive Item
+              {archiveModalConfig.title}
             </h2>
             <p className="inventory-delete-modal-text">
-              Archive <strong>{deleteTargetItem.item_name}</strong>? You can restore it later by setting its status back from the database.
+              {archiveModalConfig.text}
             </p>
             <p className="inventory-delete-modal-subtext">
-              Archiving hides the item from the active Inventory list and keeps historical records intact.
+              {archiveModalConfig.subtext}
             </p>
             <div className="inventory-delete-modal-actions">
               <button
                 type="button"
                 className="inventory-delete-button-cancel"
-                onClick={() => {
-                  if (!editDeleting) setDeleteTargetItem(null)
-                }}
-                disabled={editDeleting}
+                onClick={closeArchiveModal}
+                disabled={isArchiveModalBusy}
               >
                 Cancel
               </button>
@@ -4860,11 +6213,11 @@ function DashboardPage() {
                 type="button"
                 className="inventory-delete-button-confirm"
                 onClick={() => {
-                  void handleArchiveItem(deleteTargetItem)
+                  void archiveModalConfig.onConfirm()
                 }}
-                disabled={editDeleting}
+                disabled={isArchiveModalBusy}
               >
-                {editDeleting ? 'Archiving…' : 'Archive'}
+                {isArchiveModalBusy ? 'Archiving…' : 'Archive'}
               </button>
             </div>
           </div>
@@ -4977,11 +6330,11 @@ function DashboardPage() {
               {viewStaffQrItem.staff_id}
             </p>
             {viewStaffQrItem.qr_code ? (
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <QRCodeSVG
+              <div id="staff-qr-canvas-wrapper" style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <QRCodeCanvas
                   value={viewStaffQrItem.qr_code}
                   size={200}
-                  bgColor="transparent"
+                  bgColor="#ffffff"
                   fgColor="#111827"
                   includeMargin
                 />
@@ -4990,6 +6343,22 @@ function DashboardPage() {
               <p className="logout-modal-text">No QR code available for this staff record.</p>
             )}
             <div className="logout-modal-actions">
+              {viewStaffQrItem.qr_code && (
+                <button
+                  type="button"
+                  className="wmr-modal-button-save"
+                  onClick={() => {
+                    const canvas = document.querySelector<HTMLCanvasElement>('#staff-qr-canvas-wrapper canvas')
+                    if (!canvas) return
+                    const link = document.createElement('a')
+                    link.href = canvas.toDataURL('image/png')
+                    link.download = `${viewStaffQrItem.staff_id ?? 'staff'}-QR.png`
+                    link.click()
+                  }}
+                >
+                  Download
+                </button>
+              )}
               <button
                 type="button"
                 className="logout-modal-button-secondary"
@@ -5015,11 +6384,11 @@ function DashboardPage() {
               Item QR Code
             </h2>
             {viewQrItem.qr_code ? (
-              <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
-                <QRCodeSVG
+              <div id="inventory-qr-canvas-wrapper" style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+                <QRCodeCanvas
                   value={viewQrItem.qr_code}
                   size={200}
-                  bgColor="transparent"
+                  bgColor="#ffffff"
                   fgColor="#111827"
                   includeMargin
                 />
@@ -5028,6 +6397,23 @@ function DashboardPage() {
               <p className="logout-modal-text">No QR code available for this item.</p>
             )}
             <div className="logout-modal-actions">
+              {viewQrItem.qr_code && (
+                <button
+                  type="button"
+                  className="wmr-modal-button-save"
+                  onClick={() => {
+                    const canvas = document.querySelector<HTMLCanvasElement>('#inventory-qr-canvas-wrapper canvas')
+                    if (!canvas) return
+                    const paddedId = `ITEM-${viewQrItem.item_id.toString().padStart(3, '0')}`
+                    const link = document.createElement('a')
+                    link.href = canvas.toDataURL('image/png')
+                    link.download = `${paddedId}-QR.png`
+                    link.click()
+                  }}
+                >
+                  Download
+                </button>
+              )}
               <button
                 type="button"
                 className="logout-modal-button-secondary"
