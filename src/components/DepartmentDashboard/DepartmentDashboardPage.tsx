@@ -17,11 +17,12 @@ import './dept-mobile.css'
 
 type DepartmentDashboardPageProps = {
   departmentName: string
+  departmentCode: string
   userId: string
   departmentId: number | null
 }
 
-function DepartmentDashboardPage({ departmentName, userId, departmentId }: DepartmentDashboardPageProps) {
+function DepartmentDashboardPage({ departmentName, departmentCode, userId, departmentId }: DepartmentDashboardPageProps) {
   const [activeSection, setActiveSection] = useState<DepartmentDashboardSectionKey>('home')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
 
@@ -36,11 +37,11 @@ function DepartmentDashboardPage({ departmentName, userId, departmentId }: Depar
       case 'home':
         return <DepartmentHomeSection userId={userId} departmentName={departmentName} departmentId={departmentId} />
       case 'scanner':
-        return <DepartmentScannerSection />
+        return <DepartmentScannerSection userId={userId} departmentId={departmentId} />
       case 'requests':
-        return <DepartmentRequestsSection departmentId={departmentId} departmentName={departmentName} />
+        return <DepartmentRequestsSection departmentId={departmentId} departmentName={departmentName} userId={userId} />
       case 'reports':
-        return <DepartmentReportsSection userId={userId} />
+        return <DepartmentReportsSection userId={userId} departmentId={departmentId} />
       case 'profile':
         return <DepartmentProfileSection userId={userId} onSignOut={handleSignOut} />
       default:
@@ -52,7 +53,7 @@ function DepartmentDashboardPage({ departmentName, userId, departmentId }: Depar
     <div className={`dept-app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
       {/* Desktop sidebar */}
       <DepartmentDashboardSidebar
-        departmentName={departmentName}
+        departmentName={departmentCode || departmentName}
         activeSection={activeSection}
         navItems={navItems}
         onSelectSection={setActiveSection}

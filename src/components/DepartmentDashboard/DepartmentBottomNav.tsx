@@ -56,10 +56,10 @@ export default function DepartmentBottomNav({ active, onSelect }: Props) {
       <button
         className={`dept-bottom-nav-btn${active === 'requests' ? ' active' : ''}`}
         onClick={() => onSelect('requests')}
-        aria-label="Requests"
+        aria-label="Inventory Log"
       >
         <RequestsIcon />
-        <span>Requests</span>
+        <span>Inventory</span>
       </button>
 
       <button

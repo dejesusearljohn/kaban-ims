@@ -91,9 +91,11 @@ export const BANICAIN_LOGO_URL = '/Banicain-logo.png'
 
 type SignInPageProps = {
 	onSignInSuccess?: () => void
+  initialView?: 'signin' | 'forgot' | 'reset'
+  onPasswordResetComplete?: () => void
 }
 
-function SignInPage({ onSignInSuccess }: SignInPageProps) {
+function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetComplete }: SignInPageProps) {
   const rememberedUsername =
     typeof window !== 'undefined' ? window.localStorage.getItem('kabanRememberedUsername') ?? '' : ''
 
@@ -103,7 +105,7 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
   const [error, setError] = useState<string | null>(null)
   const [rememberMe, setRememberMe] = useState(Boolean(rememberedUsername))
   const [showPassword, setShowPassword] = useState(false)
-  const [view, setView] = useState<'signin' | 'forgot'>('signin')
+  const [view, setView] = useState<'signin' | 'forgot' | 'reset'>(initialView)
   const [showTerms, setShowTerms] = useState(false)
 
   // Forgot password state
@@ -111,6 +113,18 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
   const [forgotLoading, setForgotLoading] = useState(false)
   const [forgotError, setForgotError] = useState<string | null>(null)
   const [forgotSuccess, setForgotSuccess] = useState<string | null>(null)
+
+  // Reset password state (used after recovery link)
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmNewPassword, setConfirmNewPassword] = useState('')
+  const [showResetPassword, setShowResetPassword] = useState(false)
+  const [resetLoading, setResetLoading] = useState(false)
+  const [resetError, setResetError] = useState<string | null>(null)
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null)
+
+  useEffect(() => {
+    setView(initialView)
+  }, [initialView])
 
   useEffect(() => {
     if (!forgotError) return
@@ -123,6 +137,30 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
     const id = window.setTimeout(() => setForgotSuccess(null), 8000)
     return () => window.clearTimeout(id)
   }, [forgotSuccess])
+
+  useEffect(() => {
+    if (!resetError) return
+    const id = window.setTimeout(() => setResetError(null), 5000)
+    return () => window.clearTimeout(id)
+  }, [resetError])
+
+  useEffect(() => {
+    if (!resetSuccess) return
+    const id = window.setTimeout(() => setResetSuccess(null), 8000)
+    return () => window.clearTimeout(id)
+  }, [resetSuccess])
+
+  useEffect(() => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        setView('reset')
+      }
+    })
+
+    return () => {
+      authListener.subscription.unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     if (!error) return
@@ -240,6 +278,40 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
     const maskedRecovery = maskEmail(userRow.recovery_email)
     setForgotSuccess(`A password reset link has been sent to ${maskedRecovery}.`)
     setForgotLoading(false)
+  }
+
+  const handleResetPassword = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setResetError(null)
+    setResetSuccess(null)
+
+    if (newPassword.length < 6) {
+      setResetError('New password must be at least 6 characters.')
+      return
+    }
+
+    if (newPassword !== confirmNewPassword) {
+      setResetError('New password and confirmation do not match.')
+      return
+    }
+
+    setResetLoading(true)
+
+    const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+
+    if (updateError) {
+      setResetError(updateError.message)
+      setResetLoading(false)
+      return
+    }
+
+    setResetSuccess('Password updated successfully. You can now sign in with your new password.')
+    setNewPassword('')
+    setConfirmNewPassword('')
+    await supabase.auth.signOut()
+    setView('signin')
+    if (onPasswordResetComplete) onPasswordResetComplete()
+    setResetLoading(false)
   }
 
   return (
@@ -364,7 +436,7 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
                   </p>
                 </form>
               </>
-            ) : (
+            ) : view === 'forgot' ? (
               <>
                 <h2 className="signin-heading">RESET PASSWORD</h2>
                 <p className="signin-forgot-desc">
@@ -397,6 +469,100 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
                     type="button"
                     className="signin-back-link"
                     onClick={() => { setView('signin'); setForgotError(null); setForgotSuccess(null) }}
+                  >
+                    ← Back to Sign In
+                  </button>
+                </form>
+              </>
+            ) : (
+              <>
+                <h2 className="signin-heading">SET NEW PASSWORD</h2>
+                <p className="signin-forgot-desc">
+                  Enter your new password below to complete account recovery.
+                </p>
+
+                <form className="signin-form" onSubmit={handleResetPassword}>
+                  <div className="field-group">
+                    <label htmlFor="new-password">New Password</label>
+                    <div className="password-input-wrapper">
+                      <input
+                        id="new-password"
+                        name="new-password"
+                        type={showResetPassword ? 'text' : 'password'}
+                        placeholder="Enter new password"
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        aria-label={showResetPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowResetPassword((v) => !v)}
+                      >
+                        {showResetPassword ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                            <line x1="1" y1="1" x2="23" y2="23"/>
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="field-group">
+                    <label htmlFor="confirm-new-password">Confirm New Password</label>
+                    <div className="password-input-wrapper">
+                      <input
+                        id="confirm-new-password"
+                        name="confirm-new-password"
+                        type={showResetPassword ? 'text' : 'password'}
+                        placeholder="Confirm new password"
+                        autoComplete="new-password"
+                        value={confirmNewPassword}
+                        onChange={(e) => setConfirmNewPassword(e.target.value)}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle"
+                        aria-label={showResetPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowResetPassword((v) => !v)}
+                      >
+                        {showResetPassword ? (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                            <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                            <line x1="1" y1="1" x2="23" y2="23"/>
+                          </svg>
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                            <circle cx="12" cy="12" r="3"/>
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {resetError && <p className="signin-error">{resetError}</p>}
+                  {resetSuccess && <p className="signin-success">{resetSuccess}</p>}
+
+                  <button type="submit" className="primary-button" disabled={resetLoading}>
+                    {resetLoading ? 'Updating…' : 'Update Password'}
+                  </button>
+
+                  <button
+                    type="button"
+                    className="signin-back-link"
+                    onClick={() => { setView('signin'); setResetError(null); setResetSuccess(null) }}
                   >
                     ← Back to Sign In
                   </button>

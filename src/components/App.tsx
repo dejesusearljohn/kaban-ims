@@ -10,8 +10,19 @@ function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
 	const [dashboardTarget, setDashboardTarget] = useState<'admin' | 'department' | null>(null)
 	const [departmentName, setDepartmentName] = useState('Department')
+	const [departmentCode, setDepartmentCode] = useState('')
 	const [staffUserId, setStaffUserId] = useState<string | null>(null)
 	const [staffDepartmentId, setStaffDepartmentId] = useState<number | null>(null)
+	const detectRecoveryFlow = () => {
+		const hash = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash
+		const hashParams = new URLSearchParams(hash)
+		const queryParams = new URLSearchParams(window.location.search)
+
+		return hashParams.get('type') === 'recovery' || queryParams.get('type') === 'recovery'
+	}
+	const [isRecoveryFlow, setIsRecoveryFlow] = useState<boolean>(() =>
+		typeof window !== 'undefined' ? detectRecoveryFlow() : false,
+	)
 	const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const resetInactivityTimer = () => {
@@ -62,13 +73,14 @@ function App() {
 
 				const { data: department } = await supabase
 					.from('departments')
-					.select('dept_name')
+					.select('dept_name, dept_code')
 					.eq('id', data.department_id)
 					.maybeSingle()
 
 				return {
 					kind: 'department' as const,
 					departmentName: department?.dept_name?.trim() || 'Department',
+					departmentCode: department?.dept_code?.trim() || '',
 					departmentId: data.department_id,
 				}
 			}
@@ -103,6 +115,7 @@ function App() {
 				setDashboardTarget(target.kind)
 				if (target.kind === 'department') {
 					setDepartmentName(target.departmentName)
+					setDepartmentCode('departmentCode' in target ? (target.departmentCode ?? '') : '')
 					setStaffUserId(session.user.id)
 					setStaffDepartmentId(target.departmentId ?? null)
 				}
@@ -116,7 +129,10 @@ function App() {
 
 		void initAuth()
 
-		const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+		const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+			if (event === 'PASSWORD_RECOVERY' && isMounted) {
+				setIsRecoveryFlow(true)
+			}
 			void applySessionAccess(session)
 		})
 
@@ -130,11 +146,26 @@ function App() {
 		return null
 	}
 
+	if (isRecoveryFlow) {
+		return (
+			<SignInPage
+				initialView="reset"
+				onPasswordResetComplete={() => {
+					setIsRecoveryFlow(false)
+					if (window.location.hash) {
+						window.history.replaceState(null, '', window.location.pathname + window.location.search)
+					}
+				}}
+			/>
+		)
+	}
+
 	if (isAuthenticated) {
 		if (dashboardTarget === 'department') {
 			return (
 				<DepartmentDashboardPage
 					departmentName={departmentName}
+					departmentCode={departmentCode}
 					userId={staffUserId ?? ''}
 					departmentId={staffDepartmentId}
 				/>

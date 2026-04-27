@@ -3,6 +3,7 @@ import { supabase } from '../../supabaseClient'
 
 interface Props {
   userId: string
+  departmentId: number | null
 }
 
 interface WmrReport {
@@ -26,7 +27,7 @@ const statusClass = (s: string | null) => {
   return 'dept-badge dept-badge-pending'
 }
 
-export default function DepartmentReportsSection({ userId }: Props) {
+export default function DepartmentReportsSection({ userId, departmentId }: Props) {
   const [reports, setReports] = useState<WmrReport[]>([])
   const [inventoryOptions, setInventoryOptions] = useState<InventoryOption[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,11 +74,12 @@ export default function DepartmentReportsSection({ userId }: Props) {
     const init = async () => {
       try {
         await loadReports()
-        const { data: inv } = await supabase
+        const invQuery = supabase
           .from('inventory')
           .select('item_id, item_name')
-          .neq('status', 'archived')
           .order('item_name')
+        if (departmentId) invQuery.eq('department_id', departmentId)
+        const { data: inv } = await invQuery
         if (mounted) setInventoryOptions((inv ?? []) as InventoryOption[])
       } finally {
         if (mounted) setLoading(false)
@@ -86,7 +88,7 @@ export default function DepartmentReportsSection({ userId }: Props) {
     init()
     return () => { mounted = false }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId])
+  }, [userId, departmentId])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

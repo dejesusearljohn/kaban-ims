@@ -99,7 +99,7 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
         <div className="dept-card-body">
           <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 6 }}>
             <li style={{ fontSize: 13, color: 'var(--dept-text-muted)' }}>Use <strong>Scanner</strong> to look up any item by QR code.</li>
-            <li style={{ fontSize: 13, color: 'var(--dept-text-muted)' }}>Browse <strong>Requests</strong> to see your department's inventory and request items.</li>
+            <li style={{ fontSize: 13, color: 'var(--dept-text-muted)' }}>Open <strong>Inventory Log</strong> to view department inventory and pulled-out item history.</li>
             <li style={{ fontSize: 13, color: 'var(--dept-text-muted)' }}>File a <strong>Report</strong> if an item is damaged or lost.</li>
             <li style={{ fontSize: 13, color: 'var(--dept-text-muted)' }}>View your credentials and QR code under <strong>Profile</strong>.</li>
           </ul>

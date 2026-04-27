@@ -14,8 +14,8 @@ export const SHARED_DEPARTMENT_NAV_ITEMS: DepartmentDashboardNavItem[] = [
   },
   {
     key: 'requests',
-    label: 'Requests',
-    description: 'Department inventory and item requests',
+    label: 'Inventory Log',
+    description: 'Department inventory and pulled-out item logs',
   },
   {
     key: 'scanner',

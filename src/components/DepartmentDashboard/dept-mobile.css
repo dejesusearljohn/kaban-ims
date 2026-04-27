@@ -72,7 +72,9 @@
 @media (min-width: 768px) {
   .dept-app-shell {
     display: block;
+    height: auto;
     min-height: 100svh;
+    overflow: visible;
     padding-left: 260px;
     transition: padding-left 0.32s cubic-bezier(0.22, 1, 0.36, 1);
   }
@@ -82,7 +84,9 @@
   }
 
   .dept-page {
+    height: auto;
     min-height: 100svh;
+    overflow: visible;
     padding: 24px 28px 32px;
     padding-bottom: 24px;
   }
@@ -362,11 +366,90 @@
 .dept-list-item-badge.red   { background: #fee2e2; color: var(--dept-danger); }
 .dept-list-item-badge.gray  { background: #f1f5f9; color: var(--dept-text-muted); }
 
+.dept-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--dept-border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+.dept-segmented-btn {
+  border: none;
+  background: transparent;
+  color: var(--dept-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  border-radius: 8px;
+  padding: 10px 8px;
+  cursor: pointer;
+  transition: background-color 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+}
+.dept-segmented-btn.active {
+  background: #fff;
+  color: var(--dept-green-dark);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.04), 0 2px 8px rgba(15, 23, 42, 0.06);
+}
+
 /* ─── Scanner ───────────────────────────────── */
 .dept-scanner-wrap {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.dept-scan-steps {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--dept-border);
+  border-radius: var(--dept-radius);
+  background: var(--dept-surface);
+  margin-bottom: 12px;
+}
+.dept-scan-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 74px;
+  gap: 4px;
+}
+.dept-scan-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1.5px solid var(--dept-border);
+  color: var(--dept-text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+}
+.dept-scan-step-label {
+  font-size: 11px;
+  color: var(--dept-text-muted);
+  font-weight: 600;
+  text-align: center;
+  line-height: 1.2;
+}
+.dept-scan-step.active .dept-scan-step-num,
+.dept-scan-step.done .dept-scan-step-num {
+  border-color: var(--dept-green);
+  background: var(--dept-green);
+  color: #fff;
+}
+.dept-scan-step.active .dept-scan-step-label,
+.dept-scan-step.done .dept-scan-step-label {
+  color: var(--dept-green-dark);
+}
+.dept-scan-step-line {
+  flex: 1;
+  height: 2px;
+  background: var(--dept-border);
+  border-radius: 999px;
 }
 .dept-viewfinder {
   position: relative;
@@ -518,6 +601,11 @@
 .dept-btn-full {
   width: 100%;
 }
+@media (min-width: 768px) {
+  .dept-signout-mobile-only {
+    display: none;
+  }
+}
 .dept-btn svg {
   width: 16px;
   height: 16px;
@@ -612,6 +700,35 @@
   font-weight: 500;
   color: var(--dept-text);
   word-break: break-all;
+}
+.dept-info-row-readonly {
+  background: var(--dept-surface-alt);
+  opacity: 0.75;
+}
+/* Password toggle inside input */
+.dept-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.dept-input-wrap .dept-form-input {
+  padding-right: 42px;
+}
+.dept-pw-toggle {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  color: var(--dept-text-muted);
+  display: flex;
+  align-items: center;
+}
+.dept-pw-toggle svg {
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
 }
 
 /* ─── Status badges ─────────────────────────── */
