@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import SignInPage from './SignInPage.tsx'
 import DashboardPage from './DashboardPage'
+import { DepartmentDashboardPage } from './DepartmentDashboard'
 import { supabase } from '../supabaseClient'
 
 const INACTIVITY_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
 
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
+	const [dashboardTarget, setDashboardTarget] = useState<'admin' | 'department' | null>(null)
+	const [departmentName, setDepartmentName] = useState('Department')
+	const [staffUserId, setStaffUserId] = useState<string | null>(null)
+	const [staffDepartmentId, setStaffDepartmentId] = useState<number | null>(null)
 	const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
 	const resetInactivityTimer = () => {
@@ -37,16 +42,35 @@ function App() {
 		const getDashboardTarget = async (userId: string) => {
 			const { data, error } = await supabase
 				.from('users')
-				.select('role')
+				.select('role, department_id, is_archived, is_locked')
 				.eq('id', userId)
 				.maybeSingle()
 
 			if (error || !data) return null
+			if (data.is_archived || data.is_locked) return null
 
 			const normalizedRole = (data.role ?? '').trim().toLowerCase()
 
 			if (normalizedRole === 'super admin' || normalizedRole === 'admin') {
 				return { kind: 'admin' as const }
+			}
+
+			if (normalizedRole === 'staff') {
+				if (!data.department_id) {
+					return { kind: 'department' as const, departmentName: 'Department', departmentId: null }
+				}
+
+				const { data: department } = await supabase
+					.from('departments')
+					.select('dept_name')
+					.eq('id', data.department_id)
+					.maybeSingle()
+
+				return {
+					kind: 'department' as const,
+					departmentName: department?.dept_name?.trim() || 'Department',
+					departmentId: data.department_id,
+				}
 			}
 
 			return null
@@ -56,19 +80,33 @@ function App() {
 			session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session'],
 		) => {
 			if (!session) {
-			if (isMounted) setIsAuthenticated(false)
-			return
-		}
+				if (isMounted) {
+					setIsAuthenticated(false)
+					setDashboardTarget(null)
+				}
+				return
+			}
 
 			const target = await getDashboardTarget(session.user.id)
 
 			if (!target) {
 				await supabase.auth.signOut()
-				if (isMounted) setIsAuthenticated(false)
+				if (isMounted) {
+					setIsAuthenticated(false)
+					setDashboardTarget(null)
+				}
 				return
 			}
 
-			if (isMounted) setIsAuthenticated(true)
+			if (isMounted) {
+				setIsAuthenticated(true)
+				setDashboardTarget(target.kind)
+				if (target.kind === 'department') {
+					setDepartmentName(target.departmentName)
+					setStaffUserId(session.user.id)
+					setStaffDepartmentId(target.departmentId ?? null)
+				}
+			}
 		}
 
 		const initAuth = async () => {
@@ -93,6 +131,16 @@ function App() {
 	}
 
 	if (isAuthenticated) {
+		if (dashboardTarget === 'department') {
+			return (
+				<DepartmentDashboardPage
+					departmentName={departmentName}
+					userId={staffUserId ?? ''}
+					departmentId={staffDepartmentId}
+				/>
+			)
+		}
+
 		return <DashboardPage />
 	}
 

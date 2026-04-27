@@ -1,4 +1,4 @@
-export type DepartmentDashboardSectionKey = 'dashboard' | 'inventory' | 'wmr' | 'qr-scanner'
+export type DepartmentDashboardSectionKey = 'home' | 'scanner' | 'requests' | 'reports' | 'profile'
 
 export type DepartmentDashboardNavItem = {
   key: DepartmentDashboardSectionKey
@@ -8,34 +8,34 @@ export type DepartmentDashboardNavItem = {
 
 export const SHARED_DEPARTMENT_NAV_ITEMS: DepartmentDashboardNavItem[] = [
   {
-    key: 'dashboard',
-    label: 'Dashboard',
-    description: 'Department overview and quick metrics',
+    key: 'home',
+    label: 'Home',
+    description: 'Department overview and quick stats',
   },
   {
-    key: 'inventory',
-    label: 'Inventory',
-    description: 'Track department inventory records',
+    key: 'requests',
+    label: 'Requests',
+    description: 'Department inventory and item requests',
   },
   {
-    key: 'wmr',
-    label: 'WMR',
-    description: 'View waste materials reports',
+    key: 'scanner',
+    label: 'Scanner',
+    description: 'Scan inventory QR codes',
   },
   {
-    key: 'qr-scanner',
-    label: 'QR Scanner',
-    description: 'Scan item and staff QR codes',
+    key: 'reports',
+    label: 'Reports',
+    description: 'Submit and view WMR reports',
+  },
+  {
+    key: 'profile',
+    label: 'Profile',
+    description: 'Your account and department info',
   },
 ]
 
 export const isRescueDepartment = (departmentName: string) =>
   departmentName.trim().toLowerCase() === 'rescue department'
 
-export const getDepartmentDashboardNavItems = (departmentName: string) => {
-  if (isRescueDepartment(departmentName)) {
-    return []
-  }
-
-  return SHARED_DEPARTMENT_NAV_ITEMS
-}
+export const getDepartmentDashboardNavItems = (_departmentName: string): DepartmentDashboardNavItem[] =>
+  SHARED_DEPARTMENT_NAV_ITEMS

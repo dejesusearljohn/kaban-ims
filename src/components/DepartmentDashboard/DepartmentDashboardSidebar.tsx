@@ -32,36 +32,43 @@ function DepartmentDashboardSidebar({
 
   const getNavIcon = (key: DepartmentDashboardSectionKey) => {
     switch (key) {
-      case 'dashboard':
+      case 'home':
         return (
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <rect x="4" y="4" width="16" height="16" rx="3" ry="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M4 12h16M12 4v16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z" />
+            <polyline points="9 22 9 12 15 12 15 22" />
           </svg>
         )
-      case 'inventory':
+      case 'requests':
         return (
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <rect x="5" y="7" width="14" height="11" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M5 10h14" fill="none" stroke="currentColor" strokeWidth="1.6" />
-            <path d="M9 4h6l1 3H8z" fill="none" stroke="currentColor" strokeWidth="1.6" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2" />
+            <rect x="9" y="3" width="6" height="4" rx="1" />
+            <line x1="9" y1="12" x2="15" y2="12" />
+            <line x1="9" y1="16" x2="12" y2="16" />
           </svg>
         )
-      case 'wmr':
+      case 'scanner':
         return (
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path d="M12 4L3 19h18L12 4z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-            <path d="M12 9v5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            <circle cx="12" cy="16" r="0.9" fill="currentColor" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
+            <line x1="3" y1="12" x2="21" y2="12" />
           </svg>
         )
-      case 'qr-scanner':
+      case 'reports':
         return (
-          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <rect x="4" y="4" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1.7" />
-            <rect x="15" y="4" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1.7" />
-            <rect x="4" y="15" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1.7" />
-            <path d="M14 14h2v2h-2zM18 14h2v2h-2zM16 18h2v2h-2z" fill="currentColor" />
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+        )
+      case 'profile':
+        return (
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
+            <circle cx="12" cy="7" r="4" />
           </svg>
         )
     }

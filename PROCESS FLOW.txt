@@ -1,0 +1,43 @@
+PROCESS FLOW
+
+Necessities:
+-PWA
+-QR Integration for user and items
+-Role-based login
+-Blocking Validation for failed inventory 
+-The purpose of Kaban is to track Barangay Banicain's Inventory each day and for staffs to record their respective department's inventory each day, Monday until Friday because Saturday and Sunday are non-working days for government units
+
+
+Login
+-user must select their role. There are 3 roles for now Super Admin, Barangay Health Center Unit and Barangay Rescue Unit
+-after selecting role, they need to enter their password
+-Super Admin has full control of the system, they can add Departments and staff
+
+
+Super Admin Side
+
+Dashboard
+-Upon logging in, show Dashboard that shows analytics on each department, when button is clicked, display total items, expired items, serviceable and unserviceable items.
+-Show sidebar containing Dashboard, Inventory, Waste Materials Report (WMR), Property Acknowledgement Receipt (PAR), Vehicles, Stockpile, and Departments and Staffs. From top to bottom in this order.
+
+-on the dashboard, there are clickable buttons which are: Item Management, Staff Management, and Waste Material Reports.
+
+-Item Management, on click will redirect to inventory tab on the sidebar. Display add item and manage items(default) section, inside 'add item': item name, item type[office equipment, water equipment, fire equipment, medical equipment, electrical equipment, power tools, hand tools, furniture, vehicle, gadgets, medicine, perishables(items with expiration)], item quantity, date acquired, capture photo of the item upon adding. After clicking 'Add Item' button show summary with QR generated. 
+
+-Under 'manage items: show item id(automatically generated upon adding item), item name, item type, item quantity, date acquired, expiration (if applicable). Can be filtered by department, item type, serviceable, unserviceable, expiration date, and date acquired, clickable photo button to display photo, generate QR. Edit button on click: Item name cannot be edited. Item quantity cannot be decreased on this section but can be increased. Expiration date cannot be edited, if there is a duplicate item, it should be recorded separately. For example medicine was added 1 month ago and has existing date acquisition and expiration date, if a new medicine will be added, it will use another item id, another acquisition date and expiration date. QR shall be based on Item Id.
+
+-Waste Materials Report, on click will redirect to Waste Management Report tab on the sidebar. Display Total of WMR Cases. Super Admin cannot edit this but can monitor this instead. This tab will show Report ID(auto-generated), Item with image, Item type, Last User, Reason or Damage, Status, Location, Date Reported, Remarks(what the Super Admin's decision is). Can be filtered by date.
+
+-For sidebar buttons, PAR on click will display PAR ID, Employee name who made the PAR, Contact info of the employee, Item issued to the employee, item type, item quantity, issue date, and actions (PAR clickable button to display PAR). Employee name can be searchable, can be filtered by date.
+
+-Vehicles on click will display Vehicle Inventory tab. There will be clickable buttons to registered vehicles that also displays if vehicle is serviceable or unserviceable, on click, display Vehicle information which contains make/model, year, engine, cr number and repair history, if unserviceable show 'Unserviceable Status' with 'This vehicle is marked for repair and routed to the WMR system.' There will be a 'Log Repair' button which can be edited by the Super Admin. Under Repair History which is from the 'Log Repair', show date repaired, Job Order number, service center and amount. 
+
+-Stockpile on click will display Stockpile Inventory. There will be three sections for this,'Add Consumables' button contain Item Name, category(Relief Goods, Health Supply, Sanitation Kit, Unit of Measure, packed date, and expiration date, second section is Manage Stockpile Stockpile ID, item name, category(Relief Goods, Health Supply, Sanitation Kit, Unit of Measure, packed date, and expiration date, and last one is release history which displays Distribution Logs that records the calamity addressed, who the items were released to, how many families were helped, items distributed, quantiy and date of operation.
+
+-Departments and Staffs on click will show two sections, Department(default) and Manage Staff. Department on click will display analytics of how many staffs are there inside a department and buttons containing the 'Manage Department' button which will allow super admin to add, edit or delete a department, staffs can be removed from a department or moved to a different department, each department will have a department id. Staffs will be displayed when a Department is selected. For Example there are 2 departments displayed, Barangay Health Center and Rescue Department. On click, it will display the staffs and their information under them, staff id (auto-generate) and an 'Add Staff' button which will display an input field for staff name, drop down selection for department, drop down selection for staff position, contact information input, Generate QR button. Staff should be searchable by name. There should also be a 'Export/Print Report' button which will generate a report file.
+
+-all items should indicate 'Purchased' or 'Donated'. There should be indicators beside each staff's name if they are active or online using the Kaban system. Email and password for each role will be generated from the database. superadmin@kaban.com is for super admin, for the other users it will be depending on their department and staff id. For example STAFF-001 is from barangay rescue department, their email will be rescue001@kaban.com. For first time login, they will just need to click sign in and then they can set their password after. Super Admin will be the one to distribute each user's email.
+
+-every department will have the same dashboard containing a sidebar with dashboard, inventory, wmr and qr scanner except for Rescue Department.
+
+-Rescue Department will have dashboard, inventory, shift turnover, wmr and qr scanner. Shift turnover which needs to be approved by the Super Admin first. If they fail to record their inventory for a day, their inventory management will be locked automatically until the Super Admin allows them to record inventory again. 

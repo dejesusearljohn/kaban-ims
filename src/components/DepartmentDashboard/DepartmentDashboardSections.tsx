@@ -71,7 +71,7 @@ export function DepartmentDashboardOverview({ departmentName, onSelectSection }:
       </section>
 
       <section className="dashboard-actions" aria-label="Department quick actions">
-        <button type="button" className="action-card action-card-item" onClick={() => onSelectSection('inventory')}>
+        <button type="button" className="action-card action-card-item" onClick={() => onSelectSection('requests')}>
           <div className="action-card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <rect x="5" y="7" width="14" height="11" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="1.8" />
@@ -84,7 +84,7 @@ export function DepartmentDashboardOverview({ departmentName, onSelectSection }:
           </div>
         </button>
 
-        <button type="button" className="action-card action-card-wmr" onClick={() => onSelectSection('wmr')}>
+        <button type="button" className="action-card action-card-wmr" onClick={() => onSelectSection('reports')}>
           <div className="action-card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M12 4L3 19h18L12 4z" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -97,7 +97,7 @@ export function DepartmentDashboardOverview({ departmentName, onSelectSection }:
           </div>
         </button>
 
-        <button type="button" className="action-card action-card-staff action-card-qr" onClick={() => onSelectSection('qr-scanner')}>
+        <button type="button" className="action-card action-card-staff action-card-qr" onClick={() => onSelectSection('scanner')}>
           <div className="action-card-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <rect x="4" y="4" width="5" height="5" fill="none" stroke="currentColor" strokeWidth="1.6" />

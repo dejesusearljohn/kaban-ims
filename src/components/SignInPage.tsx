@@ -176,25 +176,25 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
         .eq('id', userId)
         .maybeSingle()
 
-      const normalizedRole = (userRow?.role ?? '').trim().toLowerCase()
-      const isAdminPortalUser = !roleError && !!userRow && (normalizedRole === 'super admin' || normalizedRole === 'admin')
-
-      if (!isAdminPortalUser) {
+      if (roleError || !userRow) {
         await supabase.auth.signOut()
-        setError('Access denied. This web app is only for Super Admin and Admin accounts. Staff accounts should use the staff web app.')
+        setError('Unable to validate account access. Please try again.')
         setLoading(false)
         return
       }
 
-      if (rememberMe) {
-        window.localStorage.setItem('kabanRememberedUsername', username)
-      } else {
-        window.localStorage.removeItem('kabanRememberedUsername')
+      const normalizedRole = (userRow.role ?? '').trim().toLowerCase()
+
+      if (normalizedRole === 'super admin' || normalizedRole === 'admin' || normalizedRole === 'staff') {
+        if (rememberMe) window.localStorage.setItem('kabanRememberedUsername', username)
+        else window.localStorage.removeItem('kabanRememberedUsername')
+        if (onSignInSuccess) onSignInSuccess()
+        setLoading(false)
+        return
       }
 
-      if (onSignInSuccess) {
-        onSignInSuccess()
-      }
+      await supabase.auth.signOut()
+      setError('Access denied. Your account does not have a valid role.')
     }
 
     setLoading(false)
