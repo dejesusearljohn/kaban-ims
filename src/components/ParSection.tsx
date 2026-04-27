@@ -66,8 +66,6 @@ function ParSection({
   parError,
   parMode,
   setParMode,
-  parItemId,
-  setParItemId,
   inventoryItems,
   parUsers,
   unitOfMeasureOptions,

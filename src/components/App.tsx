@@ -3,11 +3,8 @@ import SignInPage from './SignInPage.tsx'
 import DashboardPage from './DashboardPage'
 import { supabase } from '../supabaseClient'
 
-type DashboardTarget = { kind: 'admin' }
-
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
-	const [dashboardTarget, setDashboardTarget] = useState<DashboardTarget | null>(null)
 
 	useEffect(() => {
 		let isMounted = true
@@ -34,21 +31,18 @@ function App() {
 			session: Awaited<ReturnType<typeof supabase.auth.getSession>>['data']['session'],
 		) => {
 			if (!session) {
-				if (isMounted) setDashboardTarget(null)
-				if (isMounted) setIsAuthenticated(false)
-				return
-			}
+			if (isMounted) setIsAuthenticated(false)
+			return
+		}
 
 			const target = await getDashboardTarget(session.user.id)
 
 			if (!target) {
 				await supabase.auth.signOut()
-				if (isMounted) setDashboardTarget(null)
 				if (isMounted) setIsAuthenticated(false)
 				return
 			}
 
-			if (isMounted) setDashboardTarget(target)
 			if (isMounted) setIsAuthenticated(true)
 		}
 

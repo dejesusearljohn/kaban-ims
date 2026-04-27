@@ -143,7 +143,6 @@ function InventorySection({
   const isPurchased = selectedSource === 'purchased'
   const isDonated = selectedSource === 'donated'
   const isStockpileType = newItemType.trim().toLowerCase() === 'stockpile'
-  const isSourceSelected = selectedSource.length > 0
   const [inventoryPage, setInventoryPage] = useState(1)
 
   const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventoryItems.length / inventoryPageSize))
