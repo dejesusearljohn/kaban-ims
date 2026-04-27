@@ -278,6 +278,11 @@ function SignInPage({ onSignInSuccess }: SignInPageProps) {
                   <button type="submit" className="primary-button" disabled={loading}>
                     {loading ? 'Signing in…' : 'Sign In'}
                   </button>
+
+                  <p className="signin-terms">
+                    By signing in, you accept our{' '}
+                    <span className="signin-terms-link">Terms and Conditions</span>.
+                  </p>
                 </form>
               </>
             ) : (

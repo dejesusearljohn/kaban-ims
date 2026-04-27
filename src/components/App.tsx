@@ -1,10 +1,35 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import SignInPage from './SignInPage.tsx'
 import DashboardPage from './DashboardPage'
 import { supabase } from '../supabaseClient'
 
+const INACTIVITY_TIMEOUT_MS = 20 * 60 * 1000 // 20 minutes
+
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
+	const inactivityTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+	const resetInactivityTimer = () => {
+		if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
+		inactivityTimer.current = setTimeout(async () => {
+			await supabase.auth.signOut()
+		}, INACTIVITY_TIMEOUT_MS)
+	}
+
+	useEffect(() => {
+		if (!isAuthenticated) return
+
+		const events: (keyof WindowEventMap)[] = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll', 'click']
+		const handler = () => resetInactivityTimer()
+
+		events.forEach((e) => window.addEventListener(e, handler, { passive: true }))
+		resetInactivityTimer()
+
+		return () => {
+			events.forEach((e) => window.removeEventListener(e, handler))
+			if (inactivityTimer.current) clearTimeout(inactivityTimer.current)
+		}
+	}, [isAuthenticated]) // eslint-disable-line react-hooks/exhaustive-deps
 
 	useEffect(() => {
 		let isMounted = true
