@@ -1308,6 +1308,7 @@ function DashboardPage() {
   const statusOptions = Array.from(
     new Set<string>(['Serviceable', 'Unserviceable', 'Valid', 'Expired', ...dynamicStatusOptions]),
   ).sort()
+  const editableStatusOptions = statusOptions.filter((statusOption) => statusOption !== 'Valid')
   const acquisitionModeOptions = Array.from(
     new Set(['Purchased', 'Donated', ...inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)]),
   ).sort()
@@ -2503,7 +2504,10 @@ function DashboardPage() {
         return editExpirationValue < todayStart
       })()
         ? 'Expired'
-        : 'Valid'
+        : null
+    const normalizedEditStatus = editStatus.trim()
+    const sanitizedEditStatus =
+      normalizedEditStatus.toLowerCase() === 'valid' ? null : normalizedEditStatus || null
 
     // Prevent manual quantity decrease from the edit form.
     if (
@@ -2529,7 +2533,7 @@ function DashboardPage() {
         date_acquired: editDateAcquired ? editDateAcquired : new Date().toISOString().split('T')[0],
         expiration_date: editExpirationDate || null,
         acquisition_mode: editSource || null,
-        status: isStockpileType ? stockpileStatusToSave : editStatus || null,
+        status: isStockpileType ? stockpileStatusToSave : sanitizedEditStatus,
         condition: editCondition || null,
       })
       .eq('item_id', editingItem.item_id)
@@ -3244,7 +3248,7 @@ function DashboardPage() {
         return addExpirationValue < addTodayStart
       })()
         ? 'Expired'
-        : 'Valid'
+        : null
 
     if (!newItemName || !newItemType || !newItemDepartmentId) {
       setInventoryError('Item name, type, and department are required.')
@@ -6227,7 +6231,7 @@ function DashboardPage() {
                     onChange={(e) => setEditStatus(e.target.value)}
                   >
                     <option value="">Select status</option>
-                    {statusOptions.map((statusOption) => (
+                    {editableStatusOptions.map((statusOption) => (
                       <option key={statusOption} value={statusOption}>
                         {statusOption}
                       </option>
