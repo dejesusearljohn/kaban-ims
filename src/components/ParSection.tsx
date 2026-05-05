@@ -60,6 +60,8 @@ type ParSectionProps = {
   filteredParSummaries: ParSummary[]
   setActiveParStaffId: (staffId: string | null) => void
   handleArchiveParSummary: (staffId: string) => void
+  onExportCsv: () => void
+  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function ParSection({
@@ -78,6 +80,8 @@ function ParSection({
   filteredParSummaries,
   setActiveParStaffId,
   handleArchiveParSummary,
+  onExportCsv,
+  onImportCsv,
 }: ParSectionProps) {
   const parPageSize = useResponsivePageSize(10)
   const [parPage, setParPage] = useState(1)
@@ -97,6 +101,9 @@ function ParSection({
   const [localIssuedToId, setLocalIssuedToId] = useState('')
   const [localIssueDate, setLocalIssueDate] = useState(() => new Date().toISOString().slice(0, 10))
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([])
+  const parCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const csvMenuRef = useRef<HTMLDivElement | null>(null)
+  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const updateDraftRow = (index: number, patch: Partial<ParDraftItem>) => {
     setParDraftItems((prev) => {
@@ -164,6 +171,30 @@ function ParSection({
     }
   }, [parPage, parTotalPages])
 
+  useEffect(() => {
+    if (!csvMenuOpen) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (!csvMenuRef.current) return
+      if (csvMenuRef.current.contains(event.target as Node)) return
+      setCsvMenuOpen(false)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCsvMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [csvMenuOpen])
+
   const paginatedParSummaries = useMemo(() => {
     const start = (parPage - 1) * parPageSize
     return filteredParSummaries.slice(start, start + parPageSize)
@@ -197,21 +228,77 @@ function ParSection({
 
       {parError && <p className="dashboard-error">{parError}</p>}
 
-      <section className="inventory-toolbar" aria-label="PAR actions">
-        <button
-          type="button"
-          className={parMode === 'manage' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setParMode('manage')}
-        >
-          Manage PAR
-        </button>
-        <button
-          type="button"
-          className={parMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setParMode('add')}
-        >
-          Add PAR
-        </button>
+      <section className="section-toolbar-row" aria-label="PAR actions">
+        <div className="inventory-toolbar">
+          <button
+            type="button"
+            className={parMode === 'manage' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setParMode('manage')}
+          >
+            Manage PAR
+          </button>
+          <button
+            type="button"
+            className={parMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setParMode('add')}
+          >
+            Add PAR
+          </button>
+        </div>
+
+        <div className="csv-menu" ref={csvMenuRef}>
+          <button
+            type="button"
+            className="csv-action-button"
+            onClick={() => setCsvMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={csvMenuOpen}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Import/Export</span>
+          </button>
+          {csvMenuOpen && (
+            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  onExportCsv()
+                }}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  parCsvInputRef.current?.click()
+                }}
+              >
+                Import CSV
+              </button>
+            </div>
+          )}
+          <input
+            ref={parCsvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void onImportCsv(file)
+              }
+              e.currentTarget.value = ''
+            }}
+          />
+        </div>
       </section>
 
       {parMode === 'add' && (

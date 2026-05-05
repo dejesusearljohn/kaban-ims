@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
@@ -40,6 +40,8 @@ type WmrSectionProps = {
   onArchiveWasteItem: (item: InventoryRow, report: WmrReportRow | null) => void
   onArchiveStaffWmrReport: (report: WmrReportRow) => void
   onArchiveVehicleReport: (report: WmrReportRow) => void
+  onExportCsv: () => void
+  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function WmrSection({
@@ -72,9 +74,14 @@ function WmrSection({
   onArchiveWasteItem,
   onArchiveStaffWmrReport,
   onArchiveVehicleReport,
+  onExportCsv,
+  onImportCsv,
 }: WmrSectionProps) {
   const wmrPageSize = useResponsivePageSize(8)
   const [wmrPage, setWmrPage] = useState(1)
+  const wmrCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const csvMenuRef = useRef<HTMLDivElement | null>(null)
+  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const getWmrStatusBadgeClass = (status: string | null) => {
     const normalized = status?.toLowerCase().trim() || ''
@@ -193,6 +200,30 @@ function WmrSection({
     }
   }, [wmrPage, wmrTotalPages])
 
+  useEffect(() => {
+    if (!csvMenuOpen) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (!csvMenuRef.current) return
+      if (csvMenuRef.current.contains(event.target as Node)) return
+      setCsvMenuOpen(false)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCsvMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [csvMenuOpen])
+
   const paginatedWmrRows = useMemo(() => {
     const start = (wmrPage - 1) * wmrPageSize
     return combinedWmrRows.slice(start, start + wmrPageSize)
@@ -228,7 +259,7 @@ function WmrSection({
         </div>
       </header>
 
-      <section className="wmr-toolbar" aria-label="Waste materials filters">
+      <section className="section-toolbar-row wmr-toolbar" aria-label="Waste materials filters">
         <div className="inventory-filters">
           <div className="wmr-search-wrapper">
             <input
@@ -277,6 +308,60 @@ function WmrSection({
               <option value="Repaired">Repaired</option>
             </select>
           </div>
+        </div>
+
+        <div className="csv-menu" ref={csvMenuRef}>
+          <button
+            type="button"
+            className="csv-action-button"
+            onClick={() => setCsvMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={csvMenuOpen}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Import/Export</span>
+          </button>
+          {csvMenuOpen && (
+            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  onExportCsv()
+                }}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  wmrCsvInputRef.current?.click()
+                }}
+              >
+                Import CSV
+              </button>
+            </div>
+          )}
+          <input
+            ref={wmrCsvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void onImportCsv(file)
+              }
+              e.currentTarget.value = ''
+            }}
+          />
         </div>
       </section>
 

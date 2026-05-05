@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
-type VehicleRow = Tables<'vehicles'>
+type VehicleRow = Tables<'vehicles'> & {
+  vehicle_name?: string | null
+  color?: string | null
+}
 type VehicleRepairRow = Tables<'vehicle_repairs'>
 type UserRow = Tables<'users'>
 
@@ -16,8 +19,12 @@ type VehiclesSectionProps = {
   formatCurrency: (value: number | null) => string
   setActiveVehicleLogsId: (id: number | null) => void
   openVehicleEditModal: (vehicle: VehicleRow) => void
+  newVehicleName: string
+  setNewVehicleName: (value: string) => void
   newVehicleMakeModel: string
   setNewVehicleMakeModel: (value: string) => void
+  newVehicleColor: string
+  setNewVehicleColor: (value: string) => void
   newVehicleYearModel: string
   setNewVehicleYearModel: (value: string) => void
   newVehicleCrNumber: string
@@ -47,6 +54,8 @@ type VehiclesSectionProps = {
   parUsers: UserRow[]
   handleAddVehicleRepair: () => void
   handleArchiveVehicle: (vehicle: VehicleRow) => void
+  onExportCsv: () => void
+  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function VehiclesSection({
@@ -59,8 +68,12 @@ function VehiclesSection({
   formatCurrency,
   setActiveVehicleLogsId,
   openVehicleEditModal,
+  newVehicleName,
+  setNewVehicleName,
   newVehicleMakeModel,
   setNewVehicleMakeModel,
+  newVehicleColor,
+  setNewVehicleColor,
   newVehicleYearModel,
   setNewVehicleYearModel,
   newVehicleCrNumber,
@@ -90,9 +103,14 @@ function VehiclesSection({
   parUsers,
   handleAddVehicleRepair,
   handleArchiveVehicle,
+  onExportCsv,
+  onImportCsv,
 }: VehiclesSectionProps) {
   const vehiclesPageSize = useResponsivePageSize(8)
   const [vehiclePage, setVehiclePage] = useState(1)
+  const vehiclesCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const csvMenuRef = useRef<HTMLDivElement | null>(null)
+  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const vehicleTotalPages = Math.max(1, Math.ceil(vehicles.length / vehiclesPageSize))
 
@@ -131,6 +149,40 @@ function VehiclesSection({
     return Array.from({ length: end - start + 1 }, (_, index) => start + index)
   }, [vehiclePage, vehicleTotalPages])
 
+  useEffect(() => {
+    if (!csvMenuOpen) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (!csvMenuRef.current) return
+      if (csvMenuRef.current.contains(event.target as Node)) return
+      setCsvMenuOpen(false)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCsvMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [csvMenuOpen])
+
+  const getVehicleDisplayLabel = (vehicle: VehicleRow) => {
+    const vehicleName = vehicle.vehicle_name?.trim()
+    if (vehicleName) return vehicleName
+
+    const makeModel = vehicle.make_model?.trim()
+    if (makeModel) return makeModel
+
+    return `VEH-${vehicle.id.toString().padStart(3, '0')}`
+  }
+
   return (
     <div className="inventory-layout">
       <header className="dashboard-header">
@@ -146,21 +198,77 @@ function VehiclesSection({
 
       {vehicleError && <p className="dashboard-error">{vehicleError}</p>}
 
-      <section className="inventory-toolbar" aria-label="Vehicle actions">
-        <button
-          type="button"
-          className={vehicleMode === 'manage' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setVehicleMode('manage')}
-        >
-          Manage Vehicles
-        </button>
-        <button
-          type="button"
-          className={vehicleMode === 'add-vehicle' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setVehicleMode('add-vehicle')}
-        >
-          Add Vehicle
-        </button>
+      <section className="vehicle-toolbar-row" aria-label="Vehicle actions">
+        <div className="inventory-toolbar">
+          <button
+            type="button"
+            className={vehicleMode === 'manage' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setVehicleMode('manage')}
+          >
+            Manage Vehicles
+          </button>
+          <button
+            type="button"
+            className={vehicleMode === 'add-vehicle' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setVehicleMode('add-vehicle')}
+          >
+            Add Vehicle
+          </button>
+        </div>
+
+        <div className="csv-menu" ref={csvMenuRef}>
+          <button
+            type="button"
+            className="csv-action-button"
+            onClick={() => setCsvMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={csvMenuOpen}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Import/Export</span>
+          </button>
+          {csvMenuOpen && (
+            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  onExportCsv()
+                }}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  vehiclesCsvInputRef.current?.click()
+                }}
+              >
+                Import CSV
+              </button>
+            </div>
+          )}
+          <input
+            ref={vehiclesCsvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void onImportCsv(file)
+              }
+              e.currentTarget.value = ''
+            }}
+          />
+        </div>
       </section>
 
       {vehicleMode === 'manage' && (
@@ -193,7 +301,9 @@ function VehiclesSection({
                 <thead>
                   <tr>
                     <th scope="col">ID</th>
+                    <th scope="col">Vehicle Name</th>
                     <th scope="col">Make / Model</th>
+                    <th scope="col">Color</th>
                     <th scope="col">Year</th>
                     <th scope="col">CR Number</th>
                     <th scope="col">Engine Number</th>
@@ -205,17 +315,19 @@ function VehiclesSection({
                 <tbody>
                   {vehicleLoading ? (
                     <tr>
-                      <td colSpan={8}>Loading vehicles…</td>
+                      <td colSpan={10}>Loading vehicles…</td>
                     </tr>
                   ) : vehicles.length === 0 ? (
                     <tr>
-                      <td colSpan={8}>No vehicles found.</td>
+                      <td colSpan={10}>No vehicles found.</td>
                     </tr>
                   ) : (
                     paginatedVehicles.map((vehicle) => (
                       <tr key={vehicle.id}>
                         <td>{`VEH-${vehicle.id.toString().padStart(3, '0')}`}</td>
-                        <td>{vehicle.make_model}</td>
+                        <td>{vehicle.vehicle_name || '—'}</td>
+                        <td>{vehicle.make_model || '—'}</td>
+                        <td>{vehicle.color || '—'}</td>
                         <td>{vehicle.year_model ?? '—'}</td>
                         <td>{vehicle.cr_number || '—'}</td>
                         <td>{vehicle.engine_number || '—'}</td>
@@ -365,8 +477,21 @@ function VehiclesSection({
             <h3 className="inventory-add-title">Add Vehicle</h3>
             <div className="inventory-add-grid">
               <div className="inventory-field">
+                <label htmlFor="vehicle-name">
+                  Vehicle Name <span className="inventory-required">*</span>
+                </label>
+                <input
+                  id="vehicle-name"
+                  className="inventory-input"
+                  value={newVehicleName}
+                  onChange={(e) => setNewVehicleName(e.target.value)}
+                  placeholder="e.g. Rescue Van 1"
+                />
+              </div>
+
+              <div className="inventory-field">
                 <label htmlFor="vehicle-make-model">
-                  Make / Model <span className="inventory-required">*</span>
+                  Make / Model
                 </label>
                 <input
                   id="vehicle-make-model"
@@ -374,6 +499,17 @@ function VehiclesSection({
                   value={newVehicleMakeModel}
                   onChange={(e) => setNewVehicleMakeModel(e.target.value)}
                   placeholder="e.g. Mitsubishi L300"
+                />
+              </div>
+
+              <div className="inventory-field">
+                <label htmlFor="vehicle-color">Color</label>
+                <input
+                  id="vehicle-color"
+                  className="inventory-input"
+                  value={newVehicleColor}
+                  onChange={(e) => setNewVehicleColor(e.target.value)}
+                  placeholder="e.g. White"
                 />
               </div>
 
@@ -466,11 +602,17 @@ function VehiclesSection({
                   onChange={(e) => setNewRepairVehicleId(e.target.value)}
                 >
                   <option value="">Select vehicle</option>
-                  {vehicles.map((vehicle) => (
-                    <option key={vehicle.id} value={String(vehicle.id)}>
-                      {`VEH-${vehicle.id.toString().padStart(3, '0')} • ${vehicle.make_model}`}
-                    </option>
-                  ))}
+                  {vehicles.map((vehicle) => {
+                    const displayLabel = getVehicleDisplayLabel(vehicle)
+                    const makeModel = vehicle.make_model?.trim()
+                    const makeModelSuffix = makeModel && makeModel !== displayLabel ? ` (${makeModel})` : ''
+
+                    return (
+                      <option key={vehicle.id} value={String(vehicle.id)}>
+                        {`VEH-${vehicle.id.toString().padStart(3, '0')} • ${displayLabel}${makeModelSuffix}`}
+                      </option>
+                    )
+                  })}
                 </select>
               </div>
 

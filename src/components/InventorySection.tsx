@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
@@ -7,6 +7,7 @@ type InventoryRow = Tables<'inventory'>
 type DepartmentOverview = {
   id: number
   name: string
+  code?: string
 }
 
 type InventorySectionProps = {
@@ -50,6 +51,8 @@ type InventorySectionProps = {
   setNewItemType: (value: string) => void
   newCondition: string
   setNewCondition: (value: string) => void
+  newDonorIdentification: string
+  setNewDonorIdentification: (value: string) => void
   newItemDepartmentId: string
   setNewItemDepartmentId: (value: string) => void
   newQuantity: string
@@ -72,6 +75,8 @@ type InventorySectionProps = {
   unitOfMeasureOptions: string[]
   acquisitionModeOptions: string[]
   newItemTotalCost: number | null
+  onExportCsv: () => void
+  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function InventorySection({
@@ -115,6 +120,8 @@ function InventorySection({
   setNewItemType,
   newCondition,
   setNewCondition,
+  newDonorIdentification,
+  setNewDonorIdentification,
   newItemDepartmentId,
   setNewItemDepartmentId,
   newQuantity,
@@ -137,6 +144,8 @@ function InventorySection({
   unitOfMeasureOptions,
   acquisitionModeOptions,
   newItemTotalCost,
+  onExportCsv,
+  onImportCsv,
 }: InventorySectionProps) {
   const inventoryPageSize = useResponsivePageSize(5)
   const selectedSource = newSource.trim().toLowerCase()
@@ -144,6 +153,9 @@ function InventorySection({
   const isDonated = selectedSource === 'donated'
   const isStockpileType = newItemType.trim().toLowerCase() === 'stockpile'
   const [inventoryPage, setInventoryPage] = useState(1)
+  const inventoryCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const csvMenuRef = useRef<HTMLDivElement | null>(null)
+  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventoryItems.length / inventoryPageSize))
 
@@ -156,6 +168,30 @@ function InventorySection({
       setInventoryPage(inventoryTotalPages)
     }
   }, [inventoryPage, inventoryTotalPages])
+
+  useEffect(() => {
+    if (!csvMenuOpen) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (!csvMenuRef.current) return
+      if (csvMenuRef.current.contains(event.target as Node)) return
+      setCsvMenuOpen(false)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCsvMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [csvMenuOpen])
 
   const paginatedInventoryItems = useMemo(() => {
     const start = (inventoryPage - 1) * inventoryPageSize
@@ -217,6 +253,59 @@ function InventorySection({
                 placeholder="Search by name or ID…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
+            <div className="csv-menu" ref={csvMenuRef}>
+              <button
+                type="button"
+                className="csv-action-button"
+                onClick={() => setCsvMenuOpen((prev) => !prev)}
+                aria-haspopup="menu"
+                aria-expanded={csvMenuOpen}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span>Import/Export</span>
+              </button>
+              {csvMenuOpen && (
+                <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
+                  <button
+                    type="button"
+                    className="csv-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setCsvMenuOpen(false)
+                      onExportCsv()
+                    }}
+                  >
+                    Export CSV
+                  </button>
+                  <button
+                    type="button"
+                    className="csv-menu-item"
+                    role="menuitem"
+                    onClick={() => {
+                      setCsvMenuOpen(false)
+                      inventoryCsvInputRef.current?.click()
+                    }}
+                  >
+                    Import CSV
+                  </button>
+                </div>
+              )}
+              <input
+                ref={inventoryCsvInputRef}
+                type="file"
+                accept=".csv,text/csv"
+                style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) {
+                    void onImportCsv(file)
+                  }
+                  e.currentTarget.value = ''
+                }}
               />
             </div>
             <div className="inventory-filter-selects">
@@ -306,7 +395,7 @@ function InventorySection({
                         const paddedId = `ITEM-${item.item_id.toString().padStart(3, '0')}`
                         const acquisitionMode = item.acquisition_mode?.trim() || null
                         const status = getItemStatus(item)
-                        const locationName = departments.find((dept) => dept.id === item.department_id)?.name ?? 'Unassigned'
+                        const locationCode = departments.find((dept) => dept.id === item.department_id)?.code ?? 'Unassigned'
                         const photoUrls = getItemPhotoUrls(item)
 
                         return (
@@ -314,7 +403,7 @@ function InventorySection({
                             <td>{paddedId}</td>
                             <td>{item.item_name}</td>
                             <td>{item.item_type}</td>
-                            <td>{locationName}</td>
+                            <td>{locationCode}</td>
                             <td>{item.quantity ?? '—'}</td>
                             <td>{item.unit_of_measure ?? '—'}</td>
                             <td>{formatCurrency(item.unit_cost)}</td>
@@ -346,6 +435,10 @@ function InventorySection({
                                       ? 'badge-status-serviceable'
                                       : status === 'Unserviceable'
                                         ? 'badge-status-unserviceable'
+                                        : status === 'Low'
+                                          ? 'badge-status-low'
+                                          : status === 'Full Stock'
+                                            ? 'badge-status-full-stock'
                                         : status === 'Valid'
                                           ? 'badge-status-valid'
                                           : status === 'Expired'
@@ -650,6 +743,17 @@ function InventorySection({
                 </select>
               </div>
               <div className="inventory-field">
+                <label htmlFor="add-donor-identification">Donor Identification</label>
+                <input
+                  id="add-donor-identification"
+                  type="text"
+                  className="inventory-input"
+                  placeholder="e.g., Name, Company, or Contact (optional)"
+                  value={newDonorIdentification}
+                  onChange={(e) => setNewDonorIdentification(e.target.value)}
+                />
+              </div>
+              <div className="inventory-field">
                 <label htmlFor="add-item-department">
                   Location <span className="inventory-required">*</span>
                 </label>
@@ -694,23 +798,19 @@ function InventorySection({
                   ))}
                 </select>
               </div>
-                {isPurchased && (
-                  <div className="inventory-field">
-                    <label htmlFor="add-unit-cost">
-                      Unit Cost (per 1 qty) <span className="inventory-required">*</span>
-                    </label>
-                    <input
-                      id="add-unit-cost"
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      className="inventory-input"
-                      placeholder="0.00"
-                      value={newUnitCost}
-                      onChange={(e) => setNewUnitCost(e.target.value)}
-                    />
-                  </div>
-                )}
+              <div className="inventory-field">
+                <label htmlFor="add-unit-cost">Unit Cost (per 1 qty)</label>
+                <input
+                  id="add-unit-cost"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  className="inventory-input"
+                  placeholder="0.00 (optional)"
+                  value={newUnitCost}
+                  onChange={(e) => setNewUnitCost(e.target.value)}
+                />
+              </div>
                 {isPurchased && (
                   <div className="inventory-field">
                     <label htmlFor="add-total-cost">Total Cost (Qty x Unit Cost)</label>

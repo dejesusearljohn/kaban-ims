@@ -249,6 +249,22 @@ function ShiftTurnoverRecordsSection() {
     return rows.slice(startIndex, startIndex + pageSize)
   }, [rows, page, pageSize])
 
+  useEffect(() => {
+    if (!activeRecord) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setActiveRecord(null)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [activeRecord])
+
   const totalTurnovers = shiftTurnovers.length
 
   const loadDetailItems = async (record: ShiftTurnoverRecord) => {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
@@ -43,6 +43,8 @@ type StockpileSectionProps = {
   releasingStockpile: boolean
   handlePrintReleaseLogs: () => void
   formatDisplayDate: (dateString: string | null) => string
+  onExportCsv: () => void
+  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function StockpileSection({
@@ -71,9 +73,14 @@ function StockpileSection({
   releasingStockpile,
   handlePrintReleaseLogs,
   formatDisplayDate,
+  onExportCsv,
+  onImportCsv,
 }: StockpileSectionProps) {
   const stockpilePageSize = useResponsivePageSize(10)
   const [stockpilePage, setStockpilePage] = useState(1)
+  const stockpileCsvInputRef = useRef<HTMLInputElement | null>(null)
+  const csvMenuRef = useRef<HTMLDivElement | null>(null)
+  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const currentStockpileItems = useMemo(
     () => (stockpileMode === 'expired' ? filteredExpiredStockpileItems : filteredStockpileItems),
@@ -92,6 +99,30 @@ function StockpileSection({
       setStockpilePage(stockpileTotalPages)
     }
   }, [stockpilePage, stockpileTotalPages])
+
+  useEffect(() => {
+    if (!csvMenuOpen) return
+
+    const onMouseDown = (event: MouseEvent) => {
+      if (!csvMenuRef.current) return
+      if (csvMenuRef.current.contains(event.target as Node)) return
+      setCsvMenuOpen(false)
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setCsvMenuOpen(false)
+      }
+    }
+
+    window.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [csvMenuOpen])
 
   const paginatedStockpileItems = useMemo(() => {
     const start = (stockpilePage - 1) * stockpilePageSize
@@ -135,35 +166,91 @@ function StockpileSection({
 
       {stockpileError && <p className="dashboard-error">{stockpileError}</p>}
 
-      <section className="inventory-toolbar" aria-label="Stockpile actions">
-        <button
-          type="button"
-          className={stockpileMode === 'list' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setStockpileMode('list')}
-        >
-          Manage Stockpiles
-        </button>
-        <button
-          type="button"
-          className={stockpileMode === 'release' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={openReleasePage}
-        >
-          Stockpile Release
-        </button>
-        <button
-          type="button"
-          className={stockpileMode === 'logs' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setStockpileMode('logs')}
-        >
-          Release Logs
-        </button>
-        <button
-          type="button"
-          className={stockpileMode === 'expired' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setStockpileMode('expired')}
-        >
-          Expired
-        </button>
+      <section className="section-toolbar-row" aria-label="Stockpile actions">
+        <div className="inventory-toolbar">
+          <button
+            type="button"
+            className={stockpileMode === 'list' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setStockpileMode('list')}
+          >
+            Manage Stockpiles
+          </button>
+          <button
+            type="button"
+            className={stockpileMode === 'release' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={openReleasePage}
+          >
+            Stockpile Release
+          </button>
+          <button
+            type="button"
+            className={stockpileMode === 'logs' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setStockpileMode('logs')}
+          >
+            Release Logs
+          </button>
+          <button
+            type="button"
+            className={stockpileMode === 'expired' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setStockpileMode('expired')}
+          >
+            Expired
+          </button>
+        </div>
+
+        <div className="csv-menu" ref={csvMenuRef}>
+          <button
+            type="button"
+            className="csv-action-button"
+            onClick={() => setCsvMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={csvMenuOpen}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Import/Export</span>
+          </button>
+          {csvMenuOpen && (
+            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  onExportCsv()
+                }}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  stockpileCsvInputRef.current?.click()
+                }}
+              >
+                Import CSV
+              </button>
+            </div>
+          )}
+          <input
+            ref={stockpileCsvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void onImportCsv(file)
+              }
+              e.currentTarget.value = ''
+            }}
+          />
+        </div>
       </section>
 
       {stockpileMode === 'list' && (
@@ -286,9 +373,6 @@ function StockpileSection({
             <div className="inventory-add-card">
               <div className="stockpile-release-header">
                 <h3 className="inventory-add-title">Stockpile Release</h3>
-                <button type="button" className="inventory-secondary-button" onClick={closeStockpileReleasePage}>
-                  Back to Stockpiles
-                </button>
               </div>
 
               <p className="inventory-help-text stockpile-release-help">

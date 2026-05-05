@@ -15,6 +15,28 @@
   width: fit-content;
 }
 
+.vehicle-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.vehicle-toolbar-row .csv-menu {
+  margin-left: auto;
+}
+
+.section-toolbar-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.section-toolbar-row .csv-menu {
+  margin-left: auto;
+}
+
 .inventory-primary-button,
 .inventory-secondary-button {
   font-size: 14px;
@@ -378,6 +400,16 @@
   color: #b91c1c;
 }
 
+.badge-status-low {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.badge-status-full-stock {
+  background: #dcfce7;
+  color: #15803d;
+}
+
 .badge-condition-good {
   background: #dcfce7;
   color: #15803d;
@@ -541,6 +573,19 @@
 }
 
 @media (max-width: 960px) {
+  .vehicle-toolbar-row {
+    flex-wrap: wrap;
+  }
+
+  .vehicle-toolbar-row .csv-menu,
+  .section-toolbar-row .csv-menu {
+    margin-left: 0;
+  }
+
+  .section-toolbar-row {
+    flex-wrap: wrap;
+  }
+
   .inventory-toolbar {
     width: 100%;
     flex-wrap: wrap;

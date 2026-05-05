@@ -31,6 +31,7 @@ import '../styles/Wmr.css'
 import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
+import { downloadCsv, parseCsvFile } from '../utils/csv'
 
 type SummaryMetrics = {
   totalItems: number
@@ -56,7 +57,10 @@ type StockpileRow = Tables<'stockpile'> & { status?: string | null }
 type DistributionLogRow = Tables<'distribution_logs'>
 type WmrReportRow = Tables<'wmr_reports'>
 type ParRecordRow = Tables<'par_records'>
-type VehicleRow = Tables<'vehicles'>
+type VehicleRow = Tables<'vehicles'> & {
+  vehicle_name?: string | null
+  color?: string | null
+}
 type VehicleRepairRow = Tables<'vehicle_repairs'>
 type UserRow = Tables<'users'>
 
@@ -82,6 +86,7 @@ type ArchiveModalConfig = {
 
 const STAFF_PAGE_SIZE = 5
 const DEPARTMENT_PAGE_SIZE = 10
+const DASHBOARD_DRILLDOWN_PAGE_SIZE = 10
 
 const getVisiblePageNumbers = (currentPage: number, totalPages: number, maxVisiblePages = 5) => {
   if (totalPages <= maxVisiblePages) {
@@ -165,6 +170,7 @@ const DEFAULT_UNITS_OF_MEASURE = [
   'Box',
   'Pair',
   'Pack',
+  'Sack',
   'Roll',
   'Bottle',
   'Liter',
@@ -172,6 +178,23 @@ const DEFAULT_UNITS_OF_MEASURE = [
   'Kilogram',
   'Gram',
   'Meter',
+]
+
+const INVENTORY_IMPORT_DEFAULT_HEADERS = [
+  'item_name',
+  'item_type',
+  'department_id',
+  'department_name',
+  'department_code',
+  'quantity',
+  'unit_of_measure',
+  'unit_cost',
+  'date_acquired',
+  'expiration_date',
+  'acquisition_mode',
+  'status',
+  'condition',
+  'donor_identification',
 ]
 
 const INVENTORY_PHOTO_BUCKET = 'inventory-photos'
@@ -384,6 +407,7 @@ function DashboardPage() {
   const [newItemName, setNewItemName] = useState('')
   const [newItemType, setNewItemType] = useState('')
   const [newCondition, setNewCondition] = useState('')
+  const [newDonorIdentification, setNewDonorIdentification] = useState('')
   const [newItemDepartmentId, setNewItemDepartmentId] = useState('')
   const [newQuantity, setNewQuantity] = useState('')
   const [newUnitOfMeasure, setNewUnitOfMeasure] = useState('')
@@ -393,6 +417,10 @@ function DashboardPage() {
   const [newSource, setNewSource] = useState('')
   const [newPhotoFiles, setNewPhotoFiles] = useState<File[]>([])
   const [addingItem, setAddingItem] = useState(false)
+  const [inventoryImportRows, setInventoryImportRows] = useState<Array<Record<string, string>>>([])
+  const [inventoryImportHeaders, setInventoryImportHeaders] = useState<string[]>([])
+  const [inventoryImportSaving, setInventoryImportSaving] = useState(false)
+  const [inventoryImportError, setInventoryImportError] = useState<string | null>(null)
   const addPhotoInputRef = useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [wmrSearchQuery, setWmrSearchQuery] = useState('')
@@ -403,6 +431,11 @@ function DashboardPage() {
   const [wmrTypeFilter, setWmrTypeFilter] = useState('all')
   const [wmrDepartmentFilter, setWmrDepartmentFilter] = useState('all')
   const [wmrStatusFilter, setWmrStatusFilter] = useState('all')
+  const [dashboardMetricDrilldown, setDashboardMetricDrilldown] = useState<
+    'total' | 'serviceable' | 'unserviceable' | 'purchased' | 'donated' | 'low' | 'fullStock' | 'expired' | null
+  >(null)
+  const [dashboardDrilldownPage, setDashboardDrilldownPage] = useState(1)
+  const dashboardDrilldownModalRef = useRef<HTMLDivElement | null>(null)
   const [editingItem, setEditingItem] = useState<InventoryRow | null>(null)
   const [editItemName, setEditItemName] = useState('')
   const [editItemType, setEditItemType] = useState('')
@@ -415,6 +448,7 @@ function DashboardPage() {
   const [editSource, setEditSource] = useState('')
   const [editStatus, setEditStatus] = useState('')
   const [editCondition, setEditCondition] = useState('')
+  const [editDonorIdentification, setEditDonorIdentification] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [editDeleting, setEditDeleting] = useState(false)
   const [archiveModalConfig, setArchiveModalConfig] = useState<ArchiveModalConfig | null>(null)
@@ -470,7 +504,9 @@ function DashboardPage() {
   const [vehicleLoading, setVehicleLoading] = useState(false)
   const [vehicleSaving, setVehicleSaving] = useState(false)
   const [vehicleError, setVehicleError] = useState<string | null>(null)
+  const [newVehicleName, setNewVehicleName] = useState('')
   const [newVehicleMakeModel, setNewVehicleMakeModel] = useState('')
+  const [newVehicleColor, setNewVehicleColor] = useState('')
   const [newVehicleYearModel, setNewVehicleYearModel] = useState('')
   const [newVehicleCrNumber, setNewVehicleCrNumber] = useState('')
   const [newVehicleEngineNumber, setNewVehicleEngineNumber] = useState('')
@@ -479,6 +515,8 @@ function DashboardPage() {
   const [editingVehicle, setEditingVehicle] = useState<VehicleRow | null>(null)
   const [editVehicleServiceable, setEditVehicleServiceable] = useState('true')
   const [editVehicleRemarks, setEditVehicleRemarks] = useState('')
+  const [editVehicleName, setEditVehicleName] = useState('')
+  const [editVehicleColor, setEditVehicleColor] = useState('')
   const [isEditingVehicleDetails, setIsEditingVehicleDetails] = useState(false)
   const [editVehicleSaving, setEditVehicleSaving] = useState(false)
   const [newRepairVehicleId, setNewRepairVehicleId] = useState('')
@@ -1098,6 +1136,18 @@ function DashboardPage() {
     const parsed = value.trim() ? Number(value) : null
     return parsed != null && Number.isFinite(parsed) ? parsed : null
   }
+  const parseIntegerInput = (value: string | null | undefined) => {
+    if (!value) return null
+    const parsed = Number.parseInt(value.trim(), 10)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  const parseBooleanInput = (value: string | null | undefined, fallback = true) => {
+    if (!value) return fallback
+    const normalized = value.trim().toLowerCase()
+    if (['true', '1', 'yes', 'y', 'serviceable'].includes(normalized)) return true
+    if (['false', '0', 'no', 'n', 'unserviceable', 'needs repair'].includes(normalized)) return false
+    return fallback
+  }
   const parseDateLikeValue = (value: string | null | undefined) => {
     if (!value) return null
 
@@ -1116,18 +1166,24 @@ function DashboardPage() {
 
     if (item.item_type.trim().toLowerCase() === 'stockpile') {
       const expirationDate = parseDateLikeValue(item.expiration_date)
+      const quantityValue = Number(item.quantity ?? 0)
       const now = new Date()
       now.setHours(0, 0, 0, 0)
 
       if (expirationDate) {
         expirationDate.setHours(0, 0, 0, 0)
-        return expirationDate < now ? 'Expired' : 'Valid'
+        if (expirationDate < now) return 'Expired'
       }
 
-      return 'Valid'
+      return Number.isFinite(quantityValue) && quantityValue <= 10 ? 'Low' : 'Full Stock'
     }
 
-    return explicitStatus
+    if (explicitStatus) return explicitStatus
+
+    const quantityValue = item.quantity
+    if (quantityValue == null || Number.isNaN(Number(quantityValue))) return null
+
+    return Number(quantityValue) <= 10 ? 'Low' : 'Full Stock'
   }
   const isArchivedRow = (row: unknown) => {
     if (!row || typeof row !== 'object') return false
@@ -1206,10 +1262,22 @@ function DashboardPage() {
   const calculateTotalCost = (quantity: number | null, unitCost: number | null) =>
     quantity != null && unitCost != null ? quantity * unitCost : null
 
+  const getVehicleDisplayLabel = (vehicle: VehicleRow) => {
+    const vehicleName = vehicle.vehicle_name?.trim()
+    if (vehicleName) return vehicleName
+
+    const makeModel = vehicle.make_model?.trim()
+    if (makeModel) return makeModel
+
+    return `VEH-${vehicle.id.toString().padStart(3, '0')}`
+  }
+
   const openVehicleEditModal = (vehicle: VehicleRow) => {
     setEditingVehicle(vehicle)
     setEditVehicleServiceable(String(vehicle.is_serviceable ?? true))
     setEditVehicleRemarks(getVehicleStatusRemark(vehicle.repair_history_log))
+    setEditVehicleName(vehicle.vehicle_name ?? '')
+    setEditVehicleColor(vehicle.color ?? '')
     setIsEditingVehicleDetails(false)
   }
 
@@ -1218,6 +1286,8 @@ function DashboardPage() {
     setEditingVehicle(null)
     setEditVehicleServiceable('true')
     setEditVehicleRemarks('')
+    setEditVehicleName('')
+    setEditVehicleColor('')
     setIsEditingVehicleDetails(false)
   }
 
@@ -1306,9 +1376,19 @@ function DashboardPage() {
     ),
   )
   const statusOptions = Array.from(
-    new Set<string>(['Serviceable', 'Unserviceable', 'Valid', 'Expired', ...dynamicStatusOptions]),
+    new Set<string>([
+      'Serviceable',
+      'Unserviceable',
+      'Valid',
+      'Expired',
+      'Low',
+      'Full Stock',
+      ...dynamicStatusOptions,
+    ]),
   ).sort()
-  const editableStatusOptions = statusOptions.filter((statusOption) => statusOption !== 'Valid')
+  const editableStatusOptions = statusOptions.filter(
+    (statusOption) => !['Valid', 'Full Stock', 'Low'].includes(statusOption),
+  )
   const acquisitionModeOptions = Array.from(
     new Set(['Purchased', 'Donated', ...inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)]),
   ).sort()
@@ -1397,7 +1477,12 @@ function DashboardPage() {
     return true
   })
 
-  const combinedFilteredWmrCount = filteredWasteItems.length + staffWmrReports.filter((r) => !wasteInventoryItems.some((i) => i.item_id === r.item_id)).length + filteredVehicleWmrReports.length
+  const filteredStaffWmrReports = staffWmrReports.filter(
+    (report) => !wasteInventoryItems.some((item) => item.item_id === report.item_id),
+  )
+
+  const combinedFilteredWmrCount =
+    filteredWasteItems.length + filteredStaffWmrReports.length + filteredVehicleWmrReports.length
   const activeVehicles = vehicles.filter((vehicle) => !isArchivedRow(vehicle))
 
   const filteredInventoryItems = inventoryItems.filter((item) => {
@@ -1438,6 +1523,7 @@ function DashboardPage() {
     .filter((vehicle) => isArchivedRow(vehicle))
     .slice()
     .sort((a, b) => b.id - a.id)
+  const visibleDepartments = departments.filter((department) => department.name !== 'Stockpile Room')
   const archivedStaff = parUsers
     .filter((user) => isArchivedRow(user))
     .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
@@ -1449,7 +1535,7 @@ function DashboardPage() {
       const safeBTime = Number.isNaN(bTime) ? 0 : bTime
       return safeBTime - safeATime
     })
-  const archivedDepartments = departments
+  const archivedDepartments = visibleDepartments
     .filter((department) => {
       const departmentRow = (department as unknown as { is_archived?: boolean | null })
       return departmentRow.is_archived === true
@@ -1479,8 +1565,8 @@ function DashboardPage() {
   )
   const visibleStaffPageNumbers = getVisiblePageNumbers(staffPage, staffTotalPages)
 
-  const departmentTotalPages = Math.max(1, Math.ceil(departments.length / DEPARTMENT_PAGE_SIZE))
-  const paginatedDepartments = departments.slice(
+  const departmentTotalPages = Math.max(1, Math.ceil(visibleDepartments.length / DEPARTMENT_PAGE_SIZE))
+  const paginatedDepartments = visibleDepartments.slice(
     (departmentPage - 1) * DEPARTMENT_PAGE_SIZE,
     (departmentPage - 1) * DEPARTMENT_PAGE_SIZE + DEPARTMENT_PAGE_SIZE,
   )
@@ -1524,6 +1610,11 @@ function DashboardPage() {
       setDepartmentPage(departmentTotalPages)
     }
   }, [departmentPage, departmentTotalPages])
+
+  useEffect(() => {
+    setDashboardDrilldownPage(1)
+  }, [dashboardMetricDrilldown])
+
   const stockpileStatusCountMap = stockpileItems.reduce((acc, item) => {
     const quantity = Number(item.quantity_on_hand ?? 0)
     const expiration = item.expiration_date ? new Date(item.expiration_date) : null
@@ -1557,6 +1648,200 @@ function DashboardPage() {
     (item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'purchased',
   ).length
   const donatedCount = inventoryItems.filter((item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'donated').length
+  const lowStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'Low').length
+  const fullStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'Full Stock').length
+  const dashboardMetricLabelMap = {
+    total: 'Total Items',
+    serviceable: 'Serviceable',
+    unserviceable: 'Unserviceable',
+    purchased: 'Purchased',
+    donated: 'Donated',
+    low: 'Low Stock',
+    fullStock: 'Full Stock',
+    expired: 'Expired Items',
+  } as const
+
+  const dashboardDrilldownItems = dashboardMetricDrilldown
+    ? inventoryItems.filter((item) => {
+        const status = getInventoryStatus(item)
+        const source = (item.acquisition_mode ?? '').trim().toLowerCase()
+
+        if (status === 'Archived') return false
+
+        if (dashboardMetricDrilldown === 'total') return true
+        if (dashboardMetricDrilldown === 'serviceable') return status === 'Serviceable'
+        if (dashboardMetricDrilldown === 'unserviceable') return status === 'Unserviceable'
+        if (dashboardMetricDrilldown === 'purchased') return source === 'purchased'
+        if (dashboardMetricDrilldown === 'donated') return source === 'donated'
+        if (dashboardMetricDrilldown === 'low') return status === 'Low'
+        if (dashboardMetricDrilldown === 'fullStock') return status === 'Full Stock'
+        if (dashboardMetricDrilldown === 'expired') return status === 'Expired'
+
+        return false
+      })
+    : []
+  const dashboardDrilldownTotalPages = Math.max(
+    1,
+    Math.ceil(dashboardDrilldownItems.length / DASHBOARD_DRILLDOWN_PAGE_SIZE),
+  )
+  const dashboardDrilldownPaginatedItems = dashboardDrilldownItems.slice(
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE,
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
+  )
+  const dashboardDrilldownVisiblePageNumbers = getVisiblePageNumbers(
+    dashboardDrilldownPage,
+    dashboardDrilldownTotalPages,
+  )
+
+  useEffect(() => {
+    if (!dashboardMetricDrilldown) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      dashboardDrilldownModalRef.current?.focus()
+    })
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+    }
+  }, [dashboardMetricDrilldown])
+
+  useEffect(() => {
+    if (!dashboardMetricDrilldown) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setDashboardMetricDrilldown(null)
+        return
+      }
+
+      if (event.key === 'ArrowLeft') {
+        event.preventDefault()
+        setDashboardDrilldownPage((prev) => Math.max(1, prev - 1))
+        return
+      }
+
+      if (event.key === 'ArrowRight') {
+        event.preventDefault()
+        setDashboardDrilldownPage((prev) => Math.min(dashboardDrilldownTotalPages, prev + 1))
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [dashboardMetricDrilldown, dashboardDrilldownTotalPages])
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+
+      if (inventoryImportRows.length > 0) {
+        event.preventDefault()
+        if (!inventoryImportSaving) {
+          closeInventoryImportModal()
+        }
+        return
+      }
+
+      if (activeWmrItem || activeWmrReport) {
+        event.preventDefault()
+        if (!wmrSaving) {
+          setActiveWmrItem(null)
+          setActiveWmrReport(null)
+          setActiveWmrVehicleLabel(null)
+          setWmrRemarksInput('')
+          setWmrStatusInput('Pending')
+          setIsEditingWmrRemarks(false)
+          setWmrSaving(false)
+        }
+        return
+      }
+
+      if (viewQrItem) {
+        event.preventDefault()
+        setViewQrItem(null)
+        return
+      }
+
+      if (viewStaffQrItem) {
+        event.preventDefault()
+        setViewStaffQrItem(null)
+        return
+      }
+
+      if (viewImageItem) {
+        event.preventDefault()
+        setViewImageItem(null)
+        return
+      }
+
+      if (archiveModalConfig) {
+        event.preventDefault()
+        setArchiveModalConfig(null)
+        return
+      }
+
+      if (dashboardMetricDrilldown) {
+        event.preventDefault()
+        setDashboardMetricDrilldown(null)
+        return
+      }
+
+      if (editingItem && !editSaving && !editDeleting) {
+        event.preventDefault()
+        setEditingItem(null)
+        return
+      }
+
+      if (editingVehicle) {
+        event.preventDefault()
+        closeVehicleEditModal()
+        return
+      }
+
+      if (activeVehicleLogsId != null) {
+        event.preventDefault()
+        setActiveVehicleLogsId(null)
+        return
+      }
+
+      if (activeParStaffId) {
+        event.preventDefault()
+        setActiveParStaffId(null)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [
+    activeParStaffId,
+    activeVehicleLogsId,
+    editingVehicle,
+    editingItem,
+    editSaving,
+    editDeleting,
+    dashboardMetricDrilldown,
+    archiveModalConfig,
+    viewImageItem,
+    viewStaffQrItem,
+    viewQrItem,
+    activeWmrItem,
+    activeWmrReport,
+    wmrSaving,
+    inventoryImportRows.length,
+    inventoryImportSaving,
+  ])
+
+  useEffect(() => {
+    if (dashboardDrilldownPage > dashboardDrilldownTotalPages) {
+      setDashboardDrilldownPage(dashboardDrilldownTotalPages)
+    }
+  }, [dashboardDrilldownPage, dashboardDrilldownTotalPages])
 
   const itemTypeCountMap = inventoryItems.reduce((acc, item) => {
     const type = item.item_type.trim()
@@ -1769,6 +2054,78 @@ function DashboardPage() {
     frameDoc.close()
   }
 
+  const printHeaderLogoSrc = `${window.location.origin}/Banicain-logo.png`
+
+  const buildPrintReportHeader = (reportTitle: string) => `
+    <div class="report-header">
+      <img class="report-header-logo" src="${escapeHtml(printHeaderLogoSrc)}" alt="Barangay New Banicain logo" />
+      <div class="report-header-text">
+        <p class="report-header-city">City of Olongapo</p>
+        <p class="report-header-barangay">BARANGAY NEW BANICAIN</p>
+        <p class="report-header-address">Luna Street New Banicain Olongapo City, Philippines 2200</p>
+      </div>
+    </div>
+    <div class="report-title">${escapeHtml(reportTitle)}</div>
+  `
+
+  const getPrintCommonStyles = () => `
+    body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
+    p { margin: 0 0 12px; color: #4b5563; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
+    th { background: #f3f4f6; font-weight: 600; }
+    .report-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1.5px solid #111827;
+      padding-bottom: 8px;
+      margin-bottom: 10px;
+    }
+    .report-header-logo {
+      width: 58px;
+      height: 58px;
+      object-fit: contain;
+      flex: 0 0 auto;
+    }
+    .report-header-text {
+      line-height: 1.18;
+    }
+    .report-header-city {
+      margin: 0;
+      font-size: 11px;
+      color: #374151;
+    }
+    .report-header-barangay {
+      margin: 2px 0;
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      color: #111827;
+    }
+    .report-header-address {
+      margin: 0;
+      font-size: 11px;
+      color: #374151;
+    }
+    .report-title {
+      margin: 8px 0 12px;
+      font-size: 20px;
+      font-weight: 700;
+      color: #111827;
+      text-align: center;
+    }
+    .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
+    .sign-line { margin-top: 48px; width: 280px; }
+    .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
+    .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
+    @media print {
+      body { margin: 10mm; }
+      .report-header-logo { width: 54px; height: 54px; }
+      .report-header-barangay { font-size: 17px; }
+    }
+  `
+
   const handlePrintParForStaff = (staffId: string, startDate?: string, endDate?: string) => {
     if (!staffId) return
 
@@ -1849,23 +2206,17 @@ function DashboardPage() {
           <meta charset="utf-8" />
           <title>${escapeHtml(parNo)}</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-            h1 { margin: 0 0 16px; font-size: 20px; }
+            ${getPrintCommonStyles()}
             .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; margin-bottom: 16px; }
             .meta p { margin: 0; font-size: 14px; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; }
-            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-            th { background: #f3f4f6; font-weight: 600; }
-            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; }
+            .signatures { grid-template-columns: 1fr 1fr; gap: 40px; }
             .signatures > div { width: 220px; }
-            .sign-line { margin-top: 48px; width: 100%; }
-            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
-            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 100%; text-align: left; }
-            @media print { body { margin: 10mm; } }
+            .sign-line { width: 100%; }
+            .sign-role { width: 100%; }
           </style>
         </head>
         <body>
-          <h1>Property Acknowledgment Receipt</h1>
+          ${buildPrintReportHeader('PROPERTY ACKNOWLEDGMENT RECEIPT')}
           <div class="meta">
             <p><strong>Employee Name:</strong> ${escapeHtml(receiver?.full_name ?? staffId)}</p>
             <p><strong>Department:</strong> ${escapeHtml(departmentName)}</p>
@@ -2127,27 +2478,32 @@ function DashboardPage() {
 
   // [HANDLERS] Vehicle actions
   const handleAddVehicle = async () => {
-    if (!newVehicleMakeModel) {
-      setVehicleError('Make/Model is required.')
+    const trimmedVehicleName = newVehicleName.trim()
+    if (!trimmedVehicleName) {
+      setVehicleError('Vehicle name is required.')
       return
     }
 
     setVehicleSaving(true)
     setVehicleError(null)
 
+    const trimmedMakeModel = newVehicleMakeModel.trim()
+    const trimmedColor = newVehicleColor.trim()
     const yearValue = newVehicleYearModel ? Number(newVehicleYearModel) : null
 
     const { data, error: insertVehicleError } = await supabase
       .from('vehicles')
       .insert([
-        {
-          make_model: newVehicleMakeModel,
+        ({
+          vehicle_name: trimmedVehicleName,
+          make_model: trimmedMakeModel || null,
+          color: trimmedColor || null,
           year_model: Number.isNaN(yearValue) ? null : yearValue,
           cr_number: newVehicleCrNumber || null,
           engine_number: newVehicleEngineNumber || null,
           is_serviceable: newVehicleServiceable === 'true',
           repair_history_log: newVehicleRepairHistory || null,
-        },
+        } as never),
       ])
       .select('*')
 
@@ -2163,7 +2519,9 @@ function DashboardPage() {
       setVehicles((prev) => [...prev, insertedVehicle].sort((a, b) => b.id - a.id))
     }
 
+    setNewVehicleName('')
     setNewVehicleMakeModel('')
+    setNewVehicleColor('')
     setNewVehicleYearModel('')
     setNewVehicleCrNumber('')
     setNewVehicleEngineNumber('')
@@ -2255,6 +2613,12 @@ function DashboardPage() {
   const handleSaveVehicleEdit = async () => {
     if (!editingVehicle) return
 
+    const trimmedEditVehicleName = editVehicleName.trim()
+    if (!trimmedEditVehicleName) {
+      setVehicleError('Vehicle name is required.')
+      return
+    }
+
     if (editVehicleServiceable === 'false' && !editVehicleRemarks.trim()) {
       setVehicleError('Remarks are required when the vehicle is Unserviceable.')
       return
@@ -2273,9 +2637,11 @@ function DashboardPage() {
     const { data, error: updateError } = await supabase
       .from('vehicles')
       .update({
+        vehicle_name: trimmedEditVehicleName,
+        color: editVehicleColor.trim() || null,
         is_serviceable: editVehicleServiceable === 'true',
         repair_history_log: nextHistoryLog,
-      })
+      } as never)
       .eq('id', editingVehicle.id)
       .select('*')
 
@@ -2299,7 +2665,7 @@ function DashboardPage() {
               item_id: null,
               status: 'Pending',
               reason_damage: editVehicleRemarks.trim() || null,
-              location: `Vehicle Registry - ${updatedVehicle.make_model ?? `VEH-${updatedVehicle.id.toString().padStart(3, '0')}`}`,
+              location: `Vehicle Registry - ${getVehicleDisplayLabel(updatedVehicle)}`,
               admin_remarks: editVehicleRemarks.trim() || null,
               date_reported: new Date().toISOString().slice(0, 10),
             },
@@ -2477,8 +2843,9 @@ function DashboardPage() {
     setEditDateAcquired(item.date_acquired)
     setEditExpirationDate(item.expiration_date ?? '')
     setEditSource(item.acquisition_mode ?? '')
-    setEditStatus(getInventoryStatus(item) ?? '')
+    setEditStatus(item.item_type.trim().toLowerCase() === 'stockpile' ? getInventoryStatus(item) ?? '' : item.status?.trim() ?? '')
     setEditCondition(item.condition ?? '')
+    setEditDonorIdentification((item as InventoryRow & { donor_identification?: string | null }).donor_identification ?? '')
   }
 
   const handleSaveEdit = async () => {
@@ -2531,11 +2898,12 @@ function DashboardPage() {
         unit_of_measure: editUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
         date_acquired: editDateAcquired ? editDateAcquired : new Date().toISOString().split('T')[0],
-        expiration_date: editExpirationDate || null,
+        expiration_date: isStockpileType ? editExpirationDate || null : null,
         acquisition_mode: editSource || null,
         status: isStockpileType ? stockpileStatusToSave : sanitizedEditStatus,
         condition: editCondition || null,
-      })
+        donor_identification: editDonorIdentification || null,
+      } as any)
       .eq('item_id', editingItem.item_id)
 
     if (updateError) {
@@ -2612,7 +2980,7 @@ function DashboardPage() {
   }
 
   const openArchiveVehicleConfirmation = (vehicle: VehicleRow) => {
-    const vehicleLabel = vehicle.make_model ?? `VEH-${vehicle.id}`
+    const vehicleLabel = getVehicleDisplayLabel(vehicle)
     setArchiveModalConfig({
       kind: 'vehicle',
       title: 'Archive Vehicle',
@@ -3280,8 +3648,9 @@ function DashboardPage() {
         acquisition_mode: newSource || null,
         status: isStockpileType ? stockpileStatusToInsert : null,
         condition: newCondition || null,
+        donor_identification: newDonorIdentification || null,
         qr_code: itemUid,
-      },
+      } as any,
     ]).select('*')
 
     if (insertError) {
@@ -3370,6 +3739,7 @@ function DashboardPage() {
     setNewItemName('')
     setNewItemType('')
     setNewCondition('')
+    setNewDonorIdentification('')
     setNewItemDepartmentId('')
     setNewQuantity('')
     setNewUnitOfMeasure('')
@@ -3381,10 +3751,13 @@ function DashboardPage() {
 
     // Auto-register vehicle in vehicles table
     if (newItemType.trim().toLowerCase() === 'vehicle') {
-      await supabase.from('vehicles').insert([{
-        make_model: newItemName,
-        is_serviceable: newCondition.trim().toLowerCase() !== 'defective',
-      }])
+      await supabase.from('vehicles').insert([
+        {
+          vehicle_name: newItemName,
+          make_model: newItemName,
+          is_serviceable: newCondition.trim().toLowerCase() !== 'defective',
+        } as never,
+      ])
     }
 
     // Reload inventory list
@@ -3646,21 +4019,11 @@ function DashboardPage() {
           <meta charset="utf-8" />
           <title>Stockpile Release Logs</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-            h1 { margin: 0 0 8px; font-size: 20px; }
-            p { margin: 0 0 14px; color: #4b5563; font-size: 13px; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; }
-            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-            th { background: #f3f4f6; font-weight: 600; }
-            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
-            .sign-line { margin-top: 48px; width: 280px; }
-            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
-            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
-            @media print { body { margin: 10mm; } }
+            ${getPrintCommonStyles()}
           </style>
         </head>
         <body>
-          <h1>Stockpile Release Logs</h1>
+          ${buildPrintReportHeader('STOCKPILE RELEASE LOGS')}
           <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
           ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
           <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
@@ -3749,23 +4112,15 @@ function DashboardPage() {
           <meta charset="utf-8" />
           <title>Inventory Report</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-            h1 { margin: 0 0 8px; font-size: 20px; }
+            ${getPrintCommonStyles()}
             h2 { margin: 20px 0 8px; font-size: 16px; }
-            p { margin: 0 0 14px; color: #4b5563; font-size: 13px; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; margin-top: 8px; }
-            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; vertical-align: top; }
-            th { background: #f3f4f6; font-weight: 600; }
+            table { margin-top: 8px; }
+            th, td { vertical-align: top; }
             .section { margin-top: 18px; }
-            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
-            .sign-line { margin-top: 48px; width: 280px; }
-            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
-            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
-            @media print { body { margin: 10mm; } }
           </style>
         </head>
         <body>
-          <h1>Inventory Report</h1>
+          ${buildPrintReportHeader('INVENTORY REPORT')}
           <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
           ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
           <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
@@ -3872,21 +4227,11 @@ function DashboardPage() {
           <meta charset="utf-8" />
           <title>Waste Materials Report Summary</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-            h1 { margin: 0 0 8px; font-size: 20px; }
-            p { margin: 0 0 12px; color: #4b5563; font-size: 13px; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; }
-            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-            th { background: #f3f4f6; font-weight: 600; }
-            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
-            .sign-line { margin-top: 48px; width: 280px; }
-            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
-            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
-            @media print { body { margin: 10mm; } }
+            ${getPrintCommonStyles()}
           </style>
         </head>
         <body>
-          <h1>Waste Materials Report Summary</h1>
+          ${buildPrintReportHeader('WASTE MATERIALS REPORT SUMMARY')}
           <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
           ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
           <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
@@ -3986,21 +4331,11 @@ function DashboardPage() {
           <meta charset="utf-8" />
           <title>Vehicle Repair Logs</title>
           <style>
-            body { font-family: Arial, sans-serif; margin: 24px; color: #111827; }
-            h1 { margin: 0 0 8px; font-size: 20px; }
-            p { margin: 0 0 12px; color: #4b5563; font-size: 13px; }
-            table { width: 100%; border-collapse: collapse; font-size: 13px; }
-            th, td { border: 1px solid #d1d5db; padding: 8px; text-align: left; }
-            th { background: #f3f4f6; font-weight: 600; }
-            .signatures { margin-top: 24px; display: grid; grid-template-columns: 1fr; }
-            .sign-line { margin-top: 48px; width: 280px; }
-            .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
-            .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
-            @media print { body { margin: 10mm; } }
+            ${getPrintCommonStyles()}
           </style>
         </head>
         <body>
-          <h1>Vehicle Repair Logs</h1>
+          ${buildPrintReportHeader('VEHICLE REPAIR LOGS')}
           <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
           ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
           <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
@@ -4032,6 +4367,504 @@ function DashboardPage() {
     `
 
     printHtmlViaIframe(printDocument, setVehicleError)
+  }
+
+  const getCsvTimestamp = () => new Date().toISOString().slice(0, 10)
+
+  const handleExportInventoryCsv = () => {
+    const rows = filteredInventoryItems.map((item) => ({
+      item_id: item.item_id,
+      item_name: item.item_name,
+      item_type: item.item_type,
+      department_id: item.department_id ?? '',
+      department_name: departments.find((dept) => dept.id === item.department_id)?.name ?? '',
+      quantity: item.quantity ?? '',
+      unit_of_measure: item.unit_of_measure ?? '',
+      unit_cost: item.unit_cost ?? '',
+      date_acquired: item.date_acquired ?? '',
+      expiration_date: item.expiration_date ?? '',
+      acquisition_mode: item.acquisition_mode ?? '',
+      status: getInventoryStatus(item) ?? '',
+      condition: item.condition ?? '',
+      donor_identification: (item as InventoryRow & { donor_identification?: string | null }).donor_identification ?? '',
+    }))
+
+    downloadCsv(`inventory-${getCsvTimestamp()}.csv`, rows)
+  }
+
+  const handleImportInventoryCsv = async (file: File) => {
+    try {
+      const csvRows = await parseCsvFile(file)
+      if (csvRows.length === 0) {
+        setInventoryError('The selected CSV file has no data rows.')
+        return
+      }
+
+      const detectedHeaders = Array.from(
+        csvRows.reduce((headerSet, row) => {
+          Object.keys(row).forEach((key) => headerSet.add(key))
+          return headerSet
+        }, new Set<string>()),
+      )
+
+      const orderedHeaders = [
+        ...INVENTORY_IMPORT_DEFAULT_HEADERS.filter((header) => detectedHeaders.includes(header)),
+        ...detectedHeaders.filter((header) => !INVENTORY_IMPORT_DEFAULT_HEADERS.includes(header)),
+      ]
+
+      const finalHeaders = orderedHeaders.length > 0 ? orderedHeaders : INVENTORY_IMPORT_DEFAULT_HEADERS
+      const normalizedRows = csvRows.map((row) =>
+        finalHeaders.reduce<Record<string, string>>((acc, header) => {
+          acc[header] = row[header] ?? ''
+          return acc
+        }, {}),
+      )
+
+      setInventoryImportHeaders(finalHeaders)
+      setInventoryImportRows(normalizedRows)
+      setInventoryImportError(null)
+    } catch (error) {
+      setInventoryError(error instanceof Error ? error.message : 'Failed to import inventory CSV.')
+    }
+  }
+
+  const closeInventoryImportModal = () => {
+    if (inventoryImportSaving) return
+    setInventoryImportRows([])
+    setInventoryImportHeaders([])
+    setInventoryImportError(null)
+  }
+
+  const updateInventoryImportCell = (rowIndex: number, header: string, value: string) => {
+    setInventoryImportRows((prev) =>
+      prev.map((row, index) => (index === rowIndex ? { ...row, [header]: value } : row)),
+    )
+  }
+
+  const removeInventoryImportRow = (rowIndex: number) => {
+    setInventoryImportRows((prev) => prev.filter((_, index) => index !== rowIndex))
+  }
+
+  const addInventoryImportRow = () => {
+    setInventoryImportRows((prev) => [
+      ...prev,
+      inventoryImportHeaders.reduce<Record<string, string>>((acc, header) => {
+        acc[header] = ''
+        return acc
+      }, {}),
+    ])
+  }
+
+  const saveInventoryImportRows = async () => {
+    if (inventoryImportRows.length === 0) {
+      setInventoryImportError('There are no rows to import.')
+      return
+    }
+
+    setInventoryImportSaving(true)
+    setInventoryImportError(null)
+
+    const stockpileRoomDepartmentId =
+      departments.find((dept) => dept.name.trim().toLowerCase() === 'stockpile room')?.id ?? null
+    const payload: Array<Record<string, unknown>> = []
+    let skippedRows = 0
+
+    for (const row of inventoryImportRows) {
+      const itemName = (row.item_name ?? row.name ?? '').trim()
+      const itemType = (row.item_type ?? '').trim() || 'Office Equipment'
+
+      if (!itemName) {
+        skippedRows += 1
+        continue
+      }
+
+      const deptIdFromCsv = parseIntegerInput(row.department_id)
+      const deptName = (row.department_name ?? row.location ?? '').trim().toLowerCase()
+      const deptCode = (row.department_code ?? row.location_code ?? '').trim().toLowerCase()
+      const deptIdFromName = deptName
+        ? departments.find((dept) => dept.name.trim().toLowerCase() === deptName)?.id ?? null
+        : null
+      const deptIdFromCode = deptCode
+        ? departments.find((dept) => dept.code.trim().toLowerCase() === deptCode)?.id ?? null
+        : null
+      const isStockpileType = itemType.trim().toLowerCase() === 'stockpile'
+      const resolvedDepartmentId =
+        deptIdFromCsv ?? deptIdFromName ?? deptIdFromCode ?? (isStockpileType ? stockpileRoomDepartmentId : null)
+
+      if (resolvedDepartmentId == null) {
+        skippedRows += 1
+        continue
+      }
+
+      const expirationDate = (row.expiration_date ?? '').trim() || null
+      const expirationValue = parseDateLikeValue(expirationDate)
+      const isExpired = expirationValue != null && expirationValue < new Date()
+      const csvStatus = (row.status ?? '').trim() || null
+
+      const uid = crypto.randomUUID()
+      payload.push({
+        uid,
+        qr_code: uid,
+        item_name: itemName,
+        item_type: itemType,
+        department_id: resolvedDepartmentId,
+        quantity: parseNumericInput(row.quantity ?? '') ?? 0,
+        unit_of_measure: (row.unit_of_measure ?? '').trim() || null,
+        unit_cost: parseNumericInput(row.unit_cost ?? ''),
+        date_acquired: (row.date_acquired ?? '').trim() || new Date().toISOString().slice(0, 10),
+        expiration_date: isStockpileType ? expirationDate : null,
+        acquisition_mode: (row.acquisition_mode ?? row.source ?? '').trim() || null,
+        status: isStockpileType ? (isExpired || csvStatus === 'Expired' ? 'Expired' : null) : csvStatus,
+        condition: (row.condition ?? '').trim() || null,
+        donor_identification: (row.donor_identification ?? '').trim() || null,
+      })
+    }
+
+    if (payload.length === 0) {
+      setInventoryImportSaving(false)
+      setInventoryImportError('No valid rows found to import. Fill in required fields like item_name and location.')
+      return
+    }
+
+    const { error: insertError } = await supabase.from('inventory').insert(payload as never)
+    if (insertError) {
+      setInventoryImportSaving(false)
+      setInventoryImportError(insertError.message)
+      return
+    }
+
+    setInventoryImportSaving(false)
+    setRealtimeTick((tick) => tick + 1)
+    closeInventoryImportModal()
+    window.alert(`Imported ${payload.length} inventory row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
+  }
+
+  const handleExportStockpileCsv = () => {
+    const rows = filteredStockpileItems.map((item) => ({
+      stockpile_id: item.stockpile_id,
+      item_name: item.item_name ?? '',
+      category: item.category ?? '',
+      quantity_on_hand: item.quantity_on_hand ?? '',
+      unit_of_measure: item.unit_of_measure ?? '',
+      packed_date: item.packed_date ?? '',
+      expiration_date: item.expiration_date ?? '',
+      status: item.status ?? '',
+      department_name: 'Stockpile Room',
+    }))
+
+    downloadCsv(`stockpile-${getCsvTimestamp()}.csv`, rows)
+  }
+
+  const handleImportStockpileCsv = async (file: File) => {
+    try {
+      const csvRows = await parseCsvFile(file)
+      if (csvRows.length === 0) {
+        setStockpileError('The selected CSV file has no data rows.')
+        return
+      }
+
+      const stockpileRoomDepartmentId = departments.find((dept) => dept.name.trim().toLowerCase() === 'stockpile room')?.id ?? null
+      if (stockpileRoomDepartmentId == null) {
+        setStockpileError('Stockpile Room department is missing. Create it first before importing stockpile CSV.')
+        return
+      }
+
+      const payload: Array<Record<string, unknown>> = []
+      let skippedRows = 0
+
+      for (const row of csvRows) {
+        const itemName = (row.item_name ?? '').trim()
+        if (!itemName) {
+          skippedRows += 1
+          continue
+        }
+
+        const expirationDate = (row.expiration_date ?? '').trim() || null
+        const expirationValue = parseDateLikeValue(expirationDate)
+        const isExpired = expirationValue != null && expirationValue < new Date()
+        const uid = crypto.randomUUID()
+
+        payload.push({
+          uid,
+          qr_code: uid,
+          item_name: itemName,
+          item_type: 'Stockpile',
+          department_id: stockpileRoomDepartmentId,
+          quantity: parseNumericInput(row.quantity_on_hand ?? row.quantity ?? '') ?? 0,
+          unit_of_measure: (row.unit_of_measure ?? '').trim() || null,
+          unit_cost: parseNumericInput(row.unit_cost ?? ''),
+          date_acquired: (row.packed_date ?? row.date_acquired ?? '').trim() || new Date().toISOString().slice(0, 10),
+          expiration_date: expirationDate,
+          acquisition_mode: (row.category ?? row.acquisition_mode ?? '').trim() || null,
+          status: isExpired ? 'Expired' : null,
+          condition: (row.condition ?? '').trim() || null,
+          donor_identification: (row.donor_identification ?? '').trim() || null,
+        })
+      }
+
+      if (payload.length === 0) {
+        setStockpileError('No valid stockpile rows were found in CSV.')
+        return
+      }
+
+      const { error: insertError } = await supabase.from('inventory').insert(payload as never)
+      if (insertError) {
+        setStockpileError(insertError.message)
+        return
+      }
+
+      setRealtimeTick((tick) => tick + 1)
+      window.alert(`Imported ${payload.length} stockpile row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
+    } catch (error) {
+      setStockpileError(error instanceof Error ? error.message : 'Failed to import stockpile CSV.')
+    }
+  }
+
+  const handleExportWmrCsv = () => {
+    const rows = [
+      ...filteredWasteItems.map((item) => {
+        const report = wmrReports.find((entry) => entry.item_id === item.item_id)
+        return {
+          report_id: report?.report_id ?? '',
+          item_id: item.item_id,
+          item_name: item.item_name,
+          type: item.item_type,
+          quantity_reported: report?.quantity_reported ?? '',
+          reason_damage: report?.reason_damage ?? '',
+          status: report?.status ?? '',
+          location: report?.location ?? departments.find((dept) => dept.id === item.department_id)?.name ?? '',
+          admin_remarks: report?.admin_remarks ?? '',
+          date_reported: report?.date_reported ?? item.created_at ?? item.date_acquired ?? '',
+        }
+      }),
+      ...filteredStaffWmrReports.map((report) => {
+        const linkedItem = report.item_id ? inventoryItems.find((item) => item.item_id === report.item_id) : null
+        return {
+          report_id: report.report_id,
+          item_id: report.item_id ?? '',
+          item_name: linkedItem?.item_name ?? '',
+          type: linkedItem?.item_type ?? 'Staff Report',
+          quantity_reported: report.quantity_reported ?? '',
+          reason_damage: report.reason_damage ?? '',
+          status: report.status ?? '',
+          location: report.location ?? '',
+          admin_remarks: report.admin_remarks ?? '',
+          date_reported: report.date_reported ?? '',
+        }
+      }),
+      ...filteredVehicleWmrReports.map((report) => ({
+        report_id: report.report_id,
+        item_id: '',
+        item_name: report.location?.replace('Vehicle Registry - ', '') ?? 'Vehicle',
+        type: 'Vehicle',
+        quantity_reported: report.quantity_reported ?? '',
+        reason_damage: report.reason_damage ?? '',
+        status: report.status ?? '',
+        location: report.location ?? '',
+        admin_remarks: report.admin_remarks ?? '',
+        date_reported: report.date_reported ?? '',
+      })),
+    ]
+
+    downloadCsv(`wmr-${getCsvTimestamp()}.csv`, rows)
+  }
+
+  const handleImportWmrCsv = async (file: File) => {
+    try {
+      const csvRows = await parseCsvFile(file)
+      if (csvRows.length === 0) {
+        setWmrError('The selected CSV file has no data rows.')
+        return
+      }
+
+      const payload: Array<Record<string, unknown>> = []
+      let skippedRows = 0
+
+      for (const row of csvRows) {
+        const itemId = parseIntegerInput(row.item_id)
+        const reason = (row.reason_damage ?? '').trim() || null
+        const status = (row.status ?? '').trim() || 'Pending'
+        const dateReported = (row.date_reported ?? '').trim() || new Date().toISOString().slice(0, 10)
+
+        if (!reason && itemId == null) {
+          skippedRows += 1
+          continue
+        }
+
+        payload.push({
+          item_id: itemId,
+          quantity_reported: parseIntegerInput(row.quantity_reported) ?? 1,
+          reason_damage: reason,
+          status,
+          location: (row.location ?? '').trim() || null,
+          admin_remarks: (row.admin_remarks ?? '').trim() || null,
+          date_reported: dateReported,
+        })
+      }
+
+      if (payload.length === 0) {
+        setWmrError('No valid WMR rows were found in CSV.')
+        return
+      }
+
+      const { error: insertError } = await supabase.from('wmr_reports').insert(payload)
+      if (insertError) {
+        setWmrError(insertError.message)
+        return
+      }
+
+      setRealtimeTick((tick) => tick + 1)
+      window.alert(`Imported ${payload.length} WMR row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
+    } catch (error) {
+      setWmrError(error instanceof Error ? error.message : 'Failed to import WMR CSV.')
+    }
+  }
+
+  const handleExportVehiclesCsv = () => {
+    const rows = activeVehicles.map((vehicle) => ({
+      id: vehicle.id,
+      vehicle_name: vehicle.vehicle_name ?? '',
+      make_model: vehicle.make_model ?? '',
+      color: vehicle.color ?? '',
+      year_model: vehicle.year_model ?? '',
+      cr_number: vehicle.cr_number ?? '',
+      engine_number: vehicle.engine_number ?? '',
+      is_serviceable: vehicle.is_serviceable ?? true,
+      repair_history_log: vehicle.repair_history_log ?? '',
+    }))
+
+    downloadCsv(`vehicles-${getCsvTimestamp()}.csv`, rows)
+  }
+
+  const handleImportVehiclesCsv = async (file: File) => {
+    try {
+      const csvRows = await parseCsvFile(file)
+      if (csvRows.length === 0) {
+        setVehicleError('The selected CSV file has no data rows.')
+        return
+      }
+
+      const payload: Array<Record<string, unknown>> = []
+      let skippedRows = 0
+
+      for (const row of csvRows) {
+        const vehicleName = (row.vehicle_name ?? '').trim()
+        const makeModel = (row.make_model ?? '').trim()
+
+        if (!vehicleName && !makeModel) {
+          skippedRows += 1
+          continue
+        }
+
+        payload.push({
+          vehicle_name: vehicleName || makeModel,
+          make_model: makeModel || null,
+          color: (row.color ?? '').trim() || null,
+          year_model: parseIntegerInput(row.year_model),
+          cr_number: (row.cr_number ?? '').trim() || null,
+          engine_number: (row.engine_number ?? '').trim() || null,
+          is_serviceable: parseBooleanInput(row.is_serviceable, true),
+          repair_history_log: (row.repair_history_log ?? '').trim() || null,
+        })
+      }
+
+      if (payload.length === 0) {
+        setVehicleError('No valid vehicle rows were found in CSV.')
+        return
+      }
+
+      const { error: insertError } = await supabase.from('vehicles').insert(payload as never)
+      if (insertError) {
+        setVehicleError(insertError.message)
+        return
+      }
+
+      setRealtimeTick((tick) => tick + 1)
+      window.alert(`Imported ${payload.length} vehicle row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
+    } catch (error) {
+      setVehicleError(error instanceof Error ? error.message : 'Failed to import vehicles CSV.')
+    }
+  }
+
+  const handleExportParCsv = () => {
+    const activeParRecordsForExport = parRecords.filter((record) => !isArchivedRow(record))
+    const rows = activeParRecordsForExport.map((record) => ({
+      par_id: record.par_id,
+      issued_to_id: record.issued_to_id ?? '',
+      issued_to_name: parUsers.find((user) => user.id === record.issued_to_id)?.full_name ?? '',
+      item_id: record.item_id ?? '',
+      item_name: inventoryItems.find((item) => item.item_id === record.item_id)?.item_name ?? '',
+      quantity_issued: record.quantity_issued ?? '',
+      issue_date: record.issue_date ?? '',
+      unit_snapshot: record.unit_snapshot ?? '',
+      description_snapshot: record.description_snapshot ?? '',
+      property_no_snapshot: record.property_no_snapshot ?? '',
+      date_acquired_snapshot: record.date_acquired_snapshot ?? '',
+      cost_snapshot: record.cost_snapshot ?? '',
+      contact_snapshot: record.contact_snapshot ?? '',
+    }))
+
+    downloadCsv(`par-records-${getCsvTimestamp()}.csv`, rows)
+  }
+
+  const handleImportParCsv = async (file: File) => {
+    try {
+      const csvRows = await parseCsvFile(file)
+      if (csvRows.length === 0) {
+        setParError('The selected CSV file has no data rows.')
+        return
+      }
+
+      const validUserIds = new Set(parUsers.map((user) => user.id))
+      const validItemIds = new Set(inventoryItems.map((item) => item.item_id))
+      const payload: Array<Record<string, unknown>> = []
+      let skippedRows = 0
+
+      for (const row of csvRows) {
+        const issuedToId = (row.issued_to_id ?? '').trim()
+        const itemId = parseIntegerInput(row.item_id)
+        const quantityIssued = parseIntegerInput(row.quantity_issued) ?? 0
+
+        if (!issuedToId || itemId == null || quantityIssued <= 0) {
+          skippedRows += 1
+          continue
+        }
+
+        if (!validUserIds.has(issuedToId) || !validItemIds.has(itemId)) {
+          skippedRows += 1
+          continue
+        }
+
+        payload.push({
+          issued_to_id: issuedToId,
+          item_id: itemId,
+          quantity_issued: quantityIssued,
+          issue_date: (row.issue_date ?? '').trim() || null,
+          unit_snapshot: (row.unit_snapshot ?? '').trim() || null,
+          description_snapshot: (row.description_snapshot ?? '').trim() || null,
+          property_no_snapshot: (row.property_no_snapshot ?? '').trim() || null,
+          date_acquired_snapshot: (row.date_acquired_snapshot ?? '').trim() || null,
+          cost_snapshot: parseNumericInput(row.cost_snapshot ?? ''),
+          contact_snapshot: (row.contact_snapshot ?? '').trim() || null,
+        })
+      }
+
+      if (payload.length === 0) {
+        setParError('No valid PAR rows were found in CSV.')
+        return
+      }
+
+      const { error: insertError } = await supabase.from('par_records').insert(payload as never)
+      if (insertError) {
+        setParError(insertError.message)
+        return
+      }
+
+      setRealtimeTick((tick) => tick + 1)
+      window.alert(`Imported ${payload.length} PAR row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
+    } catch (error) {
+      setParError(error instanceof Error ? error.message : 'Failed to import PAR CSV.')
+    }
   }
 
   const filteredStockpileItems = stockpileItems.filter((item) => {
@@ -4154,6 +4987,19 @@ function DashboardPage() {
   const editItemQuantityValue = parseNumericInput(editQuantity)
   const editItemUnitCostValue = parseNumericInput(editUnitCost)
   const editItemTotalCost = calculateTotalCost(editItemQuantityValue, editItemUnitCostValue)
+  const editItemExpirationValue = parseDateLikeValue(editExpirationDate)
+  const editStatusPreview = (() => {
+    if (editItemType.trim().toLowerCase() !== 'stockpile') return editStatus || ''
+
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    if (editItemExpirationValue) {
+      editItemExpirationValue.setHours(0, 0, 0, 0)
+      if (editItemExpirationValue < today) return 'Expired'
+    }
+
+    return editItemQuantityValue != null && editItemQuantityValue <= 10 ? 'Low' : 'Full Stock'
+  })()
 
   const parQuantityValue = parseNumericInput(parQuantityIssued)
   const parUnitCostValue = parseNumericInput(parCostInput)
@@ -4183,7 +5029,18 @@ function DashboardPage() {
             {error && <p className="dashboard-error">{error}</p>}
 
             <section className="dashboard-metrics" aria-label="Item summary">
-              <article className="metric-card">
+              <article
+                className="metric-card metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('total')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('total')
+                  }
+                }}
+              >
                 <div className="metric-text">
                   <div className="metric-label">Total Items</div>
                   <div className="metric-value">{formatValue(summary.totalItems)}</div>
@@ -4200,7 +5057,18 @@ function DashboardPage() {
                   </svg>
                 </div>
               </article>
-              <article className="metric-card metric-card-serviceable">
+              <article
+                className="metric-card metric-card-serviceable metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('serviceable')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('serviceable')
+                  }
+                }}
+              >
                 <div className="metric-text">
                   <div className="metric-label">Serviceable</div>
                   <div className="metric-value">{formatValue(summary.serviceable)}</div>
@@ -4219,7 +5087,18 @@ function DashboardPage() {
                   </svg>
                 </div>
               </article>
-              <article className="metric-card metric-card-unserviceable">
+              <article
+                className="metric-card metric-card-unserviceable metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('unserviceable')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('unserviceable')
+                  }
+                }}
+              >
                 <div className="metric-text">
                   <div className="metric-label">Unserviceable</div>
                   <div className="metric-value">{formatValue(summary.unserviceable)}</div>
@@ -4231,7 +5110,18 @@ function DashboardPage() {
                   </svg>
                 </div>
               </article>
-              <article className="metric-card dashboard-source-card dashboard-source-card-purchased">
+              <article
+                className="metric-card dashboard-source-card dashboard-source-card-purchased metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('purchased')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('purchased')
+                  }
+                }}
+              >
                 <div className="metric-text">
                   <div className="dashboard-source-card-label">Purchased</div>
                   <div className="dashboard-source-card-value">{formatValue(purchasedCount)}</div>
@@ -4249,7 +5139,18 @@ function DashboardPage() {
                   </svg>
                 </div>
               </article>
-              <article className="metric-card dashboard-source-card dashboard-source-card-donated">
+              <article
+                className="metric-card dashboard-source-card dashboard-source-card-donated metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('donated')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('donated')
+                  }
+                }}
+              >
                 <div className="metric-text">
                   <div className="dashboard-source-card-label">Donated</div>
                   <div className="dashboard-source-card-value">{formatValue(donatedCount)}</div>
@@ -4267,7 +5168,76 @@ function DashboardPage() {
                   </svg>
                 </div>
               </article>
-              <article className="metric-card metric-card-unserviceable">
+              <article
+                className="metric-card metric-card-low-stock metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('low')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('low')
+                  }
+                }}
+              >
+                <div className="metric-text">
+                  <div className="metric-label">Low Stock</div>
+                  <div className="metric-value">{formatValue(lowStockCount)}</div>
+                </div>
+                <div className="metric-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="M12 4v10m0 0-3.2-3.2M12 14l3.2-3.2M5 20h14"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.4"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+              </article>
+              <article
+                className="metric-card metric-card-full-stock metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('fullStock')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('fullStock')
+                  }
+                }}
+              >
+                <div className="metric-text">
+                  <div className="metric-label">Full Stock</div>
+                  <div className="metric-value">{formatValue(fullStockCount)}</div>
+                </div>
+                <div className="metric-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path
+                      d="M4.5 12.5 9 17l10.5-10.5"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                </div>
+              </article>
+              <article
+                className="metric-card metric-card-unserviceable metric-card-clickable"
+                role="button"
+                tabIndex={0}
+                onClick={() => setDashboardMetricDrilldown('expired')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    setDashboardMetricDrilldown('expired')
+                  }
+                }}
+              >
                 <div className="metric-text">
                   <div className="metric-label">Expired Items</div>
                   <div className="metric-value">{formatValue(dashboardExpiredCount)}</div>
@@ -4355,7 +5325,7 @@ function DashboardPage() {
               <h3>Department Overview</h3>
             </header>
             <div className="panel-body department-grid">
-              {departments.map((dept) => (
+              {visibleDepartments.map((dept) => (
                 <div key={dept.id} className="dept-card">
                   <h4>{dept.name}</h4>
                   <div className="dept-metrics">
@@ -4402,7 +5372,7 @@ function DashboardPage() {
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
             typeOptions={typeOptions}
-            departments={departments.map((dept) => ({ id: dept.id, name: dept.name }))}
+            departments={departments.map((dept) => ({ id: dept.id, name: dept.name, code: dept.code }))}
             sourceOptions={acquisitionModeOptions}
             statusOptions={statusOptions}
             inventoryLoading={inventoryLoading}
@@ -4425,6 +5395,8 @@ function DashboardPage() {
             setNewItemType={setNewItemType}
             newCondition={newCondition}
             setNewCondition={setNewCondition}
+            newDonorIdentification={newDonorIdentification}
+            setNewDonorIdentification={setNewDonorIdentification}
             newItemDepartmentId={newItemDepartmentId}
             setNewItemDepartmentId={setNewItemDepartmentId}
             newQuantity={newQuantity}
@@ -4447,6 +5419,8 @@ function DashboardPage() {
             unitOfMeasureOptions={unitOfMeasureOptions}
             acquisitionModeOptions={acquisitionModeOptions}
             newItemTotalCost={newItemTotalCost}
+            onExportCsv={handleExportInventoryCsv}
+            onImportCsv={handleImportInventoryCsv}
           />
         )}
 
@@ -5044,7 +6018,7 @@ function DashboardPage() {
                             onChange={(e) => handleAddStaffDepartmentChange(e.target.value)}
                           >
                             <option value="">Select department</option>
-                            {departments.map((dept) => (
+                            {visibleDepartments.map((dept) => (
                               <option key={`staff-dept-${dept.id}`} value={String(dept.id)}>
                                 {dept.name}
                               </option>
@@ -5156,7 +6130,7 @@ function DashboardPage() {
                       style={{ maxWidth: 260 }}
                     >
                       <option value="all">All Departments</option>
-                      {departments.map((dept) => (
+                      {visibleDepartments.map((dept) => (
                         <option key={`staff-filter-${dept.id}`} value={String(dept.id)}>
                           {dept.name}
                         </option>
@@ -5384,7 +6358,7 @@ function DashboardPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {departments.length === 0 ? (
+                      {visibleDepartments.length === 0 ? (
                         <tr>
                           <td colSpan={7}>No departments found.</td>
                         </tr>
@@ -5553,6 +6527,8 @@ function DashboardPage() {
               releasingStockpile={releasingStockpile}
             handlePrintReleaseLogs={handlePrintStockpileReleaseLogs}
             formatDisplayDate={formatDisplayDate}
+            onExportCsv={handleExportStockpileCsv}
+            onImportCsv={handleImportStockpileCsv}
           />
         )}
 
@@ -5576,7 +6552,7 @@ function DashboardPage() {
             departments={departments.map((dept) => ({ id: dept.id, name: dept.name }))}
             combinedFilteredWmrCount={combinedFilteredWmrCount}
             filteredWasteItems={filteredWasteItems}
-            filteredStaffWmrReports={staffWmrReports.filter((r) => !wasteInventoryItems.some((i) => i.item_id === r.item_id))}
+            filteredStaffWmrReports={filteredStaffWmrReports}
             wmrReports={wmrReports}
             inventoryItems={inventoryItems}
             formatDisplayDate={formatDisplayDate}
@@ -5602,6 +6578,8 @@ function DashboardPage() {
             onArchiveVehicleReport={(report) => {
               openArchiveVehicleWmrConfirmation(report)
             }}
+            onExportCsv={handleExportWmrCsv}
+            onImportCsv={handleImportWmrCsv}
           />
         )}
 
@@ -5616,8 +6594,12 @@ function DashboardPage() {
             formatCurrency={formatCurrency}
             setActiveVehicleLogsId={setActiveVehicleLogsId}
             openVehicleEditModal={openVehicleEditModal}
+            newVehicleName={newVehicleName}
+            setNewVehicleName={setNewVehicleName}
             newVehicleMakeModel={newVehicleMakeModel}
             setNewVehicleMakeModel={setNewVehicleMakeModel}
+            newVehicleColor={newVehicleColor}
+            setNewVehicleColor={setNewVehicleColor}
             newVehicleYearModel={newVehicleYearModel}
             setNewVehicleYearModel={setNewVehicleYearModel}
             newVehicleCrNumber={newVehicleCrNumber}
@@ -5649,6 +6631,8 @@ function DashboardPage() {
             handleArchiveVehicle={(vehicle) => {
               openArchiveVehicleConfirmation(vehicle)
             }}
+            onExportCsv={handleExportVehiclesCsv}
+            onImportCsv={handleImportVehiclesCsv}
           />
         )}
 
@@ -5691,6 +6675,8 @@ function DashboardPage() {
             handleArchiveParSummary={(staffId) => {
               openArchiveParSummaryConfirmation(staffId)
             }}
+            onExportCsv={handleExportParCsv}
+            onImportCsv={handleImportParCsv}
           />
         )}
 
@@ -5882,7 +6868,9 @@ function DashboardPage() {
               Vehicle Repair Logs
             </h2>
             <div className="par-meta-grid">
-              <p className="wmr-modal-text"><strong>Vehicle:</strong> {activeVehicle.make_model}</p>
+              <p className="wmr-modal-text"><strong>Vehicle:</strong> {getVehicleDisplayLabel(activeVehicle)}</p>
+              <p className="wmr-modal-text"><strong>Make / Model:</strong> {activeVehicle.make_model || '—'}</p>
+              <p className="wmr-modal-text"><strong>Color:</strong> {activeVehicle.color || '—'}</p>
               <p className="wmr-modal-text"><strong>Vehicle ID:</strong> {`VEH-${activeVehicle.id.toString().padStart(3, '0')}`}</p>
               <p className="wmr-modal-text"><strong>Year Model:</strong> {activeVehicle.year_model ?? '—'}</p>
               <p className="wmr-modal-text"><strong>Status:</strong> {activeVehicle.is_serviceable ? 'Serviceable' : 'Needs Repair'}</p>
@@ -5973,7 +6961,13 @@ function DashboardPage() {
                 <strong>Vehicle ID:</strong> {`VEH-${editingVehicle.id.toString().padStart(3, '0')}`}
               </p>
               <p className="wmr-modal-text">
+                <strong>Vehicle Name:</strong> {editingVehicle.vehicle_name || '—'}
+              </p>
+              <p className="wmr-modal-text">
                 <strong>Make / Model:</strong> {editingVehicle.make_model ?? '—'}
+              </p>
+              <p className="wmr-modal-text">
+                <strong>Color:</strong> {editingVehicle.color || '—'}
               </p>
               <p className="wmr-modal-text">
                 <strong>Year Model:</strong> {editingVehicle.year_model ?? '—'}
@@ -6012,6 +7006,30 @@ function DashboardPage() {
                 </>
               ) : (
                 <div className="vehicle-edit-panel">
+                  <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
+                    <label htmlFor="edit-vehicle-name">
+                      Vehicle Name <span className="inventory-required">*</span>
+                    </label>
+                    <input
+                      id="edit-vehicle-name"
+                      className="inventory-input"
+                      value={editVehicleName}
+                      onChange={(e) => setEditVehicleName(e.target.value)}
+                      placeholder="e.g. Rescue Van 1"
+                    />
+                  </div>
+
+                  <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
+                    <label htmlFor="edit-vehicle-color">Color</label>
+                    <input
+                      id="edit-vehicle-color"
+                      className="inventory-input"
+                      value={editVehicleColor}
+                      onChange={(e) => setEditVehicleColor(e.target.value)}
+                      placeholder="e.g. White"
+                    />
+                  </div>
+
                   <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
                     <label htmlFor="edit-vehicle-serviceable">
                       Vehicle Status <span className="inventory-required">*</span>
@@ -6112,6 +7130,17 @@ function DashboardPage() {
                 </select>
               </div>
               <div className="inventory-field">
+                <label htmlFor="edit-donor-identification">Donor Identification</label>
+                <input
+                  id="edit-donor-identification"
+                  type="text"
+                  className="inventory-input"
+                  placeholder="e.g., Name, Company, or Contact (optional)"
+                  value={editDonorIdentification}
+                  onChange={(e) => setEditDonorIdentification(e.target.value)}
+                />
+              </div>
+              <div className="inventory-field">
                 <label htmlFor="edit-item-department">
                   Location <span className="inventory-required">*</span>
                 </label>
@@ -6157,27 +7186,35 @@ function DashboardPage() {
                 </select>
               </div>
               <div className="inventory-field">
-                <label htmlFor="edit-unit-cost">Unit Cost</label>
+                <label htmlFor="edit-unit-cost">Unit Cost (per 1 qty)</label>
                 <input
                   id="edit-unit-cost"
                   type="number"
                   min="0"
                   step="0.01"
                   className="inventory-input"
+                  placeholder="0.00 (optional)"
                   value={editUnitCost}
                   onChange={(e) => setEditUnitCost(e.target.value)}
                 />
               </div>
-              <div className="inventory-field">
-                <label htmlFor="edit-total-cost">Total Cost (Qty x Unit Cost)</label>
-                <input
-                  id="edit-total-cost"
-                  type="text"
-                  className="inventory-input"
-                  value={formatCurrency(editItemTotalCost)}
-                  readOnly
-                />
-              </div>
+              {editSource.trim().toLowerCase() === 'purchased' && (
+                <div className="inventory-field">
+                  <label htmlFor="edit-total-cost">Total Cost (Qty x Unit Cost)</label>
+                  <input
+                    id="edit-total-cost"
+                    type="text"
+                    className="inventory-input"
+                    value={formatCurrency(editItemTotalCost)}
+                    readOnly
+                  />
+                </div>
+              )}
+              {editSource.trim().toLowerCase() === 'donated' && (
+                <div className="inventory-field inventory-field-full">
+                  <div className="inventory-help-text">Donated items do not require unit cost or total cost.</div>
+                </div>
+              )}
               <div className="inventory-field">
                 <label htmlFor="edit-date-acquired">Date Acquired</label>
                 <input
@@ -6194,7 +7231,13 @@ function DashboardPage() {
                   id="edit-source"
                   className="inventory-input"
                   value={editSource}
-                  onChange={(e) => setEditSource(e.target.value)}
+                  onChange={(e) => {
+                    const nextSource = e.target.value
+                    setEditSource(nextSource)
+                    if (nextSource.trim().toLowerCase() !== 'purchased') {
+                      setEditUnitCost('')
+                    }
+                  }}
                 >
                   <option value="">Select source</option>
                   {acquisitionModeOptions.map((mode) => (
@@ -6204,23 +7247,25 @@ function DashboardPage() {
                   ))}
                 </select>
               </div>
-              <div className="inventory-field">
-                <label htmlFor="edit-expiration">Expiration Date</label>
-                <input
-                  id="edit-expiration"
-                  type="date"
-                  className="inventory-input"
-                  value={editExpirationDate}
-                  onChange={(e) => setEditExpirationDate(e.target.value)}
-                />
-              </div>
+              {editItemType.trim().toLowerCase() === 'stockpile' && (
+                <div className="inventory-field">
+                  <label htmlFor="edit-expiration">Expiration Date</label>
+                  <input
+                    id="edit-expiration"
+                    type="date"
+                    className="inventory-input"
+                    value={editExpirationDate}
+                    onChange={(e) => setEditExpirationDate(e.target.value)}
+                  />
+                </div>
+              )}
               <div className="inventory-field">
                 <label htmlFor="edit-status">Status</label>
                 {editItemType.trim().toLowerCase() === 'stockpile' ? (
                   <input
                     id="edit-status"
                     className="inventory-input"
-                    value={editStatus || 'Valid'}
+                    value={editStatusPreview}
                     readOnly
                   />
                 ) : (
@@ -6270,6 +7315,214 @@ function DashboardPage() {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {dashboardMetricDrilldown && activeSection === 'dashboard' && (
+        <div
+          className="dashboard-drilldown-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="dashboard-drilldown-modal-title"
+          onClick={() => setDashboardMetricDrilldown(null)}
+        >
+          <div
+            ref={dashboardDrilldownModalRef}
+            className="dashboard-drilldown-modal"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="dashboard-drilldown-modal-title">
+                {dashboardMetricLabelMap[dashboardMetricDrilldown]} Items ({formatValue(dashboardDrilldownItems.length)})
+              </h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={() => setDashboardMetricDrilldown(null)}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </header>
+            <div className="panel-body">
+              {dashboardDrilldownPaginatedItems.length === 0 ? (
+                <div className="panel-body-placeholder">No items found for this metric.</div>
+              ) : (
+                <div className="dashboard-drilldown-table-wrap">
+                  <table className="dashboard-drilldown-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Item</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Location</th>
+                        <th scope="col">Qty</th>
+                        <th scope="col">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dashboardDrilldownPaginatedItems.map((item) => {
+                        const status = getInventoryStatus(item) ?? '—'
+                        const locationName = departments.find((dept) => dept.id === item.department_id)?.name ?? 'Unassigned'
+                        return (
+                          <tr key={`drilldown-item-${item.item_id}`}>
+                            <td>{item.item_name}</td>
+                            <td>{item.item_type}</td>
+                            <td>{locationName}</td>
+                            <td>{item.quantity ?? 0}</td>
+                            <td>{status}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  {dashboardDrilldownTotalPages > 1 && (
+                    <div className="dashboard-drilldown-pagination" aria-label="Dashboard drilldown pagination">
+                      <button
+                        type="button"
+                        className="dashboard-drilldown-pagination-button"
+                        onClick={() => setDashboardDrilldownPage((prev) => Math.max(1, prev - 1))}
+                        disabled={dashboardDrilldownPage === 1}
+                      >
+                        Prev
+                      </button>
+                      {dashboardDrilldownVisiblePageNumbers.map((pageNumber) => (
+                        <button
+                          key={`dashboard-drilldown-page-${pageNumber}`}
+                          type="button"
+                          className={`dashboard-drilldown-pagination-button ${
+                            dashboardDrilldownPage === pageNumber ? 'dashboard-drilldown-pagination-button-active' : ''
+                          }`}
+                          onClick={() => setDashboardDrilldownPage(pageNumber)}
+                          aria-current={dashboardDrilldownPage === pageNumber ? 'page' : undefined}
+                        >
+                          {pageNumber}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="dashboard-drilldown-pagination-button"
+                        onClick={() =>
+                          setDashboardDrilldownPage((prev) => Math.min(dashboardDrilldownTotalPages, prev + 1))
+                        }
+                        disabled={dashboardDrilldownPage === dashboardDrilldownTotalPages}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {inventoryImportRows.length > 0 && activeSection === 'inventory' && (
+        <div
+          className="dashboard-drilldown-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inventory-import-modal-title"
+          onClick={closeInventoryImportModal}
+        >
+          <div
+            className="dashboard-drilldown-modal"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="inventory-import-modal-title">Review Inventory CSV Before Import</h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={closeInventoryImportModal}
+                aria-label="Close"
+                disabled={inventoryImportSaving}
+              >
+                x
+              </button>
+            </header>
+            <div className="panel-body">
+              <p className="wmr-modal-text" style={{ marginBottom: 10 }}>
+                Edit values before saving. Required fields: <strong>item_name</strong> and a valid location via <strong>department_id</strong>, <strong>department_name</strong>, or <strong>department_code</strong>.
+              </p>
+
+              {inventoryImportError && <p className="dashboard-error">{inventoryImportError}</p>}
+
+              <div className="dashboard-drilldown-table-wrap">
+                <table className="inventory-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">#</th>
+                      {inventoryImportHeaders.map((header) => (
+                        <th key={`inventory-import-header-${header}`} scope="col">{header}</th>
+                      ))}
+                      <th scope="col">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventoryImportRows.map((row, rowIndex) => (
+                      <tr key={`inventory-import-row-${rowIndex}`}>
+                        <td>{rowIndex + 1}</td>
+                        {inventoryImportHeaders.map((header) => (
+                          <td key={`inventory-import-cell-${rowIndex}-${header}`}>
+                            <input
+                              type="text"
+                              className="inventory-input"
+                              value={row[header] ?? ''}
+                              onChange={(event) =>
+                                updateInventoryImportCell(rowIndex, header, event.target.value)
+                              }
+                              disabled={inventoryImportSaving}
+                            />
+                          </td>
+                        ))}
+                        <td>
+                          <button
+                            type="button"
+                            className="inventory-secondary-button"
+                            onClick={() => removeInventoryImportRow(rowIndex)}
+                            disabled={inventoryImportSaving || inventoryImportRows.length === 1}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="logout-modal-actions" style={{ marginTop: 12 }}>
+                <button
+                  type="button"
+                  className="inventory-secondary-button"
+                  onClick={addInventoryImportRow}
+                  disabled={inventoryImportSaving}
+                >
+                  Add Row
+                </button>
+                <button
+                  type="button"
+                  className="logout-modal-button-secondary"
+                  onClick={closeInventoryImportModal}
+                  disabled={inventoryImportSaving}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="inventory-add-submit"
+                  onClick={() => {
+                    void saveInventoryImportRows()
+                  }}
+                  disabled={inventoryImportSaving}
+                >
+                  {inventoryImportSaving ? 'Importing…' : 'Save Import'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

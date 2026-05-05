@@ -36,6 +36,22 @@ function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse
     }
   }, [showLogoutConfirm])
 
+  useEffect(() => {
+    if (!showLogoutConfirm) return
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setShowLogoutConfirm(false)
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+    return () => {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [showLogoutConfirm])
+
   return (
     <aside className={`sidebar ${isCollapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="sidebar-header">
