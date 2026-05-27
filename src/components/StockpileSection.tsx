@@ -81,6 +81,12 @@ function StockpileSection({
   const stockpileCsvInputRef = useRef<HTMLInputElement | null>(null)
   const csvMenuRef = useRef<HTMLDivElement | null>(null)
   const [csvMenuOpen, setCsvMenuOpen] = useState(false)
+  const [releaseItemPickerRowIndex, setReleaseItemPickerRowIndex] = useState<number | null>(null)
+  const [releaseItemPickerSearch, setReleaseItemPickerSearch] = useState('')
+  const [releaseItemPickerCategory, setReleaseItemPickerCategory] = useState('all')
+  const [releaseItemPickerSelectedIds, setReleaseItemPickerSelectedIds] = useState<string[]>([])
+  const [releaseItemPickerPage, setReleaseItemPickerPage] = useState(1)
+  const releaseItemPickerModalRef = useRef<HTMLDivElement | null>(null)
 
   const currentStockpileItems = useMemo(
     () => (stockpileMode === 'expired' ? filteredExpiredStockpileItems : filteredStockpileItems),
@@ -154,6 +160,172 @@ function StockpileSection({
     () => new Set(stockpileReleaseItems.map((item) => item.stockpileId).filter((itemId) => itemId.trim())),
     [stockpileReleaseItems],
   )
+
+  const closeReleaseItemPicker = () => {
+    setReleaseItemPickerRowIndex(null)
+    setReleaseItemPickerSearch('')
+    setReleaseItemPickerCategory('all')
+    setReleaseItemPickerSelectedIds([])
+    setReleaseItemPickerPage(1)
+  }
+
+  const openReleaseItemPicker = (index: number) => {
+    setReleaseItemPickerRowIndex(index)
+    setReleaseItemPickerSearch('')
+    setReleaseItemPickerCategory('all')
+    setReleaseItemPickerSelectedIds([])
+    setReleaseItemPickerPage(1)
+  }
+
+  const toggleReleaseItemPickerSelection = (stockpileId: string) => {
+    setReleaseItemPickerSelectedIds((prev) => {
+      if (prev.includes(stockpileId)) {
+        return prev.filter((id) => id !== stockpileId)
+      }
+
+      return [...prev, stockpileId]
+    })
+  }
+
+  const releaseItemPickerCategoryOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        availableReleaseItems
+          .map((item) => item.category?.trim() || 'Uncategorized')
+          .filter((category) => category.length > 0),
+      ),
+    ).sort((a, b) => a.localeCompare(b))
+  }, [availableReleaseItems])
+
+  const filteredReleasePickerItems = useMemo(() => {
+    const normalizedSearch = releaseItemPickerSearch.trim().toLowerCase()
+
+    return availableReleaseItems
+      .filter((item) => {
+        const category = item.category?.trim() || 'Uncategorized'
+
+        if (releaseItemPickerCategory !== 'all' && category !== releaseItemPickerCategory) {
+          return false
+        }
+
+        if (!normalizedSearch) return true
+
+        return (
+          (item.item_name ?? '').toLowerCase().includes(normalizedSearch) ||
+          category.toLowerCase().includes(normalizedSearch)
+        )
+      })
+      .sort((a, b) => {
+        const categoryA = a.category?.trim() || 'Uncategorized'
+        const categoryB = b.category?.trim() || 'Uncategorized'
+        const categoryCompare = categoryA.localeCompare(categoryB)
+        if (categoryCompare !== 0) return categoryCompare
+
+        return (a.item_name ?? '').localeCompare(b.item_name ?? '')
+      })
+  }, [availableReleaseItems, releaseItemPickerCategory, releaseItemPickerSearch])
+
+  const releaseItemPickerPageSize = 8
+  const releaseItemPickerTotalPages = Math.max(1, Math.ceil(filteredReleasePickerItems.length / releaseItemPickerPageSize))
+  const paginatedReleasePickerItems = filteredReleasePickerItems.slice(
+    (releaseItemPickerPage - 1) * releaseItemPickerPageSize,
+    (releaseItemPickerPage - 1) * releaseItemPickerPageSize + releaseItemPickerPageSize,
+  )
+
+  const releaseItemPickerVisiblePageNumbers = useMemo(() => {
+    const maxVisiblePages = 5
+    if (releaseItemPickerTotalPages <= maxVisiblePages) {
+      return Array.from({ length: releaseItemPickerTotalPages }, (_, index) => index + 1)
+    }
+
+    const halfWindow = Math.floor(maxVisiblePages / 2)
+    let start = Math.max(1, releaseItemPickerPage - halfWindow)
+    let end = Math.min(releaseItemPickerTotalPages, start + maxVisiblePages - 1)
+
+    if (end - start + 1 < maxVisiblePages) {
+      start = Math.max(1, end - maxVisiblePages + 1)
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  }, [releaseItemPickerPage, releaseItemPickerTotalPages])
+
+  const getReleaseItemDisplayLabel = (stockpileId: string) => {
+    if (!stockpileId) return 'Select stockpile item'
+
+    const found = availableReleaseItems.find((item) => String(item.stockpile_id) === stockpileId)
+    return found ? (found.item_name ?? 'Unnamed') : 'Select stockpile item'
+  }
+
+  const handleApplySelectedReleaseItems = () => {
+    if (releaseItemPickerRowIndex == null || releaseItemPickerSelectedIds.length === 0) return
+
+    const currentRow = stockpileReleaseItems[releaseItemPickerRowIndex]
+    const currentRowId = currentRow?.stockpileId ?? ''
+
+    const validSelectedIds = releaseItemPickerSelectedIds.filter((stockpileId) => {
+      if (!selectedReleaseItemIds.has(stockpileId)) return true
+      return stockpileId === currentRowId
+    })
+
+    if (validSelectedIds.length === 0) {
+      closeReleaseItemPicker()
+      return
+    }
+
+    updateStockpileReleaseItem(releaseItemPickerRowIndex, 'stockpileId', validSelectedIds[0])
+
+    const currentQty = currentRow?.quantity?.trim() || '1'
+    updateStockpileReleaseItem(releaseItemPickerRowIndex, 'quantity', currentQty)
+
+    validSelectedIds.slice(1).forEach((stockpileId, offset) => {
+      addStockpileReleaseItem()
+      const nextIndex = stockpileReleaseItems.length + offset
+      updateStockpileReleaseItem(nextIndex, 'stockpileId', stockpileId)
+      updateStockpileReleaseItem(nextIndex, 'quantity', '1')
+    })
+
+    closeReleaseItemPicker()
+  }
+
+  useEffect(() => {
+    if (releaseItemPickerRowIndex == null) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      releaseItemPickerModalRef.current?.focus()
+    })
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeReleaseItemPicker()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [releaseItemPickerRowIndex])
+
+  useEffect(() => {
+    if (releaseItemPickerRowIndex == null) return
+    if (releaseItemPickerRowIndex >= stockpileReleaseItems.length) {
+      closeReleaseItemPicker()
+    }
+  }, [releaseItemPickerRowIndex, stockpileReleaseItems.length])
+
+  useEffect(() => {
+    if (releaseItemPickerRowIndex == null) return
+    setReleaseItemPickerPage(1)
+  }, [releaseItemPickerSearch, releaseItemPickerCategory, releaseItemPickerRowIndex])
+
+  useEffect(() => {
+    if (releaseItemPickerPage > releaseItemPickerTotalPages) {
+      setReleaseItemPickerPage(releaseItemPickerTotalPages)
+    }
+  }, [releaseItemPickerPage, releaseItemPickerTotalPages])
 
   return (
     <div className="inventory-layout">
@@ -439,34 +611,20 @@ function StockpileSection({
                       <tr key={`release-line-${index}`}>
                         <td className="stockpile-release-line-number stockpile-release-no-column">{index + 1}</td>
                         <td className="stockpile-release-item-column">
-                          <select
-                            className="inventory-input stockpile-release-select"
-                            value={item.stockpileId}
-                            onChange={(e) => updateStockpileReleaseItem(index, 'stockpileId', e.target.value)}
-                            disabled={releasingStockpile || availableReleaseItems.length === 0}
+                          <button
+                            type="button"
+                            className={`stockpile-release-picker-button ${item.stockpileId ? 'stockpile-release-picker-button-selected' : ''}`}
+                            onClick={() => openReleaseItemPicker(index)}
+                            disabled={releasingStockpile}
                           >
-                            <option value="">Select stockpile item</option>
-                            {availableReleaseItems.map((stockpileItem) => {
-                              const stockpileIdValue = String(stockpileItem.stockpile_id)
-                              const isSelectedInAnotherLine =
-                                selectedReleaseItemIds.has(stockpileIdValue) && stockpileIdValue !== item.stockpileId
-
-                              return (
-                                <option
-                                  key={stockpileItem.stockpile_id}
-                                  value={stockpileItem.stockpile_id}
-                                  disabled={isSelectedInAnotherLine}
-                                >
-                                  {`${stockpileItem.item_name ?? 'Unnamed'} (${stockpileItem.quantity_on_hand ?? 0} ${stockpileItem.unit_of_measure ?? ''})`}
-                                </option>
-                              )
-                            })}
-                          </select>
+                            {getReleaseItemDisplayLabel(item.stockpileId)}
+                          </button>
                         </td>
                         <td className="stockpile-release-qty-column">
                           <input
                             type="number"
                             min="1"
+                            max={selectedItem ? Number(selectedItem.quantity_on_hand ?? 0) : undefined}
                             className="inventory-input stockpile-release-quantity-input"
                             placeholder="Enter quantity"
                             value={item.quantity}
@@ -782,6 +940,159 @@ function StockpileSection({
             </div>
           )}
         </>
+      )}
+
+      {releaseItemPickerRowIndex != null && stockpileMode === 'release' && (
+        <div
+          className="stockpile-picker-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="stockpile-picker-title"
+          onClick={closeReleaseItemPicker}
+        >
+          <div
+            ref={releaseItemPickerModalRef}
+            className="stockpile-picker-modal"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="stockpile-picker-title">Select Stockpile Item</h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={closeReleaseItemPicker}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </header>
+
+            <div className="panel-body">
+              <div className="stockpile-picker-toolbar">
+                <input
+                  type="search"
+                  className="inventory-input"
+                  placeholder="Search item name or category"
+                  value={releaseItemPickerSearch}
+                  onChange={(event) => setReleaseItemPickerSearch(event.target.value)}
+                />
+                <select
+                  className="inventory-input"
+                  value={releaseItemPickerCategory}
+                  onChange={(event) => setReleaseItemPickerCategory(event.target.value)}
+                >
+                  <option value="all">All Categories</option>
+                  {releaseItemPickerCategoryOptions.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="dashboard-drilldown-table-wrap">
+                <table className="dashboard-drilldown-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Item</th>
+                      <th scope="col">Category</th>
+                      <th scope="col">Unit</th>
+                      <th scope="col">Available Qty</th>
+                      <th scope="col">Select</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredReleasePickerItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>No stockpile items match your search/category filter.</td>
+                      </tr>
+                    ) : (
+                      paginatedReleasePickerItems.map((stockpileItem) => {
+                        const stockpileId = String(stockpileItem.stockpile_id)
+                        const currentRowId =
+                          releaseItemPickerRowIndex != null
+                            ? stockpileReleaseItems[releaseItemPickerRowIndex]?.stockpileId ?? ''
+                            : ''
+                        const selectedInAnotherLine = selectedReleaseItemIds.has(stockpileId) && stockpileId !== currentRowId
+
+                        return (
+                          <tr key={`stockpile-picker-${stockpileItem.stockpile_id}`} onClick={() => !selectedInAnotherLine && toggleReleaseItemPickerSelection(stockpileId)} style={{ cursor: selectedInAnotherLine ? 'not-allowed' : 'pointer' }}>
+                            <td>{stockpileItem.item_name ?? 'Unnamed'}</td>
+                            <td>{stockpileItem.category ?? 'Uncategorized'}</td>
+                            <td>{stockpileItem.unit_of_measure ?? '—'}</td>
+                            <td>{stockpileItem.quantity_on_hand ?? 0}</td>
+                            <td>
+                              <input
+                                type="checkbox"
+                                className="stockpile-picker-checkbox"
+                                checked={releaseItemPickerSelectedIds.includes(stockpileId)}
+                                onChange={() => toggleReleaseItemPickerSelection(stockpileId)}
+                                disabled={selectedInAnotherLine}
+                                aria-label={`Select ${stockpileItem.item_name ?? 'item'}`}
+                              />
+                            </td>
+                          </tr>
+                        )
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="stockpile-picker-footer">
+                <span className="stockpile-picker-selected-count">{releaseItemPickerSelectedIds.length} selected</span>
+
+                <div className="stockpile-picker-footer-center">
+                  {releaseItemPickerTotalPages > 1 && (
+                    <div className="dashboard-drilldown-pagination" aria-label="Stockpile picker pagination">
+                      <button
+                        type="button"
+                        className="dashboard-drilldown-pagination-button"
+                        onClick={() => setReleaseItemPickerPage((prev) => Math.max(1, prev - 1))}
+                        disabled={releaseItemPickerPage === 1}
+                      >
+                        Prev
+                      </button>
+                      {releaseItemPickerVisiblePageNumbers.map((pageNumber) => (
+                        <button
+                          key={`stockpile-picker-page-${pageNumber}`}
+                          type="button"
+                          className={`dashboard-drilldown-pagination-button ${
+                            releaseItemPickerPage === pageNumber ? 'dashboard-drilldown-pagination-button-active' : ''
+                          }`}
+                          onClick={() => setReleaseItemPickerPage(pageNumber)}
+                          aria-current={releaseItemPickerPage === pageNumber ? 'page' : undefined}
+                        >
+                          {pageNumber}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="dashboard-drilldown-pagination-button"
+                        onClick={() => setReleaseItemPickerPage((prev) => Math.min(releaseItemPickerTotalPages, prev + 1))}
+                        disabled={releaseItemPickerPage === releaseItemPickerTotalPages}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="stockpile-picker-footer-right">
+                  <button
+                    type="button"
+                    className="inventory-add-submit"
+                    onClick={handleApplySelectedReleaseItems}
+                    disabled={releaseItemPickerSelectedIds.length === 0}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

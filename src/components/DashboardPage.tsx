@@ -432,7 +432,21 @@ function DashboardPage() {
   const [wmrDepartmentFilter, setWmrDepartmentFilter] = useState('all')
   const [wmrStatusFilter, setWmrStatusFilter] = useState('all')
   const [dashboardMetricDrilldown, setDashboardMetricDrilldown] = useState<
-    'total' | 'serviceable' | 'unserviceable' | 'purchased' | 'donated' | 'low' | 'fullStock' | 'expired' | null
+    | 'total'
+    | 'serviceable'
+    | 'unserviceable'
+    | 'purchased'
+    | 'donated'
+    | 'low'
+    | 'fullStock'
+    | 'expired'
+    | 'vehicleTotal'
+    | 'vehicleServiceable'
+    | 'vehicleUnserviceable'
+    | 'stockpileLow'
+    | 'stockpileFull'
+    | 'stockpileExpired'
+    | null
   >(null)
   const [dashboardDrilldownPage, setDashboardDrilldownPage] = useState(1)
   const dashboardDrilldownModalRef = useRef<HTMLDivElement | null>(null)
@@ -1484,6 +1498,8 @@ function DashboardPage() {
   const combinedFilteredWmrCount =
     filteredWasteItems.length + filteredStaffWmrReports.length + filteredVehicleWmrReports.length
   const activeVehicles = vehicles.filter((vehicle) => !isArchivedRow(vehicle))
+  const vehicleServiceableCount = activeVehicles.filter((vehicle) => vehicle.is_serviceable ?? true).length
+  const vehicleUnserviceableCount = activeVehicles.length - vehicleServiceableCount
 
   const filteredInventoryItems = inventoryItems.filter((item) => {
     if (getInventoryStatus(item) === 'Archived') {
@@ -1641,9 +1657,6 @@ function DashboardPage() {
     }))
     .filter((entry) => entry.count > 0)
 
-  // Reflect both inventory-expired and stockpile-expired totals on the dashboard metric.
-  const dashboardExpiredCount = summary.expired + (stockpileStatusCountMap.get('Expired') ?? 0)
-
   const purchasedCount = inventoryItems.filter(
     (item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'purchased',
   ).length
@@ -1659,7 +1672,22 @@ function DashboardPage() {
     low: 'Low Stock',
     fullStock: 'Full Stock',
     expired: 'Expired Items',
+    vehicleTotal: 'Total Vehicles',
+    vehicleServiceable: 'Serviceable Vehicles',
+    vehicleUnserviceable: 'Unserviceable Vehicles',
+    stockpileLow: 'Low Stock Stockpiles',
+    stockpileFull: 'Full Stock Stockpiles',
+    stockpileExpired: 'Expired Stockpiles',
   } as const
+
+  const isVehicleDrilldown =
+    dashboardMetricDrilldown === 'vehicleTotal' ||
+    dashboardMetricDrilldown === 'vehicleServiceable' ||
+    dashboardMetricDrilldown === 'vehicleUnserviceable'
+  const isStockpileDrilldown =
+    dashboardMetricDrilldown === 'stockpileLow' ||
+    dashboardMetricDrilldown === 'stockpileFull' ||
+    dashboardMetricDrilldown === 'stockpileExpired'
 
   const dashboardDrilldownItems = dashboardMetricDrilldown
     ? inventoryItems.filter((item) => {
@@ -1680,11 +1708,55 @@ function DashboardPage() {
         return false
       })
     : []
+  const dashboardDrilldownVehicles = isVehicleDrilldown
+    ? activeVehicles.filter((vehicle) => {
+        if (dashboardMetricDrilldown === 'vehicleTotal') return true
+        if (dashboardMetricDrilldown === 'vehicleServiceable') return vehicle.is_serviceable ?? true
+        if (dashboardMetricDrilldown === 'vehicleUnserviceable') return !(vehicle.is_serviceable ?? true)
+
+        return false
+      })
+    : []
+  const dashboardDrilldownStockpiles = isStockpileDrilldown
+    ? stockpileItems.filter((item) => {
+        const quantity = Number(item.quantity_on_hand ?? 0)
+        const expiration = item.expiration_date ? new Date(item.expiration_date) : null
+        const isExpired =
+          item.status?.trim() === 'Expired' ||
+          (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
+
+        if (dashboardMetricDrilldown === 'stockpileExpired') return isExpired
+        if (isExpired) return false
+
+        if (dashboardMetricDrilldown === 'stockpileLow') {
+          return quantity > 0 && quantity <= 10
+        }
+
+        if (dashboardMetricDrilldown === 'stockpileFull') {
+          return quantity > 10
+        }
+
+        return false
+      })
+    : []
+  const dashboardDrilldownItemCount = isVehicleDrilldown
+    ? dashboardDrilldownVehicles.length
+    : isStockpileDrilldown
+      ? dashboardDrilldownStockpiles.length
+      : dashboardDrilldownItems.length
   const dashboardDrilldownTotalPages = Math.max(
     1,
-    Math.ceil(dashboardDrilldownItems.length / DASHBOARD_DRILLDOWN_PAGE_SIZE),
+    Math.ceil(dashboardDrilldownItemCount / DASHBOARD_DRILLDOWN_PAGE_SIZE),
   )
   const dashboardDrilldownPaginatedItems = dashboardDrilldownItems.slice(
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE,
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
+  )
+  const dashboardDrilldownPaginatedVehicles = dashboardDrilldownVehicles.slice(
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE,
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
+  )
+  const dashboardDrilldownPaginatedStockpiles = dashboardDrilldownStockpiles.slice(
     (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE,
     (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
   )
@@ -3824,6 +3896,20 @@ function DashboardPage() {
   }
 
   const updateStockpileReleaseItem = (index: number, field: keyof StockpileReleaseDraftItem, value: string) => {
+    if (field === 'quantity') {
+      const releaseItem = stockpileReleaseItems[index]
+      if (releaseItem && releaseItem.stockpileId) {
+        const stockpileId = Number(releaseItem.stockpileId)
+        const selectedItem = stockpileItems.find((item) => item.stockpile_id === stockpileId)
+        const availableQty = Number(selectedItem?.quantity_on_hand ?? 0)
+        const enteredQty = Number(value)
+        
+        // Cap the value at available quantity
+        if (!Number.isNaN(enteredQty) && enteredQty > availableQty) {
+          value = String(availableQty)
+        }
+      }
+    }
     setStockpileReleaseItems((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)))
   }
 
@@ -5029,231 +5115,349 @@ function DashboardPage() {
             {error && <p className="dashboard-error">{error}</p>}
 
             <section className="dashboard-metrics" aria-label="Item summary">
-              <article
-                className="metric-card metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('total')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('total')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="metric-label">Total Items</div>
-                  <div className="metric-value">{formatValue(summary.totalItems)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      d="M7 8l5-3 5 3-5 3-5-3Z M7 8v6l5 3 5-3V8 M7 14l5 3 5-3 M12 11v6"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-              </article>
-              <article
-                className="metric-card metric-card-serviceable metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('serviceable')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('serviceable')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="metric-label">Serviceable</div>
-                  <div className="metric-value">{formatValue(summary.serviceable)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
-                    <path
-                      d="M8.5 12.5l2.2 2.2L15.5 10"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-              </article>
-              <article
-                className="metric-card metric-card-unserviceable metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('unserviceable')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('unserviceable')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="metric-label">Unserviceable</div>
-                  <div className="metric-value">{formatValue(summary.unserviceable)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                    <path d="M8 8l8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-                  </svg>
-                </div>
-              </article>
-              <article
-                className="metric-card dashboard-source-card dashboard-source-card-purchased metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('purchased')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('purchased')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="dashboard-source-card-label">Purchased</div>
-                  <div className="dashboard-source-card-value">{formatValue(purchasedCount)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      d="M6 8.5h12l-1 10.5H7L6 8.5Zm2.2 0V7.2A3.8 3.8 0 0 1 12 3.4a3.8 3.8 0 0 1 3.8 3.8v1.3"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+              <article className="metric-group-card" aria-label="Inventory classification">
+                <header className="metric-group-header">
+                  <h3>Inventory</h3>
+                </header>
+                <div className="metric-group-grid metric-group-grid-3">
+                  <article
+                    className="metric-card metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('total')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('total')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Total Items</div>
+                      <div className="metric-value">{formatValue(summary.totalItems)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M7 8l5-3 5 3-5 3-5-3Z M7 8v6l5 3 5-3V8 M7 14l5 3 5-3 M12 11v6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-full-stock metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('fullStock')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('fullStock')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Full Stock</div>
+                      <div className="metric-value">{formatValue(fullStockCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M4.5 12.5 9 17l10.5-10.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-low-stock metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('low')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('low')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Low Stock</div>
+                      <div className="metric-value">{formatValue(lowStockCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 4v10m0 0-3.2-3.2M12 14l3.2-3.2M5 20h14"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
                 </div>
               </article>
-              <article
-                className="metric-card dashboard-source-card dashboard-source-card-donated metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('donated')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('donated')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="dashboard-source-card-label">Donated</div>
-                  <div className="dashboard-source-card-value">{formatValue(donatedCount)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      d="M12 21s-6.8-4.3-9-8.8C1.2 8.9 3.2 5.5 6.8 5.2c1.9-.2 3.8.8 5.2 2.5 1.4-1.7 3.3-2.7 5.2-2.5 3.6.3 5.6 3.7 3.8 7-2.2 4.5-9 8.8-9 8.8Z"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+
+              <article className="metric-group-card" aria-label="Stockpile classification">
+                <header className="metric-group-header">
+                  <h3>Stockpile</h3>
+                </header>
+                <div className="metric-group-grid metric-group-grid-3">
+                  <article
+                    className="metric-card metric-card-low-stock metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('stockpileLow')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('stockpileLow')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Low Stock</div>
+                      <div className="metric-value">{formatValue(stockpileStatusCountMap.get('Low Stock') ?? 0)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 4v10m0 0-3.2-3.2M12 14l3.2-3.2M5 20h14"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-full-stock metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('stockpileFull')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('stockpileFull')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Full Stock</div>
+                      <div className="metric-value">{formatValue(stockpileStatusCountMap.get('Available') ?? 0)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M4.5 12.5 9 17l10.5-10.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-unserviceable metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('stockpileExpired')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('stockpileExpired')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Expired Items</div>
+                      <div className="metric-value">{formatValue(stockpileStatusCountMap.get('Expired') ?? 0)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                        <path
+                          d="M12 8v4l3 2"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
                 </div>
               </article>
-              <article
-                className="metric-card metric-card-low-stock metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('low')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('low')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="metric-label">Low Stock</div>
-                  <div className="metric-value">{formatValue(lowStockCount)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      d="M12 4v10m0 0-3.2-3.2M12 14l3.2-3.2M5 20h14"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+
+              <article className="metric-group-card" aria-label="Acquisition classification">
+                <header className="metric-group-header">
+                  <h3>Acquisition Source</h3>
+                </header>
+                <div className="metric-group-grid metric-group-grid-2">
+                  <article
+                    className="metric-card dashboard-source-card dashboard-source-card-purchased metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('purchased')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('purchased')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="dashboard-source-card-label">Purchased</div>
+                      <div className="dashboard-source-card-value">{formatValue(purchasedCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M6 8.5h12l-1 10.5H7L6 8.5Zm2.2 0V7.2A3.8 3.8 0 0 1 12 3.4a3.8 3.8 0 0 1 3.8 3.8v1.3"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card dashboard-source-card dashboard-source-card-donated metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('donated')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('donated')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="dashboard-source-card-label">Donated</div>
+                      <div className="dashboard-source-card-value">{formatValue(donatedCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 21s-6.8-4.3-9-8.8C1.2 8.9 3.2 5.5 6.8 5.2c1.9-.2 3.8.8 5.2 2.5 1.4-1.7 3.3-2.7 5.2-2.5 3.6.3 5.6 3.7 3.8 7-2.2 4.5-9 8.8-9 8.8Z"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
                 </div>
               </article>
-              <article
-                className="metric-card metric-card-full-stock metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('fullStock')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('fullStock')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="metric-label">Full Stock</div>
-                  <div className="metric-value">{formatValue(fullStockCount)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <path
-                      d="M4.5 12.5 9 17l10.5-10.5"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.6"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                </div>
-              </article>
-              <article
-                className="metric-card metric-card-unserviceable metric-card-clickable"
-                role="button"
-                tabIndex={0}
-                onClick={() => setDashboardMetricDrilldown('expired')}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault()
-                    setDashboardMetricDrilldown('expired')
-                  }
-                }}
-              >
-                <div className="metric-text">
-                  <div className="metric-label">Expired Items</div>
-                  <div className="metric-value">{formatValue(dashboardExpiredCount)}</div>
-                </div>
-                <div className="metric-icon" aria-hidden="true">
-                  <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                    <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
-                    <path
-                      d="M12 8v4l3 2"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.4"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
+
+              <article className="metric-group-card" aria-label="Vehicle classification">
+                <header className="metric-group-header">
+                  <h3>Vehicle</h3>
+                </header>
+                <div className="metric-group-grid metric-group-grid-3">
+                  <article
+                    className="metric-card metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('vehicleTotal')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('vehicleTotal')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Total Vehicles</div>
+                      <div className="metric-value">{formatValue(activeVehicles.length)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M4 14.5V12l1.3-4.2A2 2 0 0 1 7.2 6.4h9.6a2 2 0 0 1 1.9 1.4L20 12v2.5M6.5 18a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3Zm11 0a1.5 1.5 0 1 1 0-3 1.5 1.5 0 0 1 0 3ZM4 12h16"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-serviceable metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('vehicleServiceable')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('vehicleServiceable')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Serviceable</div>
+                      <div className="metric-value">{formatValue(vehicleServiceableCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.8" />
+                        <path
+                          d="M8.5 12.5l2.2 2.2L15.5 10"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-unserviceable metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('vehicleUnserviceable')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('vehicleUnserviceable')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Unserviceable</div>
+                      <div className="metric-value">{formatValue(vehicleUnserviceableCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                        <path d="M8 8l8 8" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+                      </svg>
+                    </div>
+                  </article>
                 </div>
               </article>
             </section>
@@ -7336,7 +7540,7 @@ function DashboardPage() {
           >
             <header className="panel-header dashboard-drilldown-header">
               <h3 id="dashboard-drilldown-modal-title">
-                {dashboardMetricLabelMap[dashboardMetricDrilldown]} Items ({formatValue(dashboardDrilldownItems.length)})
+                {dashboardMetricLabelMap[dashboardMetricDrilldown]} {isVehicleDrilldown ? 'Vehicles' : isStockpileDrilldown ? 'Stockpiles' : 'Items'} ({formatValue(dashboardDrilldownItemCount)})
               </h3>
               <button
                 type="button"
@@ -7348,36 +7552,90 @@ function DashboardPage() {
               </button>
             </header>
             <div className="panel-body">
-              {dashboardDrilldownPaginatedItems.length === 0 ? (
-                <div className="panel-body-placeholder">No items found for this metric.</div>
+              {dashboardDrilldownItemCount === 0 ? (
+                <div className="panel-body-placeholder">
+                  {isVehicleDrilldown
+                    ? 'No vehicles found for this metric.'
+                    : isStockpileDrilldown
+                      ? 'No stockpiles found for this metric.'
+                      : 'No items found for this metric.'}
+                </div>
               ) : (
                 <div className="dashboard-drilldown-table-wrap">
-                  <table className="dashboard-drilldown-table">
-                    <thead>
-                      <tr>
-                        <th scope="col">Item</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Location</th>
-                        <th scope="col">Qty</th>
-                        <th scope="col">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dashboardDrilldownPaginatedItems.map((item) => {
-                        const status = getInventoryStatus(item) ?? '—'
-                        const locationName = departments.find((dept) => dept.id === item.department_id)?.name ?? 'Unassigned'
-                        return (
-                          <tr key={`drilldown-item-${item.item_id}`}>
-                            <td>{item.item_name}</td>
-                            <td>{item.item_type}</td>
-                            <td>{locationName}</td>
-                            <td>{item.quantity ?? 0}</td>
-                            <td>{status}</td>
+                  {isVehicleDrilldown ? (
+                    <table className="dashboard-drilldown-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Vehicle</th>
+                          <th scope="col">Make/Model</th>
+                          <th scope="col">Year</th>
+                          <th scope="col">CR Number</th>
+                          <th scope="col">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboardDrilldownPaginatedVehicles.map((vehicle) => (
+                          <tr key={`drilldown-vehicle-${vehicle.id}`}>
+                            <td>{getVehicleDisplayLabel(vehicle)}</td>
+                            <td>{vehicle.make_model ?? '—'}</td>
+                            <td>{vehicle.year_model ?? '—'}</td>
+                            <td>{vehicle.cr_number ?? '—'}</td>
+                            <td>{vehicle.is_serviceable ?? true ? 'Serviceable' : 'Unserviceable'}</td>
                           </tr>
-                        )
-                      })}
-                    </tbody>
-                  </table>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : isStockpileDrilldown ? (
+                    <table className="dashboard-drilldown-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">ID</th>
+                          <th scope="col">Item Name</th>
+                          <th scope="col">Category</th>
+                          <th scope="col">Quantity</th>
+                          <th scope="col">Expiration Date</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboardDrilldownPaginatedStockpiles.map((item) => (
+                          <tr key={`drilldown-stockpile-${item.stockpile_id}`}>
+                            <td>{`STOCK-${item.stockpile_id.toString().padStart(3, '0')}`}</td>
+                            <td>{item.item_name ?? '—'}</td>
+                            <td>{item.category ?? '—'}</td>
+                            <td>{item.quantity_on_hand ?? 0}</td>
+                            <td>{formatDisplayDate(item.expiration_date)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <table className="dashboard-drilldown-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Item</th>
+                          <th scope="col">Type</th>
+                          <th scope="col">Location</th>
+                          <th scope="col">Qty</th>
+                          <th scope="col">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboardDrilldownPaginatedItems.map((item) => {
+                          const status = getInventoryStatus(item) ?? '—'
+                          const locationName = departments.find((dept) => dept.id === item.department_id)?.name ?? 'Unassigned'
+                          return (
+                            <tr key={`drilldown-item-${item.item_id}`}>
+                              <td>{item.item_name}</td>
+                              <td>{item.item_type}</td>
+                              <td>{locationName}</td>
+                              <td>{item.quantity ?? 0}</td>
+                              <td>{status}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  )}
                   {dashboardDrilldownTotalPages > 1 && (
                     <div className="dashboard-drilldown-pagination" aria-label="Dashboard drilldown pagination">
                       <button

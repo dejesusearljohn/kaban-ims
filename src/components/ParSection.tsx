@@ -100,6 +100,12 @@ function ParSection({
   const [parDraftItems, setParDraftItems] = useState<ParDraftItem[]>([emptyDraftItem()])
   const [localIssuedToId, setLocalIssuedToId] = useState('')
   const [localIssueDate, setLocalIssueDate] = useState(() => new Date().toISOString().slice(0, 10))
+  const [itemPickerRowIndex, setItemPickerRowIndex] = useState<number | null>(null)
+  const [itemPickerSearch, setItemPickerSearch] = useState('')
+  const [itemPickerCategory, setItemPickerCategory] = useState('all')
+  const [itemPickerSelectedIds, setItemPickerSelectedIds] = useState<string[]>([])
+  const [itemPickerPage, setItemPickerPage] = useState(1)
+  const itemPickerModalRef = useRef<HTMLDivElement | null>(null)
   const fileInputRefs = useRef<(HTMLInputElement | null)[]>([])
   const parCsvInputRef = useRef<HTMLInputElement | null>(null)
   const csvMenuRef = useRef<HTMLDivElement | null>(null)
@@ -112,23 +118,21 @@ function ParSection({
     })
   }
 
-  const handleDraftItemSelect = (index: number, itemId: string) => {
-    const found = inventoryItems.find((it) => String(it.item_id) === itemId)
-    const cost = found?.unit_cost ?? null
-    const qty = Number(parDraftItems[index].quantity) || 0
-    const total = cost !== null && qty > 0 ? cost * qty : null
-    updateDraftRow(index, {
-      itemId,
-      unit: found?.unit_of_measure ?? '',
-      costSnapshot: cost,
-      totalCost: total,
-      description: found?.item_name ?? '',
-    })
-  }
-
   const handleDraftQtyChange = (index: number, qty: string) => {
-    const cost = parDraftItems[index].costSnapshot
-    const qtyNum = Number(qty)
+    const draftItem = parDraftItems[index]
+    const cost = draftItem.costSnapshot
+    let qtyNum = Number(qty)
+    
+    // Cap quantity at available inventory
+    if (draftItem.itemId) {
+      const inventoryItem = inventoryItems.find((item) => String(item.item_id) === draftItem.itemId)
+      const availableQty = Number(inventoryItem?.quantity ?? 0)
+      if (!Number.isNaN(qtyNum) && qtyNum > availableQty) {
+        qtyNum = availableQty
+        qty = String(availableQty)
+      }
+    }
+    
     const total = cost !== null && qtyNum > 0 ? cost * qtyNum : null
     updateDraftRow(index, { quantity: qty, totalCost: total })
   }
@@ -152,6 +156,90 @@ function ParSection({
     setParDraftItems([emptyDraftItem()])
     setLocalIssuedToId('')
     setLocalIssueDate(new Date().toISOString().slice(0, 10))
+    setItemPickerRowIndex(null)
+    setItemPickerSearch('')
+    setItemPickerCategory('all')
+  }
+
+  const closeItemPicker = () => {
+    setItemPickerRowIndex(null)
+    setItemPickerSearch('')
+    setItemPickerCategory('all')
+    setItemPickerSelectedIds([])
+    setItemPickerPage(1)
+  }
+
+  const openItemPicker = (index: number) => {
+    setItemPickerRowIndex(index)
+    setItemPickerSearch('')
+    setItemPickerCategory('all')
+    setItemPickerSelectedIds([])
+    setItemPickerPage(1)
+  }
+
+  const toggleItemPickerSelection = (itemId: string) => {
+    setItemPickerSelectedIds((prev) => {
+      if (prev.includes(itemId)) {
+        return prev.filter((id) => id !== itemId)
+      }
+
+      return [...prev, itemId]
+    })
+  }
+
+  const handleApplySelectedItems = () => {
+    if (itemPickerRowIndex == null || itemPickerSelectedIds.length === 0) return
+
+    const selectedItems = itemPickerSelectedIds
+      .map((id) => inventoryItems.find((item) => String(item.item_id) === id) ?? null)
+      .filter((item): item is InventoryRow => item != null)
+
+    if (selectedItems.length === 0) {
+      closeItemPicker()
+      return
+    }
+
+    setParDraftItems((prev) => {
+      if (itemPickerRowIndex == null || itemPickerRowIndex < 0 || itemPickerRowIndex >= prev.length) {
+        return prev
+      }
+
+      const rows = [...prev]
+      const targetRow = rows[itemPickerRowIndex]
+      const targetQuantity = targetRow.quantity || '1'
+      const primaryItem = selectedItems[0]
+      const primaryCost = primaryItem.unit_cost ?? null
+      const primaryQty = Number(targetQuantity)
+
+      rows[itemPickerRowIndex] = {
+        ...targetRow,
+        itemId: String(primaryItem.item_id),
+        unit: primaryItem.unit_of_measure ?? '',
+        costSnapshot: primaryCost,
+        totalCost: primaryCost !== null && primaryQty > 0 ? primaryCost * primaryQty : null,
+        description: primaryItem.item_name ?? '',
+      }
+
+      if (selectedItems.length > 1) {
+        const additionalRows = selectedItems.slice(1).map((item) => {
+          const cost = item.unit_cost ?? null
+          return {
+            ...emptyDraftItem(),
+            itemId: String(item.item_id),
+            unit: item.unit_of_measure ?? '',
+            costSnapshot: cost,
+            totalCost: cost !== null ? cost : null,
+            description: item.item_name ?? '',
+          }
+        })
+
+        rows.push(...additionalRows)
+      }
+
+      return rows
+    })
+
+    closeItemPicker()
   }
 
   const handleSubmitPar = async () => {
@@ -194,6 +282,109 @@ function ParSection({
       window.removeEventListener('keydown', onKeyDown)
     }
   }, [csvMenuOpen])
+
+  useEffect(() => {
+    if (itemPickerRowIndex == null) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      itemPickerModalRef.current?.focus()
+    })
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeItemPicker()
+      }
+    }
+
+    window.addEventListener('keydown', onKeyDown)
+
+    return () => {
+      window.cancelAnimationFrame(frameId)
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [itemPickerRowIndex])
+
+  useEffect(() => {
+    if (itemPickerRowIndex == null) return
+    if (itemPickerRowIndex >= parDraftItems.length) {
+      closeItemPicker()
+    }
+  }, [itemPickerRowIndex, parDraftItems.length])
+
+  const itemPickerCategoryOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        inventoryItems
+          .map((item) => item.item_type.trim())
+          .filter((itemType) => itemType.length > 0),
+      ),
+    ).sort((a, b) => a.localeCompare(b))
+  }, [inventoryItems])
+
+  const filteredItemPickerItems = useMemo(() => {
+    const normalizedSearch = itemPickerSearch.trim().toLowerCase()
+
+    return inventoryItems
+      .filter((item) => {
+        const category = item.item_type.trim()
+        if (itemPickerCategory !== 'all' && category !== itemPickerCategory) {
+          return false
+        }
+
+        if (!normalizedSearch) return true
+
+        return (
+          item.item_name.toLowerCase().includes(normalizedSearch) ||
+          category.toLowerCase().includes(normalizedSearch)
+        )
+      })
+      .sort((a, b) => {
+        const categoryCompare = a.item_type.localeCompare(b.item_type)
+        if (categoryCompare !== 0) return categoryCompare
+        return a.item_name.localeCompare(b.item_name)
+      })
+  }, [inventoryItems, itemPickerCategory, itemPickerSearch])
+
+  const getDraftItemDisplayLabel = (itemId: string) => {
+    if (!itemId) return 'Select item'
+    const found = inventoryItems.find((item) => String(item.item_id) === itemId)
+    return found ? found.item_name : 'Select item'
+  }
+
+  const itemPickerPageSize = 8
+  const itemPickerTotalPages = Math.max(1, Math.ceil(filteredItemPickerItems.length / itemPickerPageSize))
+  const paginatedItemPickerItems = filteredItemPickerItems.slice(
+    (itemPickerPage - 1) * itemPickerPageSize,
+    (itemPickerPage - 1) * itemPickerPageSize + itemPickerPageSize,
+  )
+  const itemPickerVisiblePageNumbers = useMemo(() => {
+    const maxVisiblePages = 5
+    if (itemPickerTotalPages <= maxVisiblePages) {
+      return Array.from({ length: itemPickerTotalPages }, (_, index) => index + 1)
+    }
+
+    const halfWindow = Math.floor(maxVisiblePages / 2)
+    let start = Math.max(1, itemPickerPage - halfWindow)
+    let end = Math.min(itemPickerTotalPages, start + maxVisiblePages - 1)
+
+    if (end - start + 1 < maxVisiblePages) {
+      start = Math.max(1, end - maxVisiblePages + 1)
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  }, [itemPickerPage, itemPickerTotalPages])
+
+  useEffect(() => {
+    if (itemPickerRowIndex == null) return
+    setItemPickerPage(1)
+  }, [itemPickerSearch, itemPickerCategory, itemPickerRowIndex])
+
+  useEffect(() => {
+    if (itemPickerPage > itemPickerTotalPages) {
+      setItemPickerPage(itemPickerTotalPages)
+    }
+  }, [itemPickerPage, itemPickerTotalPages])
 
   const paginatedParSummaries = useMemo(() => {
     const start = (parPage - 1) * parPageSize
@@ -366,23 +557,19 @@ function ParSection({
                       <tr key={`par-draft-${index}`}>
                         <td className="par-draft-no-col stockpile-release-line-number">{index + 1}</td>
                         <td className="par-draft-item-col">
-                          <select
-                            className="inventory-input par-draft-select"
-                            value={row.itemId}
-                            onChange={(e) => handleDraftItemSelect(index, e.target.value)}
+                          <button
+                            type="button"
+                            className={`par-item-picker-button ${row.itemId ? 'par-item-picker-button-selected' : ''}`}
+                            onClick={() => openItemPicker(index)}
                           >
-                            <option value="">Select item</option>
-                            {inventoryItems.map((item) => (
-                              <option key={item.item_id} value={String(item.item_id)}>
-                                {item.item_name}
-                              </option>
-                            ))}
-                          </select>
+                            <span className="par-item-picker-button-label">{getDraftItemDisplayLabel(row.itemId)}</span>
+                          </button>
                         </td>
                         <td className="par-draft-qty-col">
                           <input
                             type="number"
                             min="1"
+                            max={row.itemId ? Number(inventoryItems.find((item) => String(item.item_id) === row.itemId)?.quantity ?? 0) : undefined}
                             className="inventory-input par-draft-qty-input"
                             value={row.quantity}
                             onChange={(e) => handleDraftQtyChange(index, e.target.value)}
@@ -674,6 +861,149 @@ function ParSection({
             </div>
           )}
         </>
+      )}
+
+      {itemPickerRowIndex != null && (
+        <div
+          className="par-item-picker-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="par-item-picker-title"
+          onClick={closeItemPicker}
+        >
+          <div
+            ref={itemPickerModalRef}
+            className="par-item-picker-modal"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="par-item-picker-title">Select PAR Item</h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={closeItemPicker}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </header>
+
+            <div className="panel-body">
+              <div className="par-item-picker-toolbar">
+                <input
+                  type="search"
+                  className="inventory-input"
+                  placeholder="Search item name or category"
+                  value={itemPickerSearch}
+                  onChange={(event) => setItemPickerSearch(event.target.value)}
+                />
+                <select
+                  className="inventory-input"
+                  value={itemPickerCategory}
+                  onChange={(event) => setItemPickerCategory(event.target.value)}
+                >
+                  <option value="all">All Categories</option>
+                  {itemPickerCategoryOptions.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="dashboard-drilldown-table-wrap">
+                <table className="dashboard-drilldown-table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Item</th>
+                      <th scope="col">Category</th>
+                      <th scope="col">Unit</th>
+                      <th scope="col">Available Qty</th>
+                      <th scope="col">Select</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredItemPickerItems.length === 0 ? (
+                      <tr>
+                        <td colSpan={5}>No items match your search/category filter.</td>
+                      </tr>
+                    ) : (
+                      paginatedItemPickerItems.map((item) => (
+                        <tr key={`par-item-picker-${item.item_id}`} onClick={() => toggleItemPickerSelection(String(item.item_id))} style={{ cursor: 'pointer' }}>
+                          <td>{item.item_name}</td>
+                          <td>{item.item_type}</td>
+                          <td>{item.unit_of_measure ?? '—'}</td>
+                          <td>{item.quantity ?? 0}</td>
+                          <td>
+                            <input
+                              type="checkbox"
+                              className="par-item-picker-checkbox"
+                              checked={itemPickerSelectedIds.includes(String(item.item_id))}
+                              onChange={() => toggleItemPickerSelection(String(item.item_id))}
+                              aria-label={`Select ${item.item_name}`}
+                            />
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="par-item-picker-footer">
+                <span className="par-item-picker-selected-count">{itemPickerSelectedIds.length} selected</span>
+
+                <div className="par-item-picker-footer-center">
+                  {itemPickerTotalPages > 1 && (
+                    <div className="dashboard-drilldown-pagination" aria-label="PAR item picker pagination">
+                      <button
+                        type="button"
+                        className="dashboard-drilldown-pagination-button"
+                        onClick={() => setItemPickerPage((prev) => Math.max(1, prev - 1))}
+                        disabled={itemPickerPage === 1}
+                      >
+                        Prev
+                      </button>
+                      {itemPickerVisiblePageNumbers.map((pageNumber) => (
+                        <button
+                          key={`par-item-picker-page-${pageNumber}`}
+                          type="button"
+                          className={`dashboard-drilldown-pagination-button ${
+                            itemPickerPage === pageNumber ? 'dashboard-drilldown-pagination-button-active' : ''
+                          }`}
+                          onClick={() => setItemPickerPage(pageNumber)}
+                          aria-current={itemPickerPage === pageNumber ? 'page' : undefined}
+                        >
+                          {pageNumber}
+                        </button>
+                      ))}
+                      <button
+                        type="button"
+                        className="dashboard-drilldown-pagination-button"
+                        onClick={() => setItemPickerPage((prev) => Math.min(itemPickerTotalPages, prev + 1))}
+                        disabled={itemPickerPage === itemPickerTotalPages}
+                      >
+                        Next
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="par-item-picker-footer-right">
+                  <button
+                    type="button"
+                    className="inventory-add-submit"
+                    onClick={handleApplySelectedItems}
+                    disabled={itemPickerSelectedIds.length === 0}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
