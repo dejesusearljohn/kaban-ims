@@ -81,6 +81,9 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
             .order('created_at', { ascending: false }),
         ])
 
+        if (userRes.error) throw userRes.error
+        if (invRes.error) throw invRes.error
+        if (wmrRes.error) throw wmrRes.error
         if (incomingTurnoverRes.error) throw incomingTurnoverRes.error
         if (outgoingTurnoverRes.error) throw outgoingTurnoverRes.error
 
@@ -97,10 +100,11 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
         let itemNameMap: Record<number, string> = {}
 
         if (reportItemIds.length > 0) {
-          const { data: reportItems } = await supabase
+          const { data: reportItems, error: reportItemsError } = await supabase
             .from('inventory')
             .select('item_id, item_name')
             .in('item_id', reportItemIds)
+          if (reportItemsError) throw reportItemsError
 
           itemNameMap = Object.fromEntries((reportItems ?? []).map((item) => [item.item_id, item.item_name]))
         }
@@ -157,10 +161,11 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
         let partnerMap: Record<string, { full_name: string | null; staff_id: string | null }> = {}
 
         if (partnerIds.length > 0) {
-          const { data: partnerRows } = await supabase
+          const { data: partnerRows, error: partnerError } = await supabase
             .from('users')
             .select('id, full_name, staff_id')
             .in('id', partnerIds)
+          if (partnerError) throw partnerError
 
           partnerMap = Object.fromEntries(
             (partnerRows ?? []).map((row) => [row.id, { full_name: row.full_name, staff_id: row.staff_id }]),
@@ -270,6 +275,9 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
           lowStock: items.filter((i) => (i.quantity ?? 0) <= 2).length,
         })
         setNotifications(notificationItems)
+      } catch {
+        // Errors are surfaced via empty state; individual throw sites above
+        // ensure the load aborts on the first failure.
       } finally {
         if (mounted) setLoading(false)
       }

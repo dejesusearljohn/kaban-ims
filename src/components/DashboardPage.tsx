@@ -3823,13 +3823,16 @@ function DashboardPage() {
 
     // Auto-register vehicle in vehicles table
     if (newItemType.trim().toLowerCase() === 'vehicle') {
-      await supabase.from('vehicles').insert([
+      const { error: vehicleRegError } = await supabase.from('vehicles').insert([
         {
           vehicle_name: newItemName,
           make_model: newItemName,
           is_serviceable: newCondition.trim().toLowerCase() !== 'defective',
         } as never,
       ])
+      if (vehicleRegError) {
+        setInventoryError(`Item added, but vehicle registry failed: ${vehicleRegError.message}`)
+      }
     }
 
     // Reload inventory list

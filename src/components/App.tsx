@@ -71,11 +71,13 @@ function App() {
 					return { kind: 'department' as const, departmentName: 'Department', departmentId: null }
 				}
 
-				const { data: department } = await supabase
+				const { data: department, error: deptError } = await supabase
 					.from('departments')
 					.select('dept_name, dept_code')
 					.eq('id', data.department_id)
 					.maybeSingle()
+
+				if (deptError) return null
 
 				const departmentCode = department?.dept_code?.trim() || ''
 
@@ -125,7 +127,14 @@ function App() {
 		}
 
 		const initAuth = async () => {
-			const { data } = await supabase.auth.getSession()
+			const { data, error: sessionError } = await supabase.auth.getSession()
+			if (sessionError) {
+				if (isMounted) {
+					setIsAuthenticated(false)
+					setDashboardTarget(null)
+				}
+				return
+			}
 			await applySessionAccess(data.session)
 		}
 

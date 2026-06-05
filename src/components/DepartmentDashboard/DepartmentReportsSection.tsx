@@ -60,12 +60,17 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
   })
 
   const loadReports = async () => {
-    const { data } = await supabase
+    const { data, error: reportsError } = await supabase
       .from('wmr_reports')
       .select('report_id, item_id, location, reason_damage, status, date_reported, admin_remarks, quantity_reported')
       .eq('last_user_id', userId)
       .eq('is_archived', false)
       .order('date_reported', { ascending: false })
+
+    if (reportsError) {
+      setError(reportsError.message)
+      return
+    }
 
     if (!data) return
 
@@ -73,10 +78,14 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
     const itemIds = [...new Set(data.map((r) => r.item_id).filter(Boolean))] as number[]
     let itemMetaById: Record<number, { item_name: string; unit_of_measure: string | null }> = {}
     if (itemIds.length) {
-      const { data: inv } = await supabase
+      const { data: inv, error: invError } = await supabase
         .from('inventory')
         .select('item_id, item_name, unit_of_measure')
         .in('item_id', itemIds)
+      if (invError) {
+        setError(invError.message)
+        return
+      }
       if (inv) inv.forEach((i) => { itemMetaById[i.item_id] = { item_name: i.item_name, unit_of_measure: i.unit_of_measure } })
     }
 
@@ -93,16 +102,25 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
       .select('item_id, item_name, quantity, unit_of_measure')
       .order('item_name')
     if (departmentId) invQuery.eq('department_id', departmentId)
-    const { data: inv } = await invQuery
+    const { data: inv, error: invError } = await invQuery
+    if (invError) {
+      setError(invError.message)
+      return
+    }
     setInventoryOptions((inv ?? []) as InventoryOption[])
   }
 
   const loadDepartmentOptions = async () => {
-    const { data: departments } = await supabase
+    const { data: departments, error: deptError } = await supabase
       .from('departments')
       .select('id, dept_name')
       .eq('is_archived', false)
       .order('dept_name')
+
+    if (deptError) {
+      setError(deptError.message)
+      return
+    }
 
     const nextDepartments = (departments ?? []) as DepartmentOption[]
     setDepartmentOptions(nextDepartments)
