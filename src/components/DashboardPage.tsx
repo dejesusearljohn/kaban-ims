@@ -530,7 +530,11 @@ function DashboardPage() {
   const [editVehicleServiceable, setEditVehicleServiceable] = useState('true')
   const [editVehicleRemarks, setEditVehicleRemarks] = useState('')
   const [editVehicleName, setEditVehicleName] = useState('')
+  const [editVehicleMakeModel, setEditVehicleMakeModel] = useState('')
   const [editVehicleColor, setEditVehicleColor] = useState('')
+  const [editVehicleYearModel, setEditVehicleYearModel] = useState('')
+  const [editVehicleCrNumber, setEditVehicleCrNumber] = useState('')
+  const [editVehicleEngineNumber, setEditVehicleEngineNumber] = useState('')
   const [isEditingVehicleDetails, setIsEditingVehicleDetails] = useState(false)
   const [editVehicleSaving, setEditVehicleSaving] = useState(false)
   const [newRepairVehicleId, setNewRepairVehicleId] = useState('')
@@ -1291,7 +1295,11 @@ function DashboardPage() {
     setEditVehicleServiceable(String(vehicle.is_serviceable ?? true))
     setEditVehicleRemarks(getVehicleStatusRemark(vehicle.repair_history_log))
     setEditVehicleName(vehicle.vehicle_name ?? '')
+    setEditVehicleMakeModel(vehicle.make_model ?? '')
     setEditVehicleColor(vehicle.color ?? '')
+    setEditVehicleYearModel(vehicle.year_model != null ? String(vehicle.year_model) : '')
+    setEditVehicleCrNumber(vehicle.cr_number ?? '')
+    setEditVehicleEngineNumber(vehicle.engine_number ?? '')
     setIsEditingVehicleDetails(false)
   }
 
@@ -1301,7 +1309,11 @@ function DashboardPage() {
     setEditVehicleServiceable('true')
     setEditVehicleRemarks('')
     setEditVehicleName('')
+    setEditVehicleMakeModel('')
     setEditVehicleColor('')
+    setEditVehicleYearModel('')
+    setEditVehicleCrNumber('')
+    setEditVehicleEngineNumber('')
     setIsEditingVehicleDetails(false)
   }
 
@@ -2710,7 +2722,11 @@ function DashboardPage() {
       .from('vehicles')
       .update({
         vehicle_name: trimmedEditVehicleName,
+        make_model: editVehicleMakeModel.trim() || null,
         color: editVehicleColor.trim() || null,
+        year_model: editVehicleYearModel.trim() ? Number(editVehicleYearModel) : null,
+        cr_number: editVehicleCrNumber.trim() || null,
+        engine_number: editVehicleEngineNumber.trim() || null,
         is_serviceable: editVehicleServiceable === 'true',
         repair_history_log: nextHistoryLog,
       } as never)
@@ -4277,10 +4293,12 @@ function DashboardPage() {
       .map((report) => {
         const mappedItem =
           report.item_id != null ? inventoryItems.find((item) => item.item_id === report.item_id) ?? null : null
+        const vehicleName = report.location?.replace('Vehicle Registry - ', '').trim() || null
 
         return {
           reportNo: `WMR-${report.report_id.toString().padStart(3, '0')}`,
-          description: report.reason_damage?.trim() || mappedItem?.item_name || 'Waste material report',
+          itemName: mappedItem?.item_name || vehicleName || 'Vehicle',
+          description: report.reason_damage?.trim() || '—',
           type: mappedItem?.item_type || (report.item_id == null ? 'Vehicle' : 'Inventory Item'),
           location:
             report.location?.trim() ||
@@ -4297,6 +4315,7 @@ function DashboardPage() {
         (row) =>
           `<tr>
             <td>${escapeHtml(row.reportNo)}</td>
+            <td>${escapeHtml(row.itemName)}</td>
             <td>${escapeHtml(row.description)}</td>
             <td>${escapeHtml(row.type)}</td>
             <td>${escapeHtml(row.location)}</td>
@@ -4325,6 +4344,7 @@ function DashboardPage() {
             <thead>
               <tr>
                 <th>Report No</th>
+                <th>Item Name</th>
                 <th>Description</th>
                 <th>Type</th>
                 <th>Location</th>
@@ -4333,7 +4353,7 @@ function DashboardPage() {
               </tr>
             </thead>
             <tbody>
-              ${rowsMarkup || '<tr><td colspan="6">No WMR entries found.</td></tr>'}
+              ${rowsMarkup || '<tr><td colspan="7">No WMR entries found.</td></tr>'}
             </tbody>
           </table>
           <div class="signatures">
@@ -6943,7 +6963,7 @@ function DashboardPage() {
             <h2 id="par-view-modal-title" className="wmr-modal-title">
               Property Acknowledgment Receipt
             </h2>
-            <div className="par-meta-grid">
+            <div className={`vehicle-info-grid ${isEditingVehicleDetails ? 'vehicle-info-grid-editing' : ''}`}>
               <p className="wmr-modal-text"><strong>Employee Name:</strong> {activeParReceiver?.full_name ?? activeParStaffId}</p>
               <p className="wmr-modal-text"><strong>Department:</strong> {activeParDepartment}</p>
               <p className="wmr-modal-text"><strong>PAR No:</strong> {activeParNo}</p>
@@ -7160,34 +7180,149 @@ function DashboardPage() {
               Vehicle Information
             </h2>
 
-            <div className="par-meta-grid">
+            <div className={`vehicle-info-grid ${isEditingVehicleDetails ? 'vehicle-info-grid-editing' : ''}`}>
               <p className="wmr-modal-text">
                 <strong>Vehicle ID:</strong> {`VEH-${editingVehicle.id.toString().padStart(3, '0')}`}
               </p>
-              <p className="wmr-modal-text">
-                <strong>Vehicle Name:</strong> {editingVehicle.vehicle_name || '—'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>Make / Model:</strong> {editingVehicle.make_model ?? '—'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>Color:</strong> {editingVehicle.color || '—'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>Year Model:</strong> {editingVehicle.year_model ?? '—'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>CR Number:</strong> {editingVehicle.cr_number ?? '—'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>Engine Number:</strong> {editingVehicle.engine_number ?? '—'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>Vehicle Status:</strong> {editingVehicle.is_serviceable ? 'Serviceable' : 'Unserviceable'}
-              </p>
-              <p className="wmr-modal-text">
-                <strong>Remarks:</strong> {getVehicleStatusRemark(editingVehicle.repair_history_log) || '—'}
-              </p>
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Vehicle Name:</strong>
+                  <input
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    value={editVehicleName}
+                    onChange={(e) => setEditVehicleName(e.target.value)}
+                    placeholder="e.g. Rescue Van 1"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Vehicle Name:</strong> {editingVehicle.vehicle_name || '—'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Make / Model:</strong>
+                  <input
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    value={editVehicleMakeModel}
+                    onChange={(e) => setEditVehicleMakeModel(e.target.value)}
+                    placeholder="e.g. Toyota Hilux"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Make / Model:</strong> {editingVehicle.make_model ?? '—'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Color:</strong>
+                  <input
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    value={editVehicleColor}
+                    onChange={(e) => setEditVehicleColor(e.target.value)}
+                    placeholder="e.g. White"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Color:</strong> {editingVehicle.color || '—'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Year Model:</strong>
+                  <input
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    inputMode="numeric"
+                    value={editVehicleYearModel}
+                    onChange={(e) => setEditVehicleYearModel(e.target.value)}
+                    placeholder="e.g. 2020"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Year Model:</strong> {editingVehicle.year_model ?? '—'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>CR Number:</strong>
+                  <input
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    value={editVehicleCrNumber}
+                    onChange={(e) => setEditVehicleCrNumber(e.target.value)}
+                    placeholder="e.g. CR-123456"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>CR Number:</strong> {editingVehicle.cr_number ?? '—'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Engine Number:</strong>
+                  <input
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    value={editVehicleEngineNumber}
+                    onChange={(e) => setEditVehicleEngineNumber(e.target.value)}
+                    placeholder="e.g. ENG-78910"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Engine Number:</strong> {editingVehicle.engine_number ?? '—'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Vehicle Status:</strong>
+                  <select
+                    className="inventory-input"
+                    style={{ marginTop: 8, width: '100%' }}
+                    value={editVehicleServiceable}
+                    onChange={(e) => setEditVehicleServiceable(e.target.value)}
+                  >
+                    <option value="true">Serviceable</option>
+                    <option value="false">Unserviceable</option>
+                  </select>
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Vehicle Status:</strong> {editingVehicle.is_serviceable ? 'Serviceable' : 'Unserviceable'}
+                </p>
+              )}
+
+              {isEditingVehicleDetails ? (
+                <div className="wmr-modal-text">
+                  <strong>Remarks:</strong>
+                  <textarea
+                    className="inventory-input"
+                    style={{ marginTop: 8, minHeight: 96, resize: 'vertical', width: '100%' }}
+                    value={editVehicleRemarks}
+                    onChange={(e) => setEditVehicleRemarks(e.target.value)}
+                    placeholder="Describe what is broken or why the vehicle is unserviceable"
+                  />
+                </div>
+              ) : (
+                <p className="wmr-modal-text">
+                  <strong>Remarks:</strong> {getVehicleStatusRemark(editingVehicle.repair_history_log) || '—'}
+                </p>
+              )}
             </div>
 
             <div className="wmr-modal-actions">
@@ -7209,80 +7344,23 @@ function DashboardPage() {
                   </button>
                 </>
               ) : (
-                <div className="vehicle-edit-panel">
-                  <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
-                    <label htmlFor="edit-vehicle-name">
-                      Vehicle Name <span className="inventory-required">*</span>
-                    </label>
-                    <input
-                      id="edit-vehicle-name"
-                      className="inventory-input"
-                      value={editVehicleName}
-                      onChange={(e) => setEditVehicleName(e.target.value)}
-                      placeholder="e.g. Rescue Van 1"
-                    />
-                  </div>
-
-                  <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
-                    <label htmlFor="edit-vehicle-color">Color</label>
-                    <input
-                      id="edit-vehicle-color"
-                      className="inventory-input"
-                      value={editVehicleColor}
-                      onChange={(e) => setEditVehicleColor(e.target.value)}
-                      placeholder="e.g. White"
-                    />
-                  </div>
-
-                  <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
-                    <label htmlFor="edit-vehicle-serviceable">
-                      Vehicle Status <span className="inventory-required">*</span>
-                    </label>
-                    <select
-                      id="edit-vehicle-serviceable"
-                      className="inventory-input"
-                      value={editVehicleServiceable}
-                      onChange={(e) => setEditVehicleServiceable(e.target.value)}
-                    >
-                      <option value="true">Serviceable</option>
-                      <option value="false">Unserviceable</option>
-                    </select>
-                  </div>
-
-                  {editVehicleServiceable === 'false' && (
-                    <div className="inventory-field inventory-field-full" style={{ flex: '1 1 100%' }}>
-                      <label htmlFor="edit-vehicle-remarks">
-                        Remarks <span className="inventory-required">*</span>
-                      </label>
-                      <textarea
-                        id="edit-vehicle-remarks"
-                        className="inventory-input"
-                        style={{ minHeight: 96, resize: 'vertical' }}
-                        value={editVehicleRemarks}
-                        onChange={(e) => setEditVehicleRemarks(e.target.value)}
-                        placeholder="Describe what is broken or why the vehicle is unserviceable"
-                      />
-                    </div>
-                  )}
-
-                  <div className="vehicle-edit-actions">
-                    <button
-                      type="button"
-                      className="wmr-modal-button-save vehicle-edit-save"
-                      onClick={handleSaveVehicleEdit}
-                      disabled={editVehicleSaving}
-                    >
-                      {editVehicleSaving ? 'Saving…' : 'Save'}
-                    </button>
-                    <button
-                      type="button"
-                      className="wmr-modal-button-secondary vehicle-edit-cancel"
-                      onClick={() => setIsEditingVehicleDetails(false)}
-                      disabled={editVehicleSaving}
-                    >
-                      Cancel
-                    </button>
-                  </div>
+                <div className="vehicle-edit-actions">
+                  <button
+                    type="button"
+                    className="wmr-modal-button-save vehicle-edit-save"
+                    onClick={handleSaveVehicleEdit}
+                    disabled={editVehicleSaving}
+                  >
+                    {editVehicleSaving ? 'Saving…' : 'Save'}
+                  </button>
+                  <button
+                    type="button"
+                    className="wmr-modal-button-secondary vehicle-edit-cancel"
+                    onClick={() => setIsEditingVehicleDetails(false)}
+                    disabled={editVehicleSaving}
+                  >
+                    Cancel
+                  </button>
                 </div>
               )}
             </div>
