@@ -32,6 +32,15 @@ import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
 import { downloadCsv, parseCsvFile } from '../utils/csv'
+import {
+  getVisiblePageNumbers,
+  parseFullName,
+  isLoanableItemType,
+  normalizeStaffRole,
+  mapStaffRoleToOption,
+  buildStaffEmail,
+  buildStaffQrCode,
+} from '../utils/dashboard'
 
 type SummaryMetrics = {
   totalItems: number
@@ -88,22 +97,6 @@ const STAFF_PAGE_SIZE = 5
 const DEPARTMENT_PAGE_SIZE = 10
 const DASHBOARD_DRILLDOWN_PAGE_SIZE = 10
 
-const getVisiblePageNumbers = (currentPage: number, totalPages: number, maxVisiblePages = 5) => {
-  if (totalPages <= maxVisiblePages) {
-    return Array.from({ length: totalPages }, (_, index) => index + 1)
-  }
-
-  const halfWindow = Math.floor(maxVisiblePages / 2)
-  let start = Math.max(1, currentPage - halfWindow)
-  let end = Math.min(totalPages, start + maxVisiblePages - 1)
-
-  if (end - start + 1 < maxVisiblePages) {
-    start = Math.max(1, end - maxVisiblePages + 1)
-  }
-
-  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
-}
-
 const mapInventoryItemToStockpileRow = (item: InventoryRow): StockpileRow => ({
   stockpile_id: item.item_id,
   item_name: item.item_name,
@@ -152,17 +145,7 @@ const DEFAULT_ITEM_TYPES = [
   'Perishables',
 ]
 
-const isLoanableParItem = (item: InventoryRow) => {
-  const normalizedType = item.item_type.trim().toLowerCase()
-  const isEquipment = normalizedType.includes('equipment') && normalizedType !== 'office equipment'
-
-  return (
-    isEquipment ||
-    normalizedType === 'hand tools' ||
-    normalizedType === 'power tools' ||
-    normalizedType === 'gadgets'
-  )
-}
+const isLoanableParItem = (item: InventoryRow) => isLoanableItemType(item.item_type)
 
 const DEFAULT_UNITS_OF_MEASURE = [
   'Piece(s)',
@@ -207,48 +190,6 @@ const STOCKPILE_STATUS_COLORS: Record<string, string> = {
 }
 
 const DEFAULT_STAFF_INITIAL_PASSWORD = '123456'
-
-const parseFullName = (fullName: string) => {
-  const normalizedName = fullName.trim().replace(/\s+/g, ' ')
-
-  if (!normalizedName) {
-    return { firstName: '', lastName: '' }
-  }
-
-  const nameParts = normalizedName.split(' ')
-
-  if (nameParts.length === 1) {
-    return { firstName: nameParts[0], lastName: '' }
-  }
-
-  if (nameParts.length === 2) {
-    return { firstName: nameParts[0], lastName: nameParts[1] }
-  }
-
-  const lowerParts = nameParts.map((part) => part.toLowerCase())
-  const twoWordSurnamePrefixes = new Set(['de', 'del', 'dela', 'de la', 'de los', 'de las', 'da', 'dos', 'das'])
-  const penultimate = lowerParts[lowerParts.length - 2]
-  const antepenultimate = lowerParts[lowerParts.length - 3]
-
-  if (antepenultimate === 'de' && (penultimate === 'la' || penultimate === 'los' || penultimate === 'las')) {
-    return {
-      firstName: nameParts.slice(0, -3).join(' '),
-      lastName: nameParts.slice(-3).join(' '),
-    }
-  }
-
-  if (twoWordSurnamePrefixes.has(penultimate)) {
-    return {
-      firstName: nameParts.slice(0, -2).join(' '),
-      lastName: nameParts.slice(-2).join(' '),
-    }
-  }
-
-  return {
-    firstName: nameParts.slice(0, -1).join(' '),
-    lastName: nameParts.slice(-1).join(' '),
-  }
-}
 
 function DashboardPage() {
   // [STATE] Navigation and dashboard overview
@@ -318,32 +259,6 @@ function DashboardPage() {
   const [staffSuccess, setStaffSuccess] = useState<string | null>(null)
   const [viewStaffQrItem, setViewStaffQrItem] = useState<UserRow | null>(null)
 
-  const normalizeStaffRole = (role: string | null | undefined) => {
-    const trimmedRole = role?.trim() || 'Staff'
-    const normalizedRole = trimmedRole.toLowerCase()
-
-    if (normalizedRole === 'staff') {
-      return 'Staff'
-    }
-
-    if (normalizedRole === 'admin') {
-      return 'Admin'
-    }
-
-    if (normalizedRole === 'super admin') {
-      return 'Super Admin'
-    }
-
-    return trimmedRole
-  }
-
-  const mapStaffRoleToOption = (role: string | null | undefined) => {
-    const normalizedRole = normalizeStaffRole(role)
-    if (normalizedRole === 'Super Admin') return 'Super Admin'
-    if (normalizedRole === 'Admin') return 'Admin'
-    return 'Staff'
-  }
-
   const isSuperAdminRole = (role: string | null | undefined) =>
     normalizeStaffRole(role) === 'Super Admin'
 
@@ -358,16 +273,6 @@ function DashboardPage() {
   useAutoDismissMessage(settingsSuccessMessage, () => setSettingsSuccessMessage(null))
   useAutoDismissMessage(staffError, () => setStaffError(null))
   useAutoDismissMessage(staffSuccess, () => setStaffSuccess(null))
-
-  const buildStaffEmail = (staffId: string) => {
-    const normalizedStaffId = staffId.trim().toLowerCase().replace(/\s+/g, '')
-    return normalizedStaffId ? `${normalizedStaffId}@kaban.com` : ''
-  }
-
-  const buildStaffQrCode = (staffId: string) => {
-    const normalizedStaffId = staffId.trim().toLowerCase().replace(/\s+/g, '')
-    return normalizedStaffId ? `staff-${normalizedStaffId}` : ''
-  }
 
   const buildStaffId = (departmentId: number, existingStaff: UserRow[]) => {
     const departmentCode = (departments.find((dept) => dept.id === departmentId)?.code ?? '')
