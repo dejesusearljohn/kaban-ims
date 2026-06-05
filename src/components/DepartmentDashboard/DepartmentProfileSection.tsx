@@ -113,7 +113,7 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
       return
     }
     if (form.new_password || form.confirm_password) {
-      if (form.new_password.length < 6) { setEditError('New password must be at least 6 characters.'); return }
+      if (form.new_password.length < 8) { setEditError('New password must be at least 8 characters.'); return }
       if (form.new_password !== form.confirm_password) { setEditError('Passwords do not match.'); return }
     }
     setSaving(true)

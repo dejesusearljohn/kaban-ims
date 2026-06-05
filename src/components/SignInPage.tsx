@@ -299,8 +299,8 @@ function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetCo
     setResetError(null)
     setResetSuccess(null)
 
-    if (newPassword.length < 6) {
-      setResetError('New password must be at least 6 characters.')
+    if (newPassword.length < 8) {
+      setResetError('New password must be at least 8 characters.')
       return
     }
 
