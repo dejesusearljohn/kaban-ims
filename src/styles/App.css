@@ -297,6 +297,119 @@
 	line-height: 1.5;
 }
 
+.session-timeout-toast {
+	position: fixed;
+	top: 20px;
+	right: 20px;
+	z-index: 3000;
+	width: min(360px, calc(100vw - 40px));
+	display: flex;
+	align-items: stretch;
+	gap: 12px;
+	padding: 14px 16px;
+	border-radius: 16px;
+	border: 1px solid #e5e7eb;
+	background: #ffffff;
+	box-shadow: 0 18px 40px rgba(15, 23, 42, 0.16);
+	color: #0f172a;
+	font-family: 'Poppins', var(--heading);
+	animation: session-timeout-toast-enter 180ms ease-out;
+}
+
+.session-timeout-toast-accent {
+	width: 4px;
+	border-radius: 999px;
+	background: linear-gradient(180deg, #338833 0%, #2563eb 100%);
+	flex: 0 0 auto;
+}
+
+.session-timeout-toast-content {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	min-width: 0;
+}
+
+.session-timeout-toast-title {
+	margin: 0;
+	font-size: 14px;
+	font-weight: 700;
+	letter-spacing: 0.01em;
+	color: #0f172a;
+}
+
+.session-timeout-toast-text {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.45;
+	color: #475569;
+	font-family: 'Inter', var(--sans);
+}
+
+.dept-readonly-toast {
+	position: fixed;
+	top: 20px;
+	left: 50%;
+	transform: translateX(-50%);
+	z-index: 4000;
+	width: min(440px, calc(100vw - 32px));
+	padding: 16px 18px;
+	border-radius: 18px;
+	background: rgba(255, 255, 255, 0.98);
+	border: 1px solid rgba(203, 213, 225, 0.95);
+	box-shadow: 0 18px 48px rgba(15, 23, 42, 0.22);
+	text-align: center;
+	font-family: 'Poppins', var(--heading);
+	color: #0f172a;
+	animation: dept-readonly-toast-enter 180ms ease-out;
+}
+
+.dept-readonly-toast h2 {
+	margin: 4px 0 6px;
+	font-size: 22px;
+	line-height: 1.2;
+}
+
+.dept-readonly-toast p {
+	margin: 0;
+	font-size: 14px;
+	line-height: 1.5;
+	color: #334155;
+}
+
+.dept-readonly-toast-eyebrow {
+	margin: 0;
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.16em;
+	text-transform: uppercase;
+	color: #b91c1c;
+}
+
+@keyframes dept-readonly-toast-enter {
+	from {
+		opacity: 0;
+		transform: translateX(-50%) translateY(-8px);
+	}
+	to {
+		opacity: 1;
+		transform: translateX(-50%) translateY(0);
+	}
+}
+
+
+@keyframes session-timeout-toast-enter {
+	from {
+		opacity: 0;
+		transform: translateY(-8px);
+	}
+
+	to {
+		opacity: 1;
+		transform: translateY(0);
+	}
+}
+
 .signin-forgot-desc {
 	font-size: 14px;
 	color: #6b7280;

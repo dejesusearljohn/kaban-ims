@@ -4,6 +4,7 @@ import { supabase } from '../../supabaseClient'
 interface Props {
   userId: string
   onSignOut: () => void
+  isReadOnly?: boolean
 }
 
 interface UserProfile {
@@ -32,7 +33,7 @@ interface EditForm {
   confirm_password: string
 }
 
-export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
+export default function DepartmentProfileSection({ userId, onSignOut, isReadOnly = false }: Props) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [showSignOut, setShowSignOut] = useState(false)
@@ -210,6 +211,7 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
                 className="dept-btn dept-btn-secondary"
                 style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}
                 onClick={startEdit}
+                disabled={isReadOnly}
               >
                 <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                   <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
@@ -270,27 +272,27 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
 
                   <div className="dept-form-group">
                     <label className="dept-form-label">First Name</label>
-                    <input className="dept-form-input" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} required />
+                    <input className="dept-form-input" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} required disabled={isReadOnly} />
                   </div>
                   <div className="dept-form-group">
                     <label className="dept-form-label">Last Name</label>
-                    <input className="dept-form-input" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} required />
+                    <input className="dept-form-input" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} required disabled={isReadOnly} />
                   </div>
                   <div className="dept-form-group">
                     <label className="dept-form-label">Position</label>
-                    <input className="dept-form-input" value={form.position} onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))} placeholder="e.g. Nurse, Responder" />
+                    <input className="dept-form-input" value={form.position} onChange={(e) => setForm((f) => ({ ...f, position: e.target.value }))} placeholder="e.g. Nurse, Responder" disabled={isReadOnly} />
                   </div>
                   <div className="dept-form-group">
                     <label className="dept-form-label">Contact Number</label>
-                    <input className="dept-form-input" value={form.contact_info} onChange={(e) => setForm((f) => ({ ...f, contact_info: e.target.value }))} placeholder="+63 9XX XXX XXXX" />
+                    <input className="dept-form-input" value={form.contact_info} onChange={(e) => setForm((f) => ({ ...f, contact_info: e.target.value }))} placeholder="+63 9XX XXX XXXX" disabled={isReadOnly} />
                   </div>
                   <div className="dept-form-group">
                     <label className="dept-form-label">Emergency Contact</label>
-                    <input className="dept-form-input" value={form.emergency_contact} onChange={(e) => setForm((f) => ({ ...f, emergency_contact: e.target.value }))} placeholder="Name / Number" />
+                    <input className="dept-form-input" value={form.emergency_contact} onChange={(e) => setForm((f) => ({ ...f, emergency_contact: e.target.value }))} placeholder="Name / Number" disabled={isReadOnly} />
                   </div>
                   <div className="dept-form-group">
                     <label className="dept-form-label">Recovery Email</label>
-                    <input className="dept-form-input" type="email" value={form.recovery_email} onChange={(e) => setForm((f) => ({ ...f, recovery_email: e.target.value }))} placeholder="your@personal.com" />
+                    <input className="dept-form-input" type="email" value={form.recovery_email} onChange={(e) => setForm((f) => ({ ...f, recovery_email: e.target.value }))} placeholder="your@personal.com" disabled={isReadOnly} />
                   </div>
                 </div>
               </div>
@@ -311,8 +313,9 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
                         onChange={(e) => setForm((f) => ({ ...f, new_password: e.target.value }))}
                         placeholder="Min. 6 characters"
                         autoComplete="new-password"
+                        disabled={isReadOnly}
                       />
-                      <button type="button" className="dept-pw-toggle" onClick={() => setShowNewPw((v) => !v)} aria-label="Toggle password visibility">
+                      <button type="button" className="dept-pw-toggle" onClick={() => setShowNewPw((v) => !v)} aria-label="Toggle password visibility" disabled={isReadOnly}>
                         {showNewPw ? <EyeOffIcon /> : <EyeIcon />}
                       </button>
                     </div>
@@ -327,8 +330,9 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
                         onChange={(e) => setForm((f) => ({ ...f, confirm_password: e.target.value }))}
                         placeholder="Repeat new password"
                         autoComplete="new-password"
+                        disabled={isReadOnly}
                       />
-                      <button type="button" className="dept-pw-toggle" onClick={() => setShowConfirmPw((v) => !v)} aria-label="Toggle password visibility">
+                      <button type="button" className="dept-pw-toggle" onClick={() => setShowConfirmPw((v) => !v)} aria-label="Toggle password visibility" disabled={isReadOnly}>
                         {showConfirmPw ? <EyeOffIcon /> : <EyeIcon />}
                       </button>
                     </div>
@@ -337,10 +341,10 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
               </div>
 
               <div style={{ display: 'flex', gap: 10, marginBottom: 14 }}>
-                <button type="button" className="dept-btn dept-btn-secondary" style={{ flex: 1 }} onClick={cancelEdit} disabled={saving}>
+                <button type="button" className="dept-btn dept-btn-secondary" style={{ flex: 1 }} onClick={cancelEdit} disabled={saving || isReadOnly}>
                   Cancel
                 </button>
-                <button type="submit" className="dept-btn dept-btn-primary" style={{ flex: 1 }} disabled={saving}>
+                <button type="submit" className="dept-btn dept-btn-primary" style={{ flex: 1 }} disabled={saving || isReadOnly}>
                   {saving ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>

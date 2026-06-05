@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import DepartmentDashboardSidebar from './DepartmentDashboardSidebar'
 import DepartmentBottomNav from './DepartmentBottomNav'
 import DepartmentHomeSection from './DepartmentHomeSection'
@@ -21,13 +21,37 @@ type DepartmentDashboardPageProps = {
   departmentCode: string
   userId: string
   departmentId: number | null
+  showReadOnlyNotice?: boolean
+  isReadOnly?: boolean
 }
 
-function DepartmentDashboardPage({ departmentName, departmentCode, userId, departmentId }: DepartmentDashboardPageProps) {
+function DepartmentDashboardPage({
+  departmentName,
+  departmentCode,
+  userId,
+  departmentId,
+  showReadOnlyNotice = false,
+  isReadOnly = false,
+}: DepartmentDashboardPageProps) {
   const [activeSection, setActiveSection] = useState<DepartmentDashboardSectionKey>('home')
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const [reportToOpenId, setReportToOpenId] = useState<number | null>(null)
+  const [isReadOnlyNoticeVisible, setIsReadOnlyNoticeVisible] = useState(showReadOnlyNotice)
   const isNebruStaff = departmentCode.trim().toUpperCase() === 'NEBRU'
+
+  useEffect(() => {
+    if (!showReadOnlyNotice) {
+      setIsReadOnlyNoticeVisible(false)
+      return
+    }
+
+    setIsReadOnlyNoticeVisible(true)
+    const timeoutId = window.setTimeout(() => {
+      setIsReadOnlyNoticeVisible(false)
+    }, 2800)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [showReadOnlyNotice])
 
   const navItems = useMemo(() => getDepartmentDashboardNavItems(departmentName, departmentCode), [departmentName, departmentCode])
 
@@ -49,12 +73,13 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
             departmentName={departmentName}
             departmentId={departmentId}
             onOpenReport={handleOpenReport}
+            isReadOnly={isReadOnly}
           />
         )
       case 'scanner':
-        return <DepartmentScannerSection userId={userId} departmentId={departmentId} />
+        return <DepartmentScannerSection userId={userId} departmentId={departmentId} isReadOnly={isReadOnly} />
       case 'requests':
-        return <DepartmentRequestsSection departmentId={departmentId} departmentName={departmentName} userId={userId} />
+        return <DepartmentRequestsSection departmentId={departmentId} departmentName={departmentName} userId={userId} isReadOnly={isReadOnly} />
       case 'reports':
         return (
           <DepartmentReportsSection
@@ -62,12 +87,13 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
             departmentId={departmentId}
             initialReportId={reportToOpenId}
             onInitialReportHandled={() => setReportToOpenId(null)}
+            isReadOnly={isReadOnly}
           />
         )
       case 'profile':
-        return <DepartmentProfileSection userId={userId} onSignOut={handleSignOut} />
+        return <DepartmentProfileSection userId={userId} onSignOut={handleSignOut} isReadOnly={isReadOnly} />
       case 'shift-turnover':
-        return <DepartmentShiftTurnoverSection userId={userId} departmentId={departmentId} />
+        return <DepartmentShiftTurnoverSection userId={userId} departmentId={departmentId} isReadOnly={isReadOnly} />
       default:
         return null
     }
@@ -75,6 +101,14 @@ function DepartmentDashboardPage({ departmentName, departmentCode, userId, depar
 
   return (
     <div className={`dept-app-shell ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+      {isReadOnlyNoticeVisible && isNebruStaff && (
+        <div className="dept-readonly-toast" role="alert" aria-live="polite">
+          <p className="dept-readonly-toast-eyebrow">NEBRU account locked</p>
+          <h2>Read-only notice</h2>
+          <p>This account can sign in normally. The notice will disappear shortly.</p>
+        </div>
+      )}
+
       {/* Desktop sidebar */}
       <DepartmentDashboardSidebar
         departmentName={departmentCode || departmentName}

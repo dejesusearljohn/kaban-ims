@@ -6,6 +6,7 @@ interface Props {
   departmentName: string
   departmentId: number | null
   onOpenReport: (reportId: number) => void
+  isReadOnly?: boolean
 }
 
 interface Stats {
@@ -35,7 +36,7 @@ type ShiftTurnoverNotificationRow = {
   is_approved_by_admin: boolean | null
 }
 
-export default function DepartmentHomeSection({ userId, departmentName, departmentId, onOpenReport }: Props) {
+export default function DepartmentHomeSection({ userId, departmentName, departmentId, onOpenReport, isReadOnly: _isReadOnly = false }: Props) {
   const [stats, setStats] = useState<Stats>({ totalItems: 0, pendingWmr: 0, lowStock: 0 })
   const [loading, setLoading] = useState(true)
   const [fullName, setFullName] = useState('')

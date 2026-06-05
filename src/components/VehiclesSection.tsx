@@ -617,7 +617,7 @@ function VehiclesSection({
               </div>
 
               <div className="inventory-field">
-                <label htmlFor="repair-admin-id">Issued To</label>
+                <label htmlFor="repair-admin-id">Requested by</label>
                 <select
                   id="repair-admin-id"
                   className="inventory-input"

@@ -4,6 +4,7 @@ import { supabase } from '../../supabaseClient'
 interface Props {
   userId: string
   departmentId: number | null
+  isReadOnly?: boolean
 }
 
 interface InventoryItem {
@@ -47,7 +48,7 @@ type TabKey = 'submit' | 'incoming'
 
 const formatDateTime = (value: string | null) => (value ? new Date(value).toLocaleString() : '--')
 
-export default function DepartmentShiftTurnoverSection({ userId, departmentId }: Props) {
+export default function DepartmentShiftTurnoverSection({ userId, departmentId, isReadOnly = false }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('submit')
 
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
@@ -385,7 +386,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
               </svg>
               <h2>Turnover Submitted</h2>
               <p>{submitSuccess}</p>
-              <button type="button" className="dept-btn dept-btn-primary" onClick={resetSubmissionState}>
+              <button type="button" className="dept-btn dept-btn-primary" onClick={resetSubmissionState} disabled={isReadOnly}>
                 Submit Another Turnover
               </button>
             </div>
@@ -433,7 +434,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                         id="incoming-staff-select"
                         value={incomingStaffId}
                         onChange={(event) => setIncomingStaffId(event.target.value)}
-                        disabled={submitting || staffList.length === 0}
+                        disabled={submitting || staffList.length === 0 || isReadOnly}
                       >
                         <option value="">Select incoming staff</option>
                         {staffList.map((staff) => (
@@ -485,6 +486,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                                 type="button"
                                 className={`dept-turnover-status-btn serviceable${item.condition === 'serviceable' ? ' active' : ''}`}
                                 onClick={() => setItemCondition(item.item_id, 'serviceable')}
+                                disabled={isReadOnly}
                               >
                                 Serviceable
                               </button>
@@ -492,6 +494,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                                 type="button"
                                 className={`dept-turnover-status-btn unserviceable${item.condition === 'unserviceable' ? ' active' : ''}`}
                                 onClick={() => setItemCondition(item.item_id, 'unserviceable')}
+                                disabled={isReadOnly}
                               >
                                 Unserviceable
                               </button>
@@ -507,6 +510,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                                 placeholder="Describe issue for WMR draft"
                                 value={item.remarks}
                                 onChange={(event) => setItemRemarks(item.item_id, event.target.value)}
+                                disabled={isReadOnly}
                               />
                             </div>
                           )}
@@ -530,7 +534,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                     <button
                       type="button"
                       className="dept-btn dept-btn-primary"
-                      disabled={submitting || !allConfirmed || !incomingStaffId || staffList.length === 0}
+                      disabled={submitting || !allConfirmed || !incomingStaffId || staffList.length === 0 || isReadOnly}
                       onClick={handleSubmit}
                     >
                       {submitting ? 'Submitting...' : 'Submit Shift Turnover'}
@@ -589,6 +593,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                             type="button"
                             className="dept-btn dept-btn-secondary"
                             onClick={() => loadCheckItems(request)}
+                            disabled={isReadOnly}
                           >
                             View Items
                           </button>
@@ -598,6 +603,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                           type="button"
                           className="dept-btn dept-btn-primary"
                           onClick={() => handleDecision(request.turnover_id, 'approved')}
+                          disabled={isReadOnly}
                         >
                           Accept
                         </button>
@@ -605,6 +611,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
                           type="button"
                           className="dept-btn dept-btn-danger"
                           onClick={() => handleDecision(request.turnover_id, 'disapproved')}
+                          disabled={isReadOnly}
                         >
                           Reject
                         </button>

@@ -153,6 +153,41 @@
   flex: 0 0 auto;
 }
 
+.vehicle-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 28px;
+}
+
+.vehicle-info-grid .wmr-modal-text {
+  margin: 0;
+}
+
+.vehicle-info-grid .wmr-modal-text input,
+.vehicle-info-grid .wmr-modal-text select,
+.vehicle-info-grid .wmr-modal-text textarea {
+  margin-top: 8px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.vehicle-info-grid-editing .wmr-modal-text {
+  min-height: 64px;
+}
+
+.vehicle-info-grid-editing .wmr-modal-text strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.vehicle-info-grid-editing .inventory-input {
+  box-sizing: border-box;
+}
+
+.vehicle-info-grid-editing .wmr-modal-text textarea.inventory-input {
+  min-height: 96px;
+}
+
 .shift-turnover-preview-backdrop {
   align-items: flex-start;
   overflow-y: auto;

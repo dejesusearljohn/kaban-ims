@@ -6,6 +6,7 @@ interface Props {
   departmentId: number | null
   initialReportId?: number | null
   onInitialReportHandled?: () => void
+  isReadOnly?: boolean
 }
 
 interface WmrReport {
@@ -39,7 +40,7 @@ const statusClass = (s: string | null) => {
   return 'dept-badge dept-badge-pending'
 }
 
-export default function DepartmentReportsSection({ userId, departmentId, initialReportId = null, onInitialReportHandled }: Props) {
+export default function DepartmentReportsSection({ userId, departmentId, initialReportId = null, onInitialReportHandled, isReadOnly = false }: Props) {
   const [reports, setReports] = useState<WmrReport[]>([])
   const [inventoryOptions, setInventoryOptions] = useState<InventoryOption[]>([])
   const [departmentOptions, setDepartmentOptions] = useState<DepartmentOption[]>([])
@@ -235,7 +236,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
           <p style={{ fontSize: 13, color: 'var(--dept-text-muted)', margin: 0 }}>Submit and track WMR reports.</p>
         </div>
         {!showForm && (
-          <button className="dept-btn dept-btn-primary" onClick={() => setShowForm(true)}>
+          <button className="dept-btn dept-btn-primary" onClick={() => setShowForm(true)} disabled={isReadOnly}>
             <svg viewBox="0 0 24 24" fill="none" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
@@ -261,6 +262,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
               className="dept-btn dept-btn-secondary"
               style={{ padding: '4px 10px', fontSize: 12 }}
               onClick={() => { setShowForm(false); setError('') }}
+              disabled={isReadOnly}
             >
               Cancel
             </button>
@@ -289,6 +291,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
                       quantity_reported: String(Math.min(Number(prev.quantity_reported) || 1, availableQuantity)),
                     }))
                   }}
+                  disabled={isReadOnly}
                 >
                   <option value="">— Select item —</option>
                   {inventoryOptions.map((i) => (
@@ -305,6 +308,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
                   value={form.quantity_reported}
                   onChange={(e) => setForm({ ...form, quantity_reported: e.target.value })}
                   required
+                  disabled={isReadOnly}
                 />
               </div>
               <div className="dept-form-group">
@@ -313,6 +317,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
                   value={form.location}
                   onChange={(e) => setForm({ ...form, location: e.target.value })}
                   required
+                  disabled={isReadOnly}
                 >
                   <option value="">— Select department —</option>
                   {departmentOptions.map((department) => (
@@ -327,6 +332,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
                   value={form.reason_damage}
                   onChange={(e) => setForm({ ...form, reason_damage: e.target.value })}
                   required
+                  disabled={isReadOnly}
                 />
               </div>
               <div className="dept-form-group">
@@ -335,9 +341,10 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
                   type="date"
                   value={form.date_reported}
                   onChange={(e) => setForm({ ...form, date_reported: e.target.value })}
+                  disabled={isReadOnly}
                 />
               </div>
-              <button className="dept-btn dept-btn-primary dept-btn-full" type="submit" disabled={submitting}>
+              <button className="dept-btn dept-btn-primary dept-btn-full" type="submit" disabled={submitting || isReadOnly}>
                 {submitting ? 'Submitting…' : 'Submit Report'}
               </button>
             </form>

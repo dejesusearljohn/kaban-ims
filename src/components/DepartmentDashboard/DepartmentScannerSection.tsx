@@ -13,6 +13,7 @@ declare global {
 interface Props {
   userId: string
   departmentId: number | null
+  isReadOnly?: boolean
 }
 
 interface ItemResult {
@@ -30,7 +31,7 @@ interface ItemResult {
   date_acquired: string
 }
 
-export default function DepartmentScannerSection({ userId, departmentId }: Props) {
+export default function DepartmentScannerSection({ userId, departmentId, isReadOnly = false }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const scanLoopRef = useRef<number | null>(null)
@@ -335,9 +336,9 @@ export default function DepartmentScannerSection({ userId, departmentId }: Props
             Camera is not available on this device.
           </div>
         ) : scanning ? (
-          <button className="dept-btn dept-btn-secondary dept-btn-full" onClick={stopCamera}>Stop Camera</button>
+          <button className="dept-btn dept-btn-secondary dept-btn-full" onClick={stopCamera} disabled={isReadOnly}>Stop Camera</button>
         ) : (
-          <button className="dept-btn dept-btn-primary dept-btn-full" onClick={() => void startCamera()}>
+          <button className="dept-btn dept-btn-primary dept-btn-full" onClick={() => void startCamera()} disabled={isReadOnly}>
             <svg viewBox="0 0 24 24" fill="none" strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round">
               <path d="M3 7V5a2 2 0 012-2h2M17 3h2a2 2 0 012 2v2M21 17v2a2 2 0 01-2 2h-2M7 21H5a2 2 0 01-2-2v-2" />
               <line x1="3" y1="12" x2="21" y2="12" />
@@ -382,14 +383,15 @@ export default function DepartmentScannerSection({ userId, departmentId }: Props
                 value={qtyInput}
                 onChange={(e) => setQtyInput(e.target.value)}
                 placeholder="Enter quantity"
+                disabled={isReadOnly}
               />
             </div>
 
             <div style={{ display: 'flex', gap: 10, marginTop: 12 }}>
-              <button className="dept-btn dept-btn-secondary" style={{ flex: 1 }} onClick={() => { resetFlow(); void startCamera() }}>
+              <button className="dept-btn dept-btn-secondary" style={{ flex: 1 }} onClick={() => { resetFlow(); void startCamera() }} disabled={isReadOnly}>
                 Cancel
               </button>
-              <button className="dept-btn dept-btn-primary" style={{ flex: 1 }} onClick={proceedToSummary}>
+              <button className="dept-btn dept-btn-primary" style={{ flex: 1 }} onClick={proceedToSummary} disabled={isReadOnly}>
                 Review Summary
               </button>
             </div>
@@ -410,7 +412,7 @@ export default function DepartmentScannerSection({ userId, departmentId }: Props
                 className="dept-btn dept-btn-secondary"
                 style={{ flex: 1 }}
                 onClick={() => setShowSummary(false)}
-                disabled={confirming}
+                disabled={confirming || isReadOnly}
               >
                 Back
               </button>
@@ -418,7 +420,7 @@ export default function DepartmentScannerSection({ userId, departmentId }: Props
                 className="dept-btn dept-btn-primary"
                 style={{ flex: 1 }}
                 onClick={() => void confirmRequisition()}
-                disabled={confirming}
+                disabled={confirming || isReadOnly}
               >
                 {confirming ? 'Confirming…' : 'Confirm'}
               </button>

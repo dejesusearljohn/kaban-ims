@@ -5,6 +5,7 @@ interface Props {
   departmentId: number | null
   departmentName: string
   userId: string
+  isReadOnly?: boolean
 }
 
 interface InventoryItem {
@@ -37,7 +38,7 @@ interface InventoryLog {
 
 type ViewMode = 'inventory' | 'logs'
 
-export default function DepartmentRequestsSection({ departmentId, departmentName, userId }: Props) {
+export default function DepartmentRequestsSection({ departmentId, departmentName, userId, isReadOnly: _isReadOnly = false }: Props) {
   const [view, setView] = useState<ViewMode>('inventory')
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
   const [logs, setLogs] = useState<InventoryLog[]>([])

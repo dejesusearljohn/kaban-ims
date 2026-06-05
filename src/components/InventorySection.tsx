@@ -226,21 +226,77 @@ function InventorySection({
 
       {inventoryError && <p className="dashboard-error">{inventoryError}</p>}
 
-      <section className="inventory-toolbar" aria-label="Inventory actions">
-        <button
-          type="button"
-          className={inventoryMode === 'list' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setInventoryMode('list')}
-        >
-          Manage Items
-        </button>
-        <button
-          type="button"
-          className={inventoryMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-          onClick={() => setInventoryMode('add')}
-        >
-          Add Item
-        </button>
+      <section className="section-toolbar-row" aria-label="Inventory actions">
+        <div className="inventory-toolbar">
+          <button
+            type="button"
+            className={inventoryMode === 'list' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setInventoryMode('list')}
+          >
+            Manage Items
+          </button>
+          <button
+            type="button"
+            className={inventoryMode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
+            onClick={() => setInventoryMode('add')}
+          >
+            Add Item
+          </button>
+        </div>
+
+        <div className="csv-menu" ref={csvMenuRef}>
+          <button
+            type="button"
+            className="csv-action-button"
+            onClick={() => setCsvMenuOpen((prev) => !prev)}
+            aria-haspopup="menu"
+            aria-expanded={csvMenuOpen}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+              <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            <span>Import/Export</span>
+          </button>
+          {csvMenuOpen && (
+            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  onExportCsv()
+                }}
+              >
+                Export CSV
+              </button>
+              <button
+                type="button"
+                className="csv-menu-item"
+                role="menuitem"
+                onClick={() => {
+                  setCsvMenuOpen(false)
+                  inventoryCsvInputRef.current?.click()
+                }}
+              >
+                Import CSV
+              </button>
+            </div>
+          )}
+          <input
+            ref={inventoryCsvInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) {
+                void onImportCsv(file)
+              }
+              e.currentTarget.value = ''
+            }}
+          />
+        </div>
       </section>
 
       {inventoryMode === 'list' && (
@@ -253,59 +309,6 @@ function InventorySection({
                 placeholder="Search by name or ID…"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-              />
-            </div>
-            <div className="csv-menu" ref={csvMenuRef}>
-              <button
-                type="button"
-                className="csv-action-button"
-                onClick={() => setCsvMenuOpen((prev) => !prev)}
-                aria-haspopup="menu"
-                aria-expanded={csvMenuOpen}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                  <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-                <span>Import/Export</span>
-              </button>
-              {csvMenuOpen && (
-                <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
-                  <button
-                    type="button"
-                    className="csv-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setCsvMenuOpen(false)
-                      onExportCsv()
-                    }}
-                  >
-                    Export CSV
-                  </button>
-                  <button
-                    type="button"
-                    className="csv-menu-item"
-                    role="menuitem"
-                    onClick={() => {
-                      setCsvMenuOpen(false)
-                      inventoryCsvInputRef.current?.click()
-                    }}
-                  >
-                    Import CSV
-                  </button>
-                </div>
-              )}
-              <input
-                ref={inventoryCsvInputRef}
-                type="file"
-                accept=".csv,text/csv"
-                style={{ display: 'none' }}
-                onChange={(e) => {
-                  const file = e.target.files?.[0]
-                  if (file) {
-                    void onImportCsv(file)
-                  }
-                  e.currentTarget.value = ''
-                }}
               />
             </div>
             <div className="inventory-filter-selects">
