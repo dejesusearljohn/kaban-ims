@@ -206,7 +206,7 @@ const STOCKPILE_STATUS_COLORS: Record<string, string> = {
   Expired: '#6b7280',
 }
 
-const DEFAULT_STAFF_INITIAL_PASSWORD = '123456'
+const DEFAULT_STAFF_INITIAL_PASSWORD = import.meta.env.VITE_DEFAULT_STAFF_PASSWORD as string || 'ChangeMe!2025'
 
 const parseFullName = (fullName: string) => {
   const normalizedName = fullName.trim().replace(/\s+/g, ' ')
@@ -3178,13 +3178,22 @@ function DashboardPage() {
       throw new Error('Secure hashing is not available in this environment.')
     }
 
+    const salt = window.crypto.getRandomValues(new Uint8Array(16))
     const encoded = new TextEncoder().encode(password)
-    const digest = await window.crypto.subtle.digest('SHA-256', encoded)
-    const hashHex = Array.from(new Uint8Array(digest))
+    const keyMaterial = await window.crypto.subtle.importKey('raw', encoded, 'PBKDF2', false, ['deriveBits'])
+    const derived = await window.crypto.subtle.deriveBits(
+      { name: 'PBKDF2', salt, iterations: 100_000, hash: 'SHA-256' },
+      keyMaterial,
+      256,
+    )
+    const hashHex = Array.from(new Uint8Array(derived))
+      .map((byte) => byte.toString(16).padStart(2, '0'))
+      .join('')
+    const saltHex = Array.from(salt)
       .map((byte) => byte.toString(16).padStart(2, '0'))
       .join('')
 
-    return `sha256:${hashHex}`
+    return `pbkdf2:sha256:100000:${saltHex}:${hashHex}`
   }
 
   const handleChangeSettingsPassword = async () => {
