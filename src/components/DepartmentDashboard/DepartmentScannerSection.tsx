@@ -250,7 +250,11 @@ export default function DepartmentScannerSection({ userId, departmentId }: Props
     let mounted = true
 
     const loadStaff = async () => {
-      const { data } = await supabase.from('users').select('full_name').eq('id', userId).maybeSingle()
+      const { data, error: staffError } = await supabase.from('users').select('full_name').eq('id', userId).maybeSingle()
+      if (staffError) {
+        if (mounted) setError('Failed to load staff info.')
+        return
+      }
       if (mounted && data?.full_name) setStaffName(data.full_name)
     }
 

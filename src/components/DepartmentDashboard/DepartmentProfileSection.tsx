@@ -55,24 +55,28 @@ export default function DepartmentProfileSection({ userId, onSignOut }: Props) {
     let mounted = true
     const load = async () => {
       try {
-        const { data } = await supabase
+        const { data, error: userError } = await supabase
           .from('users')
           .select('full_name, email, role, position, staff_id, contact_info, emergency_contact, recovery_email, qr_code, department_id')
           .eq('id', userId)
           .maybeSingle()
+        if (userError) throw userError
         if (!data || !mounted) return
         let dept_name: string | undefined
         let dept_code: string | undefined
         if (data.department_id) {
-          const { data: dept } = await supabase
+          const { data: dept, error: deptError } = await supabase
             .from('departments')
             .select('dept_name, dept_code')
             .eq('id', data.department_id)
             .maybeSingle()
+          if (deptError) throw deptError
           dept_name = dept?.dept_name ?? undefined
           dept_code = dept?.dept_code ?? undefined
         }
         if (mounted) setProfile({ ...data, department_name: dept_name, department_code: dept_code } as UserProfile)
+      } catch {
+        if (mounted) setEditError('Failed to load profile.')
       } finally {
         if (mounted) setLoading(false)
       }

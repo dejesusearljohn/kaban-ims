@@ -197,11 +197,17 @@ function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetCo
     // Look up the real recovery_email stored in the users table — that is
     // what is registered in Supabase Auth.
     const typedEmail = username.trim().toLowerCase()
-    const { data: lookupRow } = await supabase
+    const { data: lookupRow, error: lookupError } = await supabase
       .from('users')
       .select('recovery_email')
       .eq('email', typedEmail)
       .maybeSingle()
+
+    if (lookupError) {
+      setError('Unable to verify account. Please try again.')
+      setLoading(false)
+      return
+    }
 
     const authEmail = lookupRow?.recovery_email?.trim() || typedEmail
 
@@ -285,9 +291,15 @@ function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetCo
     }
 
     // Send the reset link to the real auth email (recovery_email)
-    await supabase.auth.resetPasswordForEmail(userRow.recovery_email.trim(), {
+    const { error: resetError } = await supabase.auth.resetPasswordForEmail(userRow.recovery_email.trim(), {
       redirectTo: window.location.origin,
     })
+
+    if (resetError) {
+      setForgotError(resetError.message)
+      setForgotLoading(false)
+      return
+    }
 
     const maskedRecovery = maskEmail(userRow.recovery_email)
     setForgotSuccess(`A password reset link has been sent to ${maskedRecovery}.`)

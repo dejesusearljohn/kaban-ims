@@ -303,7 +303,13 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId }:
         location: null as string | null,
         quantity_reported: 1,
       }))
-      await supabase.from('wmr_reports').insert(wmrRows)
+      const { error: wmrInsertError } = await supabase.from('wmr_reports').insert(wmrRows)
+      if (wmrInsertError) {
+        await supabase.from('daily_checks').delete().eq('check_id', checkData.check_id)
+        setSubmitError(`Failed to create WMR reports: ${wmrInsertError.message}`)
+        setSubmitting(false)
+        return
+      }
     }
 
     const { error: turnoverError } = await supabase.from('shift_turnovers').insert({
