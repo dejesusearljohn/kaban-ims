@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
+import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
@@ -76,7 +76,6 @@ type InventorySectionProps = {
   acquisitionModeOptions: string[]
   newItemTotalCost: number | null
   onExportCsv: () => void
-  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function InventorySection({
@@ -145,7 +144,6 @@ function InventorySection({
   acquisitionModeOptions,
   newItemTotalCost,
   onExportCsv,
-  onImportCsv,
 }: InventorySectionProps) {
   const inventoryPageSize = useResponsivePageSize(5)
   const selectedSource = newSource.trim().toLowerCase()
@@ -153,9 +151,6 @@ function InventorySection({
   const isDonated = selectedSource === 'donated'
   const isStockpileType = newItemType.trim().toLowerCase() === 'stockpile'
   const [inventoryPage, setInventoryPage] = useState(1)
-  const inventoryCsvInputRef = useRef<HTMLInputElement | null>(null)
-  const csvMenuRef = useRef<HTMLDivElement | null>(null)
-  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventoryItems.length / inventoryPageSize))
 
@@ -169,29 +164,6 @@ function InventorySection({
     }
   }, [inventoryPage, inventoryTotalPages])
 
-  useEffect(() => {
-    if (!csvMenuOpen) return
-
-    const onMouseDown = (event: MouseEvent) => {
-      if (!csvMenuRef.current) return
-      if (csvMenuRef.current.contains(event.target as Node)) return
-      setCsvMenuOpen(false)
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCsvMenuOpen(false)
-      }
-    }
-
-    window.addEventListener('mousedown', onMouseDown)
-    window.addEventListener('keydown', onKeyDown)
-
-    return () => {
-      window.removeEventListener('mousedown', onMouseDown)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [csvMenuOpen])
 
   const paginatedInventoryItems = useMemo(() => {
     const start = (inventoryPage - 1) * inventoryPageSize
@@ -244,58 +216,17 @@ function InventorySection({
           </button>
         </div>
 
-        <div className="csv-menu" ref={csvMenuRef}>
+        <div className="csv-menu">
           <button
             type="button"
             className="csv-action-button"
-            onClick={() => setCsvMenuOpen((prev) => !prev)}
-            aria-haspopup="menu"
-            aria-expanded={csvMenuOpen}
+            onClick={onExportCsv}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span>Import/Export</span>
+            <span>Export CSV</span>
           </button>
-          {csvMenuOpen && (
-            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
-              <button
-                type="button"
-                className="csv-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setCsvMenuOpen(false)
-                  onExportCsv()
-                }}
-              >
-                Export CSV
-              </button>
-              <button
-                type="button"
-                className="csv-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setCsvMenuOpen(false)
-                  inventoryCsvInputRef.current?.click()
-                }}
-              >
-                Import CSV
-              </button>
-            </div>
-          )}
-          <input
-            ref={inventoryCsvInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) {
-                void onImportCsv(file)
-              }
-              e.currentTarget.value = ''
-            }}
-          />
         </div>
       </section>
 

@@ -21,8 +21,9 @@ import StockpileSection from './StockpileSection'
 import WmrSection from './WmrSection'
 import VehiclesSection from './VehiclesSection'
 import ParSection, { type ParDraftItem } from './ParSection'
-import AccountabilityReportsSection from './AccountabilityReportsSection'
+
 import ShiftTurnoverRecordsSection from './ShiftTurnoverRecordsSection'
+import BorrowedItemsSection from './BorrowedItemsSection'
 import ReportsSection, { type ReportPeriod } from './ReportsSection'
 import type { SidebarSection } from './Sidebar'
 import '../styles/DashboardPage.css'
@@ -31,7 +32,8 @@ import '../styles/Wmr.css'
 import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
-import { downloadCsv, parseCsvFile } from '../utils/csv'
+import { downloadExcel, downloadVehicleLedgerExcel } from '../utils/excel'
+import { formatItemId } from '../utils/itemUtils'
 
 type SummaryMetrics = {
   totalItems: number
@@ -69,6 +71,7 @@ type StockpileReleaseLog = {
   itemName: string
   unit: string
   quantity: number
+  attachmentUrls: string[]
 }
 
 type StockpileReleaseDraftItem = {
@@ -137,31 +140,38 @@ const useAutoDismissMessage = (
 }
 
 const DEFAULT_ITEM_TYPES = [
-  'Office Equipment',
-  'Water Equipment',
-  'Fire Equipment',
-  'Medical Equipment',
-  'Electrical Equipment',
-  'Power Tools',
-  'Hand Tools',
-  'Furniture',
-  'Vehicle',
-  'Stockpile',
-  'Gadgets',
-  'Medicine',
-  'Perishables',
+  'ICT Equipment',
+  'Office Supplies/Equipment',
+  'Disaster/Emergency Equipment',
+  'Maintenance Tools',
+  'Electrical Items',
+  'Furniture/Fixtures',
+  'Cleaning Materials',
+  'Tools & Light Equipment',
+  'Equipment',
+  'Mechanical Equipment',
+  'Transportation Equipment',
 ]
+
+// Mapping of item types to their ID code prefixes
+const ITEM_TYPE_CODE_MAP: { [key: string]: string } = {
+  'ICT Equipment': 'ICT',
+  'Office Supplies/Equipment': 'OFC',
+  'Disaster/Emergency Equipment': 'EMG',
+  'Maintenance Tools': 'MNT',
+  'Electrical Items': 'ELE',
+  'Furniture/Fixtures': 'FUR',
+  'Cleaning Materials': 'CLN',
+  'Tools & Light Equipment': 'TLE',
+  'Equipment': 'EQP',
+  'Mechanical Equipment': 'MEQ',
+  'Transportation Equipment': 'TE',
+}
 
 const isLoanableParItem = (item: InventoryRow) => {
   const normalizedType = item.item_type.trim().toLowerCase()
-  const isEquipment = normalizedType.includes('equipment') && normalizedType !== 'office equipment'
-
-  return (
-    isEquipment ||
-    normalizedType === 'hand tools' ||
-    normalizedType === 'power tools' ||
-    normalizedType === 'gadgets'
-  )
+  const loanableTypes = ['ict equipment', 'office supplies/equipment', 'disaster/emergency equipment', 'maintenance tools', 'electrical items', 'tools & light equipment', 'equipment', 'mechanical equipment', 'transportation equipment']
+  return loanableTypes.includes(normalizedType)
 }
 
 const DEFAULT_UNITS_OF_MEASURE = [
@@ -180,22 +190,19 @@ const DEFAULT_UNITS_OF_MEASURE = [
   'Meter',
 ]
 
-const INVENTORY_IMPORT_DEFAULT_HEADERS = [
-  'item_name',
-  'item_type',
-  'department_id',
-  'department_name',
-  'department_code',
-  'quantity',
-  'unit_of_measure',
-  'unit_cost',
-  'date_acquired',
-  'expiration_date',
-  'acquisition_mode',
-  'status',
-  'condition',
-  'donor_identification',
-]
+// Helper function to generate property number based on item type
+const generatePropertyNumber = (itemType: string, existingItems: InventoryRow[]): string => {
+  const typeCode = ITEM_TYPE_CODE_MAP[itemType] || 'GEN'
+  
+  // Count how many items already have this type code
+  const itemsWithTypeCode = existingItems.filter((item) => {
+    const itemTypeCode = ITEM_TYPE_CODE_MAP[item.item_type] || 'GEN'
+    return itemTypeCode === typeCode
+  })
+  
+  const nextNumber = itemsWithTypeCode.length + 1
+  return `${typeCode}-${nextNumber.toString().padStart(3, '0')}`
+}
 
 const INVENTORY_PHOTO_BUCKET = 'inventory-photos'
 const TYPE_CHART_COLORS = ['#059669', '#0284c7', '#d97706', '#7c3aed', '#e11d48']
@@ -535,6 +542,13 @@ function DashboardPage() {
   const [editVehicleYearModel, setEditVehicleYearModel] = useState('')
   const [editVehicleCrNumber, setEditVehicleCrNumber] = useState('')
   const [editVehicleEngineNumber, setEditVehicleEngineNumber] = useState('')
+  const [editVehicleClassification, setEditVehicleClassification] = useState('')
+  const [editVehicleAccountCode, setEditVehicleAccountCode] = useState('')
+  const [editVehiclePropertyNumber, setEditVehiclePropertyNumber] = useState('')
+  const [editVehiclePlateNumber, setEditVehiclePlateNumber] = useState('')
+  const [editVehicleDescription, setEditVehicleDescription] = useState('')
+  const [editVehicleEstimatedUsefulLife, setEditVehicleEstimatedUsefulLife] = useState('')
+  const [editVehicleDepreciationRate, setEditVehicleDepreciationRate] = useState('')
   const [isEditingVehicleDetails, setIsEditingVehicleDetails] = useState(false)
   const [editVehicleSaving, setEditVehicleSaving] = useState(false)
   const [newRepairVehicleId, setNewRepairVehicleId] = useState('')
@@ -555,6 +569,7 @@ function DashboardPage() {
   const [stockpileReleaseItems, setStockpileReleaseItems] = useState<StockpileReleaseDraftItem[]>([
     { stockpileId: '', quantity: '' },
   ])
+  const [stockpileReleaseAttachmentFiles, setStockpileReleaseAttachmentFiles] = useState<File[]>([])
   const [stockpileReleaseIssuedToInput, setStockpileReleaseIssuedToInput] = useState('')
   const [stockpileReleaseReasonInput, setStockpileReleaseReasonInput] = useState('')
   const [releasingStockpile, setReleasingStockpile] = useState(false)
@@ -1159,13 +1174,7 @@ function DashboardPage() {
     const parsed = Number.parseInt(value.trim(), 10)
     return Number.isFinite(parsed) ? parsed : null
   }
-  const parseBooleanInput = (value: string | null | undefined, fallback = true) => {
-    if (!value) return fallback
-    const normalized = value.trim().toLowerCase()
-    if (['true', '1', 'yes', 'y', 'serviceable'].includes(normalized)) return true
-    if (['false', '0', 'no', 'n', 'unserviceable', 'needs repair'].includes(normalized)) return false
-    return fallback
-  }
+        // removed parseBooleanInput - no longer needed
   const parseDateLikeValue = (value: string | null | undefined) => {
     if (!value) return null
 
@@ -1300,6 +1309,13 @@ function DashboardPage() {
     setEditVehicleYearModel(vehicle.year_model != null ? String(vehicle.year_model) : '')
     setEditVehicleCrNumber(vehicle.cr_number ?? '')
     setEditVehicleEngineNumber(vehicle.engine_number ?? '')
+    setEditVehicleClassification((vehicle as any).classification ?? '')
+    setEditVehicleAccountCode((vehicle as any).account_code ?? '')
+    setEditVehiclePropertyNumber((vehicle as any).property_number ?? '')
+    setEditVehiclePlateNumber((vehicle as any).plate_number ?? '')
+    setEditVehicleDescription((vehicle as any).description ?? '')
+    setEditVehicleEstimatedUsefulLife((vehicle as any).estimated_useful_life_years != null ? String((vehicle as any).estimated_useful_life_years) : '')
+    setEditVehicleDepreciationRate((vehicle as any).depreciation_rate ?? '')
     setIsEditingVehicleDetails(false)
   }
 
@@ -1314,6 +1330,13 @@ function DashboardPage() {
     setEditVehicleYearModel('')
     setEditVehicleCrNumber('')
     setEditVehicleEngineNumber('')
+    setEditVehicleClassification('')
+    setEditVehicleAccountCode('')
+    setEditVehiclePropertyNumber('')
+    setEditVehiclePlateNumber('')
+    setEditVehicleDescription('')
+    setEditVehicleEstimatedUsefulLife('')
+    setEditVehicleDepreciationRate('')
     setIsEditingVehicleDetails(false)
   }
 
@@ -1662,12 +1685,80 @@ function DashboardPage() {
     return acc
   }, new Map<string, number>())
 
-  const stockpileStatusChartData = ['Available', 'Low Stock', 'Out of Stock', 'Expired']
+  const stockpileStatusItemsMap = stockpileItems.reduce((acc, item) => {
+    const quantity = Number(item.quantity_on_hand ?? 0)
+    const expiration = item.expiration_date ? new Date(item.expiration_date) : null
+    const isExpired = expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today
+
+    let status = 'Available'
+
+    if (quantity <= 0) {
+      status = 'Out of Stock'
+    } else if (isExpired) {
+      status = 'Expired'
+    } else if (quantity <= 10) {
+      status = 'Low Stock'
+    }
+
+    const itemName = item.item_name?.trim() || 'Unnamed Item'
+    const unit = item.unit_of_measure?.trim() || 'pcs'
+    const safeQuantity = Number.isFinite(quantity) ? quantity : 0
+    const currentItems = acc.get(status) ?? []
+    currentItems.push({ itemName, quantity: safeQuantity, unit })
+    acc.set(status, currentItems)
+    return acc
+  }, new Map<string, Array<{ itemName: string; quantity: number; unit: string }>>())
+
+  const stockpileStatusChartData = ['Low Stock', 'Out of Stock', 'Expired']
     .map((status) => ({
       name: status,
       count: stockpileStatusCountMap.get(status) ?? 0,
+      items: stockpileStatusItemsMap.get(status) ?? [],
     }))
     .filter((entry) => entry.count > 0)
+
+  const renderStockpileStatusTooltip = ({
+    active,
+    payload,
+  }: {
+    active?: boolean
+    payload?: ReadonlyArray<{
+      payload?: {
+        name?: string
+        items?: Array<{ itemName: string; quantity: number; unit: string }>
+      }
+    }>
+  }) => {
+    if (!active || !payload || payload.length === 0) return null
+
+    const dataPoint = payload[0]?.payload
+    const statusName = dataPoint?.name ?? 'Status'
+    const items = dataPoint?.items ?? []
+
+    if (items.length === 0) return null
+
+    return (
+      <div
+        style={{
+          background: '#ffffff',
+          border: '1px solid #d1d5db',
+          borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(15, 23, 42, 0.12)',
+          padding: 10,
+          minWidth: 220,
+        }}
+      >
+        <p style={{ margin: '0 0 8px', fontSize: 12, fontWeight: 700, color: '#111827' }}>{statusName}</p>
+        <div style={{ display: 'grid', gap: 4 }}>
+          {items.map((entry, index) => (
+            <p key={`${entry.itemName}-${index}`} style={{ margin: 0, fontSize: 12, color: '#1f2937' }}>
+              {entry.itemName}: {entry.quantity} {entry.unit}
+            </p>
+          ))}
+        </div>
+      </div>
+    )
+  }
 
   const purchasedCount = inventoryItems.filter(
     (item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'purchased',
@@ -2508,6 +2599,11 @@ function DashboardPage() {
             contact_snapshot: selectedUser?.contact_info ?? existingRecord.contact_snapshot ?? null,
             unit_snapshot: row.unit || existingRecord.unit_snapshot || null,
             description_snapshot: row.description || existingRecord.description_snapshot || selectedItem.item_name,
+            property_no_snapshot:
+              row.propertyId.trim() ||
+              existingRecord.property_no_snapshot ||
+              selectedItem.property_no ||
+              `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
             cost_snapshot: row.costSnapshot ?? existingRecord.cost_snapshot ?? null,
           })
           .eq('par_id', existingRecord.par_id)
@@ -2536,6 +2632,7 @@ function DashboardPage() {
               unit_snapshot: row.unit || selectedItem.unit_of_measure || null,
               description_snapshot: row.description || selectedItem.item_name,
               property_no_snapshot:
+                row.propertyId.trim() ||
                 selectedItem.property_no ||
                 `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
               date_acquired_snapshot: selectedItem.date_acquired,
@@ -2729,6 +2826,13 @@ function DashboardPage() {
         engine_number: editVehicleEngineNumber.trim() || null,
         is_serviceable: editVehicleServiceable === 'true',
         repair_history_log: nextHistoryLog,
+        classification: editVehicleClassification.trim() || null,
+        account_code: editVehicleAccountCode.trim() || null,
+        property_number: editVehiclePropertyNumber.trim() || null,
+        plate_number: editVehiclePlateNumber.trim() || null,
+        description: editVehicleDescription.trim() || null,
+        estimated_useful_life_years: editVehicleEstimatedUsefulLife.trim() ? Number(editVehicleEstimatedUsefulLife) : null,
+        depreciation_rate: editVehicleDepreciationRate.trim() ? Number(editVehicleDepreciationRate) : null,
       } as never)
       .eq('id', editingVehicle.id)
       .select('*')
@@ -3504,9 +3608,15 @@ function DashboardPage() {
     setStaffSuccess(null)
 
     const nextLockState = !(user.is_locked ?? false)
+    
+    // When unlocking, reset the timer by updating created_at to now
+    const updatePayload = nextLockState
+      ? { is_locked: nextLockState }
+      : { is_locked: nextLockState, created_at: new Date().toISOString() }
+
     const { data: updatedUser, error: updateError } = await supabase
       .from('users')
-      .update({ is_locked: nextLockState })
+      .update(updatePayload)
       .eq('id', user.id)
       .select('*')
       .single()
@@ -3722,6 +3832,10 @@ function DashboardPage() {
     const quantityNumber = newQuantity ? Number(newQuantity) : null
     const unitCostNumber = normalizedSource === 'purchased' ? Number(newUnitCost) : null
     const itemUid = crypto.randomUUID()
+    
+    // Generate property number based on item type
+    const propertyNo = generatePropertyNumber(newItemType, inventoryItems)
+    
     const { data: insertedItems, error: insertError } = await supabase.from('inventory').insert([
       {
         uid: itemUid,
@@ -3737,6 +3851,7 @@ function DashboardPage() {
         status: isStockpileType ? stockpileStatusToInsert : null,
         condition: newCondition || null,
         donor_identification: newDonorIdentification || null,
+        property_no: propertyNo,
         qr_code: itemUid,
       } as any,
     ]).select('*')
@@ -3837,8 +3952,8 @@ function DashboardPage() {
     setNewSource('')
     setNewPhotoFiles([])
 
-    // Auto-register vehicle in vehicles table
-    if (newItemType.trim().toLowerCase() === 'vehicle') {
+    // Auto-register vehicle in vehicles table for Transportation Equipment
+    if (newItemType.trim().toLowerCase() === 'transportation equipment') {
       await supabase.from('vehicles').insert([
         {
           vehicle_name: newItemName,
@@ -3896,12 +4011,14 @@ function DashboardPage() {
 
   const closeStockpileReleasePage = () => {
     if (releasingStockpile) return
+    setStockpileReleaseAttachmentFiles([])
     setStockpileMode('list')
   }
 
   const openStockpileReleasePage = () => {
     setStockpileError(null)
     setStockpileReleaseItems([{ stockpileId: '', quantity: '' }])
+    setStockpileReleaseAttachmentFiles([])
     setStockpileReleaseIssuedToInput('')
     setStockpileReleaseReasonInput('')
     setStockpileMode('release')
@@ -3999,6 +4116,31 @@ function DashboardPage() {
     setReleasingStockpile(true)
     setStockpileError(null)
 
+    const uploadedAttachmentUrls: string[] = []
+    for (const file of stockpileReleaseAttachmentFiles) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+      const filePath = `stockpile-releases/${Date.now()}-${crypto.randomUUID()}-${safeName}`
+      const { error: uploadError } = await supabase.storage
+        .from(INVENTORY_PHOTO_BUCKET)
+        .upload(filePath, file, {
+          contentType: file.type || 'application/octet-stream',
+          upsert: false,
+        })
+
+      if (uploadError) {
+        setStockpileError(
+          `Release photo upload failed: ${uploadError.message}. Check storage policies for '${INVENTORY_PHOTO_BUCKET}'.`,
+        )
+        setReleasingStockpile(false)
+        return
+      }
+
+      const { data: publicUrlData } = supabase.storage.from(INVENTORY_PHOTO_BUCKET).getPublicUrl(filePath)
+      if (publicUrlData?.publicUrl) {
+        uploadedAttachmentUrls.push(publicUrlData.publicUrl)
+      }
+    }
+
     const updates = Array.from(groupedReleases.entries()).map(async ([stockpileId, entry]) => {
       const updatedQty = Number(entry.row.quantity_on_hand ?? 0) - entry.quantity
       const result = await supabase.from('inventory').update({ quantity: updatedQty }).eq('item_id', stockpileId)
@@ -4030,6 +4172,7 @@ function DashboardPage() {
           item_name: entry.row.item_name,
           quantity: entry.quantity,
           unit_of_measure: entry.row.unit_of_measure,
+          attachment_urls: uploadedAttachmentUrls,
         })),
       },
     ])
@@ -4073,6 +4216,7 @@ function DashboardPage() {
     setReleasingStockpile(false)
     setStockpileMode('logs')
     setStockpileReleaseItems([{ stockpileId: '', quantity: '' }])
+    setStockpileReleaseAttachmentFiles([])
     setStockpileReleaseIssuedToInput('')
     setStockpileReleaseReasonInput('')
   }
@@ -4479,60 +4623,25 @@ function DashboardPage() {
 
   const handleExportInventoryCsv = () => {
     const rows = filteredInventoryItems.map((item) => ({
-      item_id: item.item_id,
-      item_name: item.item_name,
-      item_type: item.item_type,
-      department_id: item.department_id ?? '',
-      department_name: departments.find((dept) => dept.id === item.department_id)?.name ?? '',
-      quantity: item.quantity ?? '',
-      unit_of_measure: item.unit_of_measure ?? '',
-      unit_cost: item.unit_cost ?? '',
-      date_acquired: item.date_acquired ?? '',
-      expiration_date: item.expiration_date ?? '',
-      acquisition_mode: item.acquisition_mode ?? '',
-      status: getInventoryStatus(item) ?? '',
-      condition: item.condition ?? '',
-      donor_identification: (item as InventoryRow & { donor_identification?: string | null }).donor_identification ?? '',
+      'Item ID': formatItemId(item.item_id, item.item_type),
+      Item: item.item_name,
+      Category: item.item_type,
+      Location: departments.find((dept) => dept.id === item.department_id)?.name ?? '',
+      Quantity: item.quantity ?? '',
+      unit: item.unit_of_measure ?? '',
+      cost: item.unit_cost ?? '',
+      'Date Acquired': item.date_acquired ?? '',
+      'Expiration Date': item.expiration_date ?? '',
+      Acquisition: item.acquisition_mode ?? '',
+      Status: getInventoryStatus(item) ?? '',
+      Condition: item.condition ?? '',
+      Donor: (item as InventoryRow & { donor_identification?: string | null }).donor_identification ?? '',
     }))
 
-    downloadCsv(`inventory-${getCsvTimestamp()}.csv`, rows)
+    downloadExcel(`inventory-${getCsvTimestamp()}.xlsx`, rows)
   }
 
-  const handleImportInventoryCsv = async (file: File) => {
-    try {
-      const csvRows = await parseCsvFile(file)
-      if (csvRows.length === 0) {
-        setInventoryError('The selected CSV file has no data rows.')
-        return
-      }
 
-      const detectedHeaders = Array.from(
-        csvRows.reduce((headerSet, row) => {
-          Object.keys(row).forEach((key) => headerSet.add(key))
-          return headerSet
-        }, new Set<string>()),
-      )
-
-      const orderedHeaders = [
-        ...INVENTORY_IMPORT_DEFAULT_HEADERS.filter((header) => detectedHeaders.includes(header)),
-        ...detectedHeaders.filter((header) => !INVENTORY_IMPORT_DEFAULT_HEADERS.includes(header)),
-      ]
-
-      const finalHeaders = orderedHeaders.length > 0 ? orderedHeaders : INVENTORY_IMPORT_DEFAULT_HEADERS
-      const normalizedRows = csvRows.map((row) =>
-        finalHeaders.reduce<Record<string, string>>((acc, header) => {
-          acc[header] = row[header] ?? ''
-          return acc
-        }, {}),
-      )
-
-      setInventoryImportHeaders(finalHeaders)
-      setInventoryImportRows(normalizedRows)
-      setInventoryImportError(null)
-    } catch (error) {
-      setInventoryError(error instanceof Error ? error.message : 'Failed to import inventory CSV.')
-    }
-  }
 
   const closeInventoryImportModal = () => {
     if (inventoryImportSaving) return
@@ -4647,331 +4756,156 @@ function DashboardPage() {
 
   const handleExportStockpileCsv = () => {
     const rows = filteredStockpileItems.map((item) => ({
-      stockpile_id: item.stockpile_id,
-      item_name: item.item_name ?? '',
-      category: item.category ?? '',
-      quantity_on_hand: item.quantity_on_hand ?? '',
-      unit_of_measure: item.unit_of_measure ?? '',
-      packed_date: item.packed_date ?? '',
-      expiration_date: item.expiration_date ?? '',
-      status: item.status ?? '',
-      department_name: 'Stockpile Room',
+      Item: item.item_name ?? '',
+      Acquisitions: item.category ?? '',
+      'Available Qty': item.quantity_on_hand ?? '',
+      Unit: item.unit_of_measure ?? '',
+      'Date Packed': item.packed_date ?? '',
+      'Expiration Date': item.expiration_date ?? '',
     }))
 
-    downloadCsv(`stockpile-${getCsvTimestamp()}.csv`, rows)
+    downloadExcel(`stockpile-${getCsvTimestamp()}.xlsx`, rows)
   }
 
-  const handleImportStockpileCsv = async (file: File) => {
-    try {
-      const csvRows = await parseCsvFile(file)
-      if (csvRows.length === 0) {
-        setStockpileError('The selected CSV file has no data rows.')
-        return
-      }
 
-      const stockpileRoomDepartmentId = departments.find((dept) => dept.name.trim().toLowerCase() === 'stockpile room')?.id ?? null
-      if (stockpileRoomDepartmentId == null) {
-        setStockpileError('Stockpile Room department is missing. Create it first before importing stockpile CSV.')
-        return
-      }
-
-      const payload: Array<Record<string, unknown>> = []
-      let skippedRows = 0
-
-      for (const row of csvRows) {
-        const itemName = (row.item_name ?? '').trim()
-        if (!itemName) {
-          skippedRows += 1
-          continue
-        }
-
-        const expirationDate = (row.expiration_date ?? '').trim() || null
-        const expirationValue = parseDateLikeValue(expirationDate)
-        const isExpired = expirationValue != null && expirationValue < new Date()
-        const uid = crypto.randomUUID()
-
-        payload.push({
-          uid,
-          qr_code: uid,
-          item_name: itemName,
-          item_type: 'Stockpile',
-          department_id: stockpileRoomDepartmentId,
-          quantity: parseNumericInput(row.quantity_on_hand ?? row.quantity ?? '') ?? 0,
-          unit_of_measure: (row.unit_of_measure ?? '').trim() || null,
-          unit_cost: parseNumericInput(row.unit_cost ?? ''),
-          date_acquired: (row.packed_date ?? row.date_acquired ?? '').trim() || new Date().toISOString().slice(0, 10),
-          expiration_date: expirationDate,
-          acquisition_mode: (row.category ?? row.acquisition_mode ?? '').trim() || null,
-          status: isExpired ? 'Expired' : null,
-          condition: (row.condition ?? '').trim() || null,
-          donor_identification: (row.donor_identification ?? '').trim() || null,
-        })
-      }
-
-      if (payload.length === 0) {
-        setStockpileError('No valid stockpile rows were found in CSV.')
-        return
-      }
-
-      const { error: insertError } = await supabase.from('inventory').insert(payload as never)
-      if (insertError) {
-        setStockpileError(insertError.message)
-        return
-      }
-
-      setRealtimeTick((tick) => tick + 1)
-      window.alert(`Imported ${payload.length} stockpile row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
-    } catch (error) {
-      setStockpileError(error instanceof Error ? error.message : 'Failed to import stockpile CSV.')
-    }
-  }
 
   const handleExportWmrCsv = () => {
     const rows = [
       ...filteredWasteItems.map((item) => {
         const report = wmrReports.find((entry) => entry.item_id === item.item_id)
         return {
-          report_id: report?.report_id ?? '',
-          item_id: item.item_id,
-          item_name: item.item_name,
-          type: item.item_type,
-          quantity_reported: report?.quantity_reported ?? '',
-          reason_damage: report?.reason_damage ?? '',
-          status: report?.status ?? '',
-          location: report?.location ?? departments.find((dept) => dept.id === item.department_id)?.name ?? '',
-          admin_remarks: report?.admin_remarks ?? '',
-          date_reported: report?.date_reported ?? item.created_at ?? item.date_acquired ?? '',
+          'Report ID': report?.report_id ?? '',
+          Item: item.item_name,
+          Category: item.item_type,
+          Quantity: report?.quantity_reported ?? '',
+          Reason: report?.reason_damage ?? '',
+          Status: report?.status ?? '',
+          Location: report?.location ?? departments.find((dept) => dept.id === item.department_id)?.name ?? '',
+          Remarks: report?.admin_remarks ?? '',
+          'Date Reported': report?.date_reported ?? item.created_at ?? item.date_acquired ?? '',
         }
       }),
       ...filteredStaffWmrReports.map((report) => {
         const linkedItem = report.item_id ? inventoryItems.find((item) => item.item_id === report.item_id) : null
         return {
-          report_id: report.report_id,
-          item_id: report.item_id ?? '',
-          item_name: linkedItem?.item_name ?? '',
-          type: linkedItem?.item_type ?? 'Staff Report',
-          quantity_reported: report.quantity_reported ?? '',
-          reason_damage: report.reason_damage ?? '',
-          status: report.status ?? '',
-          location: report.location ?? '',
-          admin_remarks: report.admin_remarks ?? '',
-          date_reported: report.date_reported ?? '',
+          'Report ID': report.report_id,
+          Item: linkedItem?.item_name ?? '',
+          Category: linkedItem?.item_type ?? 'Staff Report',
+          Quantity: report.quantity_reported ?? '',
+          Reason: report.reason_damage ?? '',
+          Status: report.status ?? '',
+          Location: report.location ?? '',
+          Remarks: report.admin_remarks ?? '',
+          'Date Reported': report.date_reported ?? '',
         }
       }),
       ...filteredVehicleWmrReports.map((report) => ({
-        report_id: report.report_id,
-        item_id: '',
-        item_name: report.location?.replace('Vehicle Registry - ', '') ?? 'Vehicle',
-        type: 'Vehicle',
-        quantity_reported: report.quantity_reported ?? '',
-        reason_damage: report.reason_damage ?? '',
-        status: report.status ?? '',
-        location: report.location ?? '',
-        admin_remarks: report.admin_remarks ?? '',
-        date_reported: report.date_reported ?? '',
+        'Report ID': report.report_id,
+        Item: report.location?.replace('Vehicle Registry - ', '') ?? 'Vehicle',
+        Category: 'Vehicle',
+        Quantity: report.quantity_reported ?? '',
+        Reason: report.reason_damage ?? '',
+        Status: report.status ?? '',
+        Location: report.location ?? '',
+        Remarks: report.admin_remarks ?? '',
+        'Date Reported': report.date_reported ?? '',
       })),
     ]
 
-    downloadCsv(`wmr-${getCsvTimestamp()}.csv`, rows)
+    downloadExcel(`wmr-${getCsvTimestamp()}.xlsx`, rows)
   }
 
-  const handleImportWmrCsv = async (file: File) => {
-    try {
-      const csvRows = await parseCsvFile(file)
-      if (csvRows.length === 0) {
-        setWmrError('The selected CSV file has no data rows.')
-        return
-      }
 
-      const payload: Array<Record<string, unknown>> = []
-      let skippedRows = 0
-
-      for (const row of csvRows) {
-        const itemId = parseIntegerInput(row.item_id)
-        const reason = (row.reason_damage ?? '').trim() || null
-        const status = (row.status ?? '').trim() || 'Pending'
-        const dateReported = (row.date_reported ?? '').trim() || new Date().toISOString().slice(0, 10)
-
-        if (!reason && itemId == null) {
-          skippedRows += 1
-          continue
-        }
-
-        payload.push({
-          item_id: itemId,
-          quantity_reported: parseIntegerInput(row.quantity_reported) ?? 1,
-          reason_damage: reason,
-          status,
-          location: (row.location ?? '').trim() || null,
-          admin_remarks: (row.admin_remarks ?? '').trim() || null,
-          date_reported: dateReported,
-        })
-      }
-
-      if (payload.length === 0) {
-        setWmrError('No valid WMR rows were found in CSV.')
-        return
-      }
-
-      const { error: insertError } = await supabase.from('wmr_reports').insert(payload)
-      if (insertError) {
-        setWmrError(insertError.message)
-        return
-      }
-
-      setRealtimeTick((tick) => tick + 1)
-      window.alert(`Imported ${payload.length} WMR row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
-    } catch (error) {
-      setWmrError(error instanceof Error ? error.message : 'Failed to import WMR CSV.')
-    }
-  }
 
   const handleExportVehiclesCsv = () => {
-    const rows = activeVehicles.map((vehicle) => ({
-      id: vehicle.id,
-      vehicle_name: vehicle.vehicle_name ?? '',
-      make_model: vehicle.make_model ?? '',
-      color: vehicle.color ?? '',
-      year_model: vehicle.year_model ?? '',
-      cr_number: vehicle.cr_number ?? '',
-      engine_number: vehicle.engine_number ?? '',
-      is_serviceable: vehicle.is_serviceable ?? true,
-      repair_history_log: vehicle.repair_history_log ?? '',
-    }))
-
-    downloadCsv(`vehicles-${getCsvTimestamp()}.csv`, rows)
-  }
-
-  const handleImportVehiclesCsv = async (file: File) => {
-    try {
-      const csvRows = await parseCsvFile(file)
-      if (csvRows.length === 0) {
-        setVehicleError('The selected CSV file has no data rows.')
-        return
+    const sheets = activeVehicles.map((vehicle) => {
+      const vehicleAny = vehicle as VehicleRow & {
+        classification?: string | null
+        account_code?: string | null
+        property_number?: string | null
+        plate_number?: string | null
+        description?: string | null
+        estimated_useful_life_years?: number | null
+        depreciation_rate?: number | null
       }
 
-      const payload: Array<Record<string, unknown>> = []
-      let skippedRows = 0
-
-      for (const row of csvRows) {
-        const vehicleName = (row.vehicle_name ?? '').trim()
-        const makeModel = (row.make_model ?? '').trim()
-
-        if (!vehicleName && !makeModel) {
-          skippedRows += 1
-          continue
-        }
-
-        payload.push({
-          vehicle_name: vehicleName || makeModel,
-          make_model: makeModel || null,
-          color: (row.color ?? '').trim() || null,
-          year_model: parseIntegerInput(row.year_model),
-          cr_number: (row.cr_number ?? '').trim() || null,
-          engine_number: (row.engine_number ?? '').trim() || null,
-          is_serviceable: parseBooleanInput(row.is_serviceable, true),
-          repair_history_log: (row.repair_history_log ?? '').trim() || null,
+      const repairsForVehicle = vehicleRepairs
+        .filter((repair) => repair.vehicle_id === vehicle.id)
+        .sort((a, b) => {
+          const aDate = a.date_repaired ?? ''
+          const bDate = b.date_repaired ?? ''
+          return aDate.localeCompare(bDate)
         })
-      }
 
-      if (payload.length === 0) {
-        setVehicleError('No valid vehicle rows were found in CSV.')
-        return
-      }
+      const repairRows = repairsForVehicle.map((repair) => ({
+        dateRepaired: repair.date_repaired ?? '',
+        jobOrderNo: repair.job_order_number ?? '',
+        serviceCenter: repair.service_center ?? '',
+        remarks: getRepairDescription(repair.repair_id, vehicle.repair_history_log),
+        repairCost: repair.amount ?? '',
+      }))
 
-      const { error: insertError } = await supabase.from('vehicles').insert(payload as never)
-      if (insertError) {
-        setVehicleError(insertError.message)
-        return
+      return {
+        sheetName: vehicle.vehicle_name?.trim() || `Vehicle-${vehicle.id}`,
+        propertyEquipment: vehicle.vehicle_name?.trim() || `Vehicle ${vehicle.id}`,
+        classification: vehicleAny.classification?.trim() || 'Transportation Equipment',
+        accountCode: vehicleAny.account_code?.trim() || '1-07-06-010',
+        propertyNumber: vehicleAny.property_number?.trim() || `VEH-${String(vehicle.id).padStart(3, '0')}`,
+        plateNumber: vehicleAny.plate_number?.trim() || vehicle.cr_number?.trim() || '—',
+        usefulLife:
+          vehicleAny.estimated_useful_life_years != null
+            ? `${vehicleAny.estimated_useful_life_years} years`
+            : '7 years',
+        description:
+          vehicleAny.description?.trim() ||
+          [vehicle.make_model ?? '', vehicle.color ?? ''].filter((value) => value.trim().length > 0).join(' / ') ||
+          'Vehicle asset',
+        brandModel: vehicle.make_model?.trim() || '—',
+        depreciationRate:
+          vehicleAny.depreciation_rate != null
+            ? `${vehicleAny.depreciation_rate}%`
+            : '14.29%',
+        rows: repairRows,
       }
+    })
 
-      setRealtimeTick((tick) => tick + 1)
-      window.alert(`Imported ${payload.length} vehicle row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
-    } catch (error) {
-      setVehicleError(error instanceof Error ? error.message : 'Failed to import vehicles CSV.')
-    }
+    downloadVehicleLedgerExcel(`vehicles-ledger-${getCsvTimestamp()}.xlsx`, sheets)
   }
+
+
 
   const handleExportParCsv = () => {
-    const activeParRecordsForExport = parRecords.filter((record) => !isArchivedRow(record))
-    const rows = activeParRecordsForExport.map((record) => ({
-      par_id: record.par_id,
-      issued_to_id: record.issued_to_id ?? '',
-      issued_to_name: parUsers.find((user) => user.id === record.issued_to_id)?.full_name ?? '',
-      item_id: record.item_id ?? '',
-      item_name: inventoryItems.find((item) => item.item_id === record.item_id)?.item_name ?? '',
-      quantity_issued: record.quantity_issued ?? '',
-      issue_date: record.issue_date ?? '',
-      unit_snapshot: record.unit_snapshot ?? '',
-      description_snapshot: record.description_snapshot ?? '',
-      property_no_snapshot: record.property_no_snapshot ?? '',
-      date_acquired_snapshot: record.date_acquired_snapshot ?? '',
-      cost_snapshot: record.cost_snapshot ?? '',
-      contact_snapshot: record.contact_snapshot ?? '',
-    }))
+    const groupedRows = Array.from(groupedParByStaff.entries())
+      .map(([staffId, records]) => ({
+        staffId,
+        issuedTo: parUsers.find((user) => user.id === staffId)?.full_name ?? '',
+        parNo: (() => {
+          const staff = parUsers.find((user) => user.id === staffId)
+          return staff?.staff_id ? `PAR-${staff.staff_id}` : `PAR-${staffId.slice(0, 8)}`
+        })(),
+        records: records.slice().sort((a, b) => b.par_id - a.par_id),
+        latestParId: Math.max(...records.map((record) => record.par_id)),
+      }))
+      .sort((a, b) => b.latestParId - a.latestParId)
 
-    downloadCsv(`par-records-${getCsvTimestamp()}.csv`, rows)
+    const rows = groupedRows.flatMap((group) =>
+      group.records.map((record, index) => ({
+        'PAR No.': index === 0 ? group.parNo : '',
+        'Issued To': index === 0 ? group.issuedTo : '',
+        Quantity: record.quantity_issued ?? '',
+        'Issue Date': record.issue_date ?? '',
+        Unit: record.unit_snapshot ?? '',
+        Description: record.description_snapshot ?? '',
+        'Property ID': record.property_no_snapshot ?? '',
+        'Date Acquired': record.date_acquired_snapshot ?? '',
+        Cost: record.cost_snapshot ?? '',
+      })),
+    )
+
+    downloadExcel(`par-records-${getCsvTimestamp()}.xlsx`, rows)
   }
 
-  const handleImportParCsv = async (file: File) => {
-    try {
-      const csvRows = await parseCsvFile(file)
-      if (csvRows.length === 0) {
-        setParError('The selected CSV file has no data rows.')
-        return
-      }
 
-      const validUserIds = new Set(parUsers.map((user) => user.id))
-      const validItemIds = new Set(inventoryItems.map((item) => item.item_id))
-      const payload: Array<Record<string, unknown>> = []
-      let skippedRows = 0
-
-      for (const row of csvRows) {
-        const issuedToId = (row.issued_to_id ?? '').trim()
-        const itemId = parseIntegerInput(row.item_id)
-        const quantityIssued = parseIntegerInput(row.quantity_issued) ?? 0
-
-        if (!issuedToId || itemId == null || quantityIssued <= 0) {
-          skippedRows += 1
-          continue
-        }
-
-        if (!validUserIds.has(issuedToId) || !validItemIds.has(itemId)) {
-          skippedRows += 1
-          continue
-        }
-
-        payload.push({
-          issued_to_id: issuedToId,
-          item_id: itemId,
-          quantity_issued: quantityIssued,
-          issue_date: (row.issue_date ?? '').trim() || null,
-          unit_snapshot: (row.unit_snapshot ?? '').trim() || null,
-          description_snapshot: (row.description_snapshot ?? '').trim() || null,
-          property_no_snapshot: (row.property_no_snapshot ?? '').trim() || null,
-          date_acquired_snapshot: (row.date_acquired_snapshot ?? '').trim() || null,
-          cost_snapshot: parseNumericInput(row.cost_snapshot ?? ''),
-          contact_snapshot: (row.contact_snapshot ?? '').trim() || null,
-        })
-      }
-
-      if (payload.length === 0) {
-        setParError('No valid PAR rows were found in CSV.')
-        return
-      }
-
-      const { error: insertError } = await supabase.from('par_records').insert(payload as never)
-      if (insertError) {
-        setParError(insertError.message)
-        return
-      }
-
-      setRealtimeTick((tick) => tick + 1)
-      window.alert(`Imported ${payload.length} PAR row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
-    } catch (error) {
-      setParError(error instanceof Error ? error.message : 'Failed to import PAR CSV.')
-    }
-  }
 
   const filteredStockpileItems = stockpileItems.filter((item) => {
     const explicitStatus = item.status?.trim() || null
@@ -5011,6 +4945,9 @@ function DashboardPage() {
       const quantity = Number(row.quantity)
       const itemName = typeof row.item_name === 'string' ? row.item_name : ''
       const unit = typeof row.unit_of_measure === 'string' ? row.unit_of_measure : ''
+      const attachmentUrls = Array.isArray(row.attachment_urls)
+        ? row.attachment_urls.filter((url): url is string => typeof url === 'string' && url.length > 0)
+        : []
 
       if (Number.isNaN(quantity)) return []
 
@@ -5020,6 +4957,7 @@ function DashboardPage() {
           itemName,
           unit,
           quantity,
+          attachmentUrls,
         },
       ]
     })
@@ -5496,7 +5434,7 @@ function DashboardPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                     <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
                     <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                    <Tooltip />
+                    <Tooltip content={renderStockpileStatusTooltip} />
                     <Bar dataKey="count" name="Stockpile Items" radius={[6, 6, 0, 0]}>
                       {stockpileStatusChartData.map((entry) => (
                         <Cell
@@ -5543,37 +5481,6 @@ function DashboardPage() {
           </article>
           </section>
 
-          <section className="dashboard-row" aria-label="Department overview">
-          <article className="panel panel-wide">
-            <header className="panel-header">
-              <h3>Department Overview</h3>
-            </header>
-            <div className="panel-body department-grid">
-              {visibleDepartments.map((dept) => (
-                <div key={dept.id} className="dept-card">
-                  <h4>{dept.name}</h4>
-                  <div className="dept-metrics">
-                    <div className="dept-metric">
-                      <span className="dept-metric-label">Total Items</span>
-                      <span className="dept-metric-value">{formatValue(dept.totalItems)}</span>
-                    </div>
-                    <div className="dept-metric dept-metric-serviceable">
-                      <span className="dept-metric-label">Serviceable</span>
-                      <span className="dept-metric-value">{formatValue(dept.serviceable)}</span>
-                    </div>
-                    <div className="dept-metric dept-metric-unserviceable">
-                      <span className="dept-metric-label">Unserviceable</span>
-                      <span className="dept-metric-value">{formatValue(dept.unserviceable)}</span>
-                    </div>
-                  </div>
-                  <p className="dept-footer">
-                    {formatValue(dept.staffCount)} staff members • {formatValue(dept.onlineCount)} online
-                  </p>
-                </div>
-              ))}
-            </div>
-          </article>
-            </section>
           </>
         )}
 
@@ -5644,7 +5551,6 @@ function DashboardPage() {
             acquisitionModeOptions={acquisitionModeOptions}
             newItemTotalCost={newItemTotalCost}
             onExportCsv={handleExportInventoryCsv}
-            onImportCsv={handleImportInventoryCsv}
           />
         )}
 
@@ -6738,6 +6644,8 @@ function DashboardPage() {
             filteredExpiredStockpileItems={filteredExpiredStockpileItems}
             stockpileReleaseLogs={parsedStockpileReleaseLogs}
               stockpileReleaseItems={stockpileReleaseItems}
+              stockpileReleaseAttachmentFiles={stockpileReleaseAttachmentFiles}
+              setStockpileReleaseAttachmentFiles={setStockpileReleaseAttachmentFiles}
               setStockpileReleaseIssuedToInput={setStockpileReleaseIssuedToInput}
               stockpileReleaseIssuedToInput={stockpileReleaseIssuedToInput}
               setStockpileReleaseReasonInput={setStockpileReleaseReasonInput}
@@ -6752,7 +6660,6 @@ function DashboardPage() {
             handlePrintReleaseLogs={handlePrintStockpileReleaseLogs}
             formatDisplayDate={formatDisplayDate}
             onExportCsv={handleExportStockpileCsv}
-            onImportCsv={handleImportStockpileCsv}
           />
         )}
 
@@ -6803,7 +6710,6 @@ function DashboardPage() {
               openArchiveVehicleWmrConfirmation(report)
             }}
             onExportCsv={handleExportWmrCsv}
-            onImportCsv={handleImportWmrCsv}
           />
         )}
 
@@ -6856,7 +6762,6 @@ function DashboardPage() {
               openArchiveVehicleConfirmation(vehicle)
             }}
             onExportCsv={handleExportVehiclesCsv}
-            onImportCsv={handleImportVehiclesCsv}
           />
         )}
 
@@ -6900,16 +6805,17 @@ function DashboardPage() {
               openArchiveParSummaryConfirmation(staffId)
             }}
             onExportCsv={handleExportParCsv}
-            onImportCsv={handleImportParCsv}
           />
         )}
 
-        {activeSection === 'accountability' && (
-          <AccountabilityReportsSection />
-        )}
+
 
         {activeSection === 'shift-turnover-records' && (
           <ShiftTurnoverRecordsSection />
+        )}
+
+        {activeSection === 'borrowed-items' && (
+          <BorrowedItemsSection />
         )}
 
         {activeSection === 'reports' && (
@@ -6976,7 +6882,7 @@ function DashboardPage() {
                     <th scope="col">QTY</th>
                     <th scope="col">Unit</th>
                     <th scope="col">Description</th>
-                    <th scope="col">Property No.</th>
+                    <th scope="col">Property ID</th>
                     <th scope="col" className="inventory-date-column">Date Acquired</th>
                     <th scope="col">Unit Cost</th>
                   </tr>
@@ -7087,7 +6993,7 @@ function DashboardPage() {
           aria-modal="true"
           aria-labelledby="vehicle-logs-modal-title"
         >
-          <div className="par-modal">
+          <div className="par-modal vehicle-modal">
             <h2 id="vehicle-logs-modal-title" className="wmr-modal-title">
               Vehicle Repair Logs
             </h2>
@@ -7170,162 +7076,308 @@ function DashboardPage() {
       {/* [MODAL] Vehicle status edit */}
       {editingVehicle && (
         <div
-          className="par-modal-backdrop"
+          className="dashboard-drilldown-modal-backdrop"
           role="dialog"
           aria-modal="true"
           aria-labelledby="vehicle-edit-modal-title"
+          onClick={closeVehicleEditModal}
         >
-          <div className="par-modal">
-            <h2 id="vehicle-edit-modal-title" className="wmr-modal-title">
-              Vehicle Information
-            </h2>
+          <div
+            className="dashboard-drilldown-modal vehicle-edit-modal-shell"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="vehicle-edit-modal-title">Vehicle Information</h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={closeVehicleEditModal}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </header>
 
-            <div className={`vehicle-info-grid ${isEditingVehicleDetails ? 'vehicle-info-grid-editing' : ''}`}>
-              <p className="wmr-modal-text">
-                <strong>Vehicle ID:</strong> {`VEH-${editingVehicle.id.toString().padStart(3, '0')}`}
-              </p>
+            <div className="panel-body">
+              <div className={`vehicle-info-grid ${isEditingVehicleDetails ? 'vehicle-info-grid-editing' : ''}`}>
+              {/* Row 1: Property/Equipment, Classification, Account Code */}
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Property/Equipment:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleName}
+                      onChange={(e) => setEditVehicleName(e.target.value)}
+                      placeholder="e.g. DOUBLE CAB"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Property/Equipment:</strong> {editingVehicle.vehicle_name || '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Classification:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleClassification}
+                      onChange={(e) => setEditVehicleClassification(e.target.value)}
+                      placeholder="e.g. Pick-up / Double Cab"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Classification:</strong> {(editingVehicle as any).classification || '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Account Code:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleAccountCode}
+                      onChange={(e) => setEditVehicleAccountCode(e.target.value)}
+                      placeholder="e.g. 1-07-06-010"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Account Code:</strong> {(editingVehicle as any).account_code || '—'}
+                  </p>
+                )}
+              </div>
 
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Vehicle Name:</strong>
-                  <input
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    value={editVehicleName}
-                    onChange={(e) => setEditVehicleName(e.target.value)}
-                    placeholder="e.g. Rescue Van 1"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Vehicle Name:</strong> {editingVehicle.vehicle_name || '—'}
-                </p>
-              )}
+              {/* Row 2: Property #, Plate #, Est. Useful Life */}
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Property #:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehiclePropertyNumber}
+                      onChange={(e) => setEditVehiclePropertyNumber(e.target.value)}
+                      placeholder="e.g. VEH-PT01"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Property #:</strong> {(editingVehicle as any).property_number || '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Plate #:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehiclePlateNumber}
+                      onChange={(e) => setEditVehiclePlateNumber(e.target.value)}
+                      placeholder="e.g. U21346"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Plate #:</strong> {(editingVehicle as any).plate_number || '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Est. Useful Life:</strong>
+                    <input
+                      className="inventory-input"
+                      inputMode="numeric"
+                      value={editVehicleEstimatedUsefulLife}
+                      onChange={(e) => setEditVehicleEstimatedUsefulLife(e.target.value)}
+                      placeholder="e.g. 7 (years)"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Est. Useful Life:</strong> {(editingVehicle as any).estimated_useful_life_years ? `${(editingVehicle as any).estimated_useful_life_years} years` : '—'}
+                  </p>
+                )}
+              </div>
 
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Make / Model:</strong>
-                  <input
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    value={editVehicleMakeModel}
-                    onChange={(e) => setEditVehicleMakeModel(e.target.value)}
-                    placeholder="e.g. Toyota Hilux"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Make / Model:</strong> {editingVehicle.make_model ?? '—'}
-                </p>
-              )}
+              {/* Row 3: Description (left), Brand/Model (center), Rate of Depreciation (right) */}
+              <div style={{ gridColumn: 'span 2' }}>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Description:</strong>
+                    <textarea
+                      className="inventory-input"
+                      style={{ resize: 'vertical' }}
+                      value={editVehicleDescription}
+                      onChange={(e) => setEditVehicleDescription(e.target.value)}
+                      placeholder="e.g. TRANSPORTATION EQUIPMENT - PATIENT TRANSPORT VEHICLE (PTV)"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Description:</strong> <br /> {(editingVehicle as any).description || '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Rate of Depreciation:</strong>
+                    <input
+                      className="inventory-input"
+                      inputMode="decimal"
+                      value={editVehicleDepreciationRate}
+                      onChange={(e) => setEditVehicleDepreciationRate(e.target.value)}
+                      placeholder="e.g. 14.29 (%)"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Rate of Depreciation:</strong> {(editingVehicle as any).depreciation_rate ? `${(editingVehicle as any).depreciation_rate}%` : '—'}
+                  </p>
+                )}
+              </div>
 
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Color:</strong>
-                  <input
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    value={editVehicleColor}
-                    onChange={(e) => setEditVehicleColor(e.target.value)}
-                    placeholder="e.g. White"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Color:</strong> {editingVehicle.color || '—'}
-                </p>
-              )}
+              {/* Additional fields row */}
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Brand/Model:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleMakeModel}
+                      onChange={(e) => setEditVehicleMakeModel(e.target.value)}
+                      placeholder="e.g. FOTON Gratour"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Brand/Model:</strong> {editingVehicle.make_model ?? '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Color:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleColor}
+                      onChange={(e) => setEditVehicleColor(e.target.value)}
+                      placeholder="e.g. White"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Color:</strong> {editingVehicle.color || '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Year Model:</strong>
+                    <input
+                      className="inventory-input"
+                      inputMode="numeric"
+                      value={editVehicleYearModel}
+                      onChange={(e) => setEditVehicleYearModel(e.target.value)}
+                      placeholder="e.g. 2020"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Year Model:</strong> {editingVehicle.year_model ?? '—'}
+                  </p>
+                )}
+              </div>
 
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Year Model:</strong>
-                  <input
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    inputMode="numeric"
-                    value={editVehicleYearModel}
-                    onChange={(e) => setEditVehicleYearModel(e.target.value)}
-                    placeholder="e.g. 2020"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Year Model:</strong> {editingVehicle.year_model ?? '—'}
-                </p>
-              )}
+              {/* Engine and CR information row */}
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>CR Number:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleCrNumber}
+                      onChange={(e) => setEditVehicleCrNumber(e.target.value)}
+                      placeholder="e.g. CR-123456"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>CR Number:</strong> {editingVehicle.cr_number ?? '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Engine Number:</strong>
+                    <input
+                      className="inventory-input"
+                      value={editVehicleEngineNumber}
+                      onChange={(e) => setEditVehicleEngineNumber(e.target.value)}
+                      placeholder="e.g. ENG-78910"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Engine Number:</strong> {editingVehicle.engine_number ?? '—'}
+                  </p>
+                )}
+              </div>
+              <div>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Vehicle Status:</strong>
+                    <select
+                      className="inventory-input"
+                      value={editVehicleServiceable}
+                      onChange={(e) => setEditVehicleServiceable(e.target.value)}
+                    >
+                      <option value="true">Serviceable</option>
+                      <option value="false">Unserviceable</option>
+                    </select>
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Vehicle Status:</strong> {editingVehicle.is_serviceable ? 'Serviceable' : 'Unserviceable'}
+                  </p>
+                )}
+              </div>
 
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>CR Number:</strong>
-                  <input
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    value={editVehicleCrNumber}
-                    onChange={(e) => setEditVehicleCrNumber(e.target.value)}
-                    placeholder="e.g. CR-123456"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>CR Number:</strong> {editingVehicle.cr_number ?? '—'}
-                </p>
-              )}
-
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Engine Number:</strong>
-                  <input
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    value={editVehicleEngineNumber}
-                    onChange={(e) => setEditVehicleEngineNumber(e.target.value)}
-                    placeholder="e.g. ENG-78910"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Engine Number:</strong> {editingVehicle.engine_number ?? '—'}
-                </p>
-              )}
-
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Vehicle Status:</strong>
-                  <select
-                    className="inventory-input"
-                    style={{ marginTop: 8, width: '100%' }}
-                    value={editVehicleServiceable}
-                    onChange={(e) => setEditVehicleServiceable(e.target.value)}
-                  >
-                    <option value="true">Serviceable</option>
-                    <option value="false">Unserviceable</option>
-                  </select>
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Vehicle Status:</strong> {editingVehicle.is_serviceable ? 'Serviceable' : 'Unserviceable'}
-                </p>
-              )}
-
-              {isEditingVehicleDetails ? (
-                <div className="wmr-modal-text">
-                  <strong>Remarks:</strong>
-                  <textarea
-                    className="inventory-input"
-                    style={{ marginTop: 8, minHeight: 96, resize: 'vertical', width: '100%' }}
-                    value={editVehicleRemarks}
-                    onChange={(e) => setEditVehicleRemarks(e.target.value)}
-                    placeholder="Describe what is broken or why the vehicle is unserviceable"
-                  />
-                </div>
-              ) : (
-                <p className="wmr-modal-text">
-                  <strong>Remarks:</strong> {getVehicleStatusRemark(editingVehicle.repair_history_log) || '—'}
-                </p>
-              )}
+              {/* Remarks full width */}
+              <div style={{ gridColumn: '1 / -1' }}>
+                {isEditingVehicleDetails ? (
+                  <div className="wmr-modal-text">
+                    <strong>Remarks:</strong>
+                    <textarea
+                      className="inventory-input"
+                      style={{ resize: 'vertical' }}
+                      value={editVehicleRemarks}
+                      onChange={(e) => setEditVehicleRemarks(e.target.value)}
+                      placeholder="Describe what is broken or why the vehicle is unserviceable"
+                    />
+                  </div>
+                ) : (
+                  <p className="wmr-modal-text">
+                    <strong>Remarks:</strong> <br /> {getVehicleStatusRemark(editingVehicle.repair_history_log) || '—'}
+                  </p>
+                )}
+              </div>
+              </div>
             </div>
 
-            <div className="wmr-modal-actions">
+            <div className="vehicle-edit-modal-footer">
               {!isEditingVehicleDetails ? (
                 <>
                   <button

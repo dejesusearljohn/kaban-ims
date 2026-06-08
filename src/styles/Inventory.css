@@ -502,6 +502,35 @@
   background: #fee2e2;
 }
 
+.borrowed-return-button {
+  min-height: 30px;
+  min-width: 96px;
+  padding: 6px 12px;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  background: #f0fdf4;
+  color: #15803d;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.borrowed-return-button:hover:not(:disabled) {
+  border-color: #4ade80;
+  background: #dcfce7;
+}
+
+.borrowed-return-button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
 .staff-actions {
   display: flex;
   flex-direction: column;
@@ -709,6 +738,13 @@
 
 .inventory-field-full {
   grid-column: 1 / -1;
+}
+
+.inventory-field-value {
+  margin: 0;
+  font-size: 14px;
+  color: #111827;
+  font-weight: 500;
 }
 
 .inventory-photo-drop {

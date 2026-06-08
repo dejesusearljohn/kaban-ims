@@ -8,7 +8,6 @@ type UserRow = Pick<Tables<'users'>, 'id' | 'full_name' | 'staff_id' | 'departme
 type DepartmentRow = Pick<Tables<'departments'>, 'id' | 'dept_name'>
 type DailyCheckRow = Pick<Tables<'daily_checks'>, 'check_id' | 'check_date'>
 
-type AdminReviewState = 'pending' | 'approved' | 'rejected'
 type TurnoverStatus = 'pending' | 'approved' | 'disapproved'
 
 type ShiftTurnoverRecord = {
@@ -17,7 +16,6 @@ type ShiftTurnoverRecord = {
   dailyCheckId: number | null
   checkDate: string | null
   status: TurnoverStatus
-  adminReview: AdminReviewState
   outgoingName: string
   outgoingStaffId: string
   incomingName: string
@@ -57,12 +55,6 @@ const normalizeTurnoverStatus = (value: string | null | undefined): TurnoverStat
   return 'pending'
 }
 
-const getAdminReviewState = (value: boolean | null): AdminReviewState => {
-  if (value === true) return 'approved'
-  if (value === false) return 'rejected'
-  return 'pending'
-}
-
 const formatDateLabel = (value: string | null) => {
   if (!value) return '—'
   return new Date(value).toLocaleDateString('en-PH', {
@@ -83,12 +75,12 @@ const formatDateTimeLabel = (value: string | null) => {
   })
 }
 
-const getStatusPillStyle = (state: TurnoverStatus | AdminReviewState) => {
+const getStatusPillStyle = (state: TurnoverStatus) => {
   if (state === 'approved') {
     return { backgroundColor: '#dcfce7', color: '#166534' }
   }
 
-  if (state === 'disapproved' || state === 'rejected') {
+  if (state === 'disapproved') {
     return { backgroundColor: '#fee2e2', color: '#991b1b' }
   }
 
@@ -101,11 +93,8 @@ function ShiftTurnoverRecordsSection() {
   const [searchQuery, setSearchQuery] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [adminReviewFilter, setAdminReviewFilter] = useState('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [actionError, setActionError] = useState<string | null>(null)
-  const [reviewingTurnoverId, setReviewingTurnoverId] = useState<number | null>(null)
 
   const [shiftTurnovers, setShiftTurnovers] = useState<ShiftTurnoverRow[]>([])
   const [users, setUsers] = useState<UserRow[]>([])
@@ -195,7 +184,6 @@ function ShiftTurnoverRecordsSection() {
           dailyCheckId: record.daily_check_id,
           checkDate,
           status: normalizeTurnoverStatus(record.status),
-          adminReview: getAdminReviewState(record.is_approved_by_admin),
           outgoingName: outgoing?.full_name ?? 'Unknown Staff',
           outgoingStaffId: outgoing?.staff_id ?? '—',
           incomingName: incoming?.full_name ?? 'Unknown Staff',
@@ -213,10 +201,6 @@ function ShiftTurnoverRecordsSection() {
           return false
         }
 
-        if (adminReviewFilter !== 'all' && row.adminReview !== adminReviewFilter) {
-          return false
-        }
-
         if (!normalizedSearch) {
           return true
         }
@@ -230,13 +214,13 @@ function ShiftTurnoverRecordsSection() {
           row.departmentName.toLowerCase().includes(normalizedSearch)
         )
       })
-  }, [shiftTurnovers, users, departments, dailyChecks, departmentFilter, statusFilter, adminReviewFilter, normalizedSearch])
+  }, [shiftTurnovers, users, departments, dailyChecks, departmentFilter, statusFilter, normalizedSearch])
 
   const totalPages = Math.max(1, Math.ceil(rows.length / pageSize))
 
   useEffect(() => {
     setPage(1)
-  }, [normalizedSearch, departmentFilter, statusFilter, adminReviewFilter])
+  }, [normalizedSearch, departmentFilter, statusFilter])
 
   useEffect(() => {
     if (page > totalPages) {
@@ -305,41 +289,6 @@ function ShiftTurnoverRecordsSection() {
     setDetailLoading(false)
   }
 
-  const applyAdminReview = async (turnoverId: number, isApproved: boolean) => {
-    setReviewingTurnoverId(turnoverId)
-    setActionError(null)
-
-    const { error: updateError } = await supabase
-      .from('shift_turnovers')
-      .update({ is_approved_by_admin: isApproved })
-      .eq('turnover_id', turnoverId)
-
-    if (updateError) {
-      setActionError(updateError.message)
-      setReviewingTurnoverId(null)
-      return
-    }
-
-    setShiftTurnovers((prev) =>
-      prev.map((row) =>
-        row.turnover_id === turnoverId
-          ? { ...row, is_approved_by_admin: isApproved }
-          : row,
-      ),
-    )
-
-    if (activeRecord?.turnoverId === turnoverId) {
-      setActiveRecord((prev) => (prev
-        ? {
-          ...prev,
-          adminReview: isApproved ? 'approved' : 'rejected',
-        }
-        : prev))
-    }
-
-    setReviewingTurnoverId(null)
-  }
-
   return (
     <div className="wmr-layout">
       <header className="dashboard-header">
@@ -350,7 +299,6 @@ function ShiftTurnoverRecordsSection() {
       </header>
 
       {error && <p className="dashboard-error">{error}</p>}
-      {actionError && <p className="dashboard-error">{actionError}</p>}
 
       <section className="wmr-toolbar" aria-label="Shift turnover records tools">
         <div className="inventory-filters">
@@ -388,17 +336,6 @@ function ShiftTurnoverRecordsSection() {
               <option value="approved">Approved</option>
               <option value="disapproved">Disapproved</option>
             </select>
-
-            <select
-              className="inventory-filter-select"
-              value={adminReviewFilter}
-              onChange={(event) => setAdminReviewFilter(event.target.value)}
-            >
-              <option value="all">All Admin Reviews</option>
-              <option value="pending">Pending Review</option>
-              <option value="approved">Admin Approved</option>
-              <option value="rejected">Admin Rejected</option>
-            </select>
           </div>
         </div>
       </section>
@@ -414,7 +351,6 @@ function ShiftTurnoverRecordsSection() {
                 <th scope="col">Department</th>
                 <th scope="col">Check Date</th>
                 <th scope="col">Turnover Status</th>
-                <th scope="col">Admin Review</th>
                 <th scope="col">Submitted</th>
                 <th scope="col">Actions</th>
               </tr>
@@ -422,16 +358,14 @@ function ShiftTurnoverRecordsSection() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9}>Loading shift turnover records...</td>
+                  <td colSpan={8}>Loading shift turnover records...</td>
                 </tr>
               ) : visibleRows.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>No shift turnover records found.</td>
+                  <td colSpan={8}>No shift turnover records found.</td>
                 </tr>
               ) : (
                 visibleRows.map((row) => {
-                  const isReviewing = reviewingTurnoverId === row.turnoverId
-
                   return (
                     <tr key={row.turnoverId}>
                       <td>{row.turnoverId}</td>
@@ -460,21 +394,6 @@ function ShiftTurnoverRecordsSection() {
                           {row.status}
                         </span>
                       </td>
-                      <td>
-                        <span
-                          style={{
-                            ...getStatusPillStyle(row.adminReview),
-                            borderRadius: 999,
-                            display: 'inline-block',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            padding: '4px 10px',
-                            textTransform: 'capitalize',
-                          }}
-                        >
-                          {row.adminReview === 'pending' ? 'pending review' : row.adminReview}
-                        </span>
-                      </td>
                       <td>{formatDateTimeLabel(row.createdAt)}</td>
                       <td className="inventory-row-actions inventory-row-actions-left">
                         <div className="shift-turnover-actions-grid">
@@ -497,50 +416,6 @@ function ShiftTurnoverRecordsSection() {
                                 strokeLinejoin="round"
                               />
                               <circle cx="12" cy="12" r="2.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Approve turnover"
-                            title="Approve turnover"
-                            className="inventory-icon-button inventory-icon-button-success"
-                            onClick={() => {
-                              void applyAdminReview(row.turnoverId, true)
-                            }}
-                            disabled={isReviewing || row.adminReview === 'approved'}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                              <path
-                                d="M8.5 12.3l2.2 2.2 4.8-5.2"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.6"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
-                            </svg>
-                          </button>
-                          <button
-                            type="button"
-                            aria-label="Reject turnover"
-                            title="Reject turnover"
-                            className="inventory-icon-button inventory-icon-button-danger"
-                            onClick={() => {
-                              void applyAdminReview(row.turnoverId, false)
-                            }}
-                            disabled={isReviewing || row.adminReview === 'rejected'}
-                          >
-                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                              <circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" strokeWidth="1.6" />
-                              <path
-                                d="M9 9l6 6M15 9l-6 6"
-                                fill="none"
-                                stroke="currentColor"
-                                strokeWidth="1.6"
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                              />
                             </svg>
                           </button>
                         </div>

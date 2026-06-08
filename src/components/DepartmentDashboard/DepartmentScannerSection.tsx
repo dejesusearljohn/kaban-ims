@@ -14,6 +14,7 @@ interface Props {
   userId: string
   departmentId: number | null
   isReadOnly?: boolean
+  isActive?: boolean
 }
 
 interface ItemResult {
@@ -31,7 +32,7 @@ interface ItemResult {
   date_acquired: string
 }
 
-export default function DepartmentScannerSection({ userId, departmentId, isReadOnly = false }: Props) {
+export default function DepartmentScannerSection({ userId, departmentId, isReadOnly = false, isActive = true }: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const streamRef = useRef<MediaStream | null>(null)
   const scanLoopRef = useRef<number | null>(null)
@@ -264,6 +265,13 @@ export default function DepartmentScannerSection({ userId, departmentId, isReadO
     if (cameraSupported) void startCamera()
     return () => stopCamera()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Stop camera when navigating away from scanner tab
+  useEffect(() => {
+    if (!isActive) {
+      stopCamera()
+    }
+  }, [isActive])
 
   return (
     <div className="dept-section">

@@ -10,12 +10,12 @@ export type SidebarSection =
   | 'stockpile'
   | 'wmr'
   | 'par'
-  | 'accountability'
   | 'shift-turnover-records'
   | 'vehicles'
   | 'reports'
   | 'settings'
   | 'departments-staff'
+  | 'borrowed-items'
 
 type SidebarProps = {
   activeSection: SidebarSection
@@ -164,17 +164,18 @@ function Sidebar({ activeSection, onChangeSection, isCollapsed, onToggleCollapse
           <span className="sidebar-link-text">PAR</span>
         </button>
         <button
-          className={`sidebar-link ${activeSection === 'accountability' ? 'sidebar-link-active' : ''}`}
+          className={`sidebar-link ${activeSection === 'borrowed-items' ? 'sidebar-link-active' : ''}`}
           type="button"
-          onClick={() => onChangeSection('accountability')}
+          onClick={() => onChangeSection('borrowed-items')}
         >
           <span className="sidebar-link-icon" aria-hidden="true">
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-              <path d="M7 4h10a2 2 0 012 2v12a2 2 0 01-2 2H7a2 2 0 01-2-2V6a2 2 0 012-2z" fill="none" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M9 8h6M9 12h6M9 16h4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1" fill="none" stroke="currentColor" strokeWidth="1.6" />
+              <path d="M9 10h6M9 14h6M9 18h4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
           </span>
-          <span className="sidebar-link-text">Accountability Reports</span>
+          <span className="sidebar-link-text">Borrowed Items</span>
         </button>
         <button
           className={`sidebar-link ${activeSection === 'shift-turnover-records' ? 'sidebar-link-active' : ''}`}

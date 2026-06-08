@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
@@ -55,7 +55,6 @@ type VehiclesSectionProps = {
   handleAddVehicleRepair: () => void
   handleArchiveVehicle: (vehicle: VehicleRow) => void
   onExportCsv: () => void
-  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function VehiclesSection({
@@ -104,13 +103,9 @@ function VehiclesSection({
   handleAddVehicleRepair,
   handleArchiveVehicle,
   onExportCsv,
-  onImportCsv,
 }: VehiclesSectionProps) {
   const vehiclesPageSize = useResponsivePageSize(8)
   const [vehiclePage, setVehiclePage] = useState(1)
-  const vehiclesCsvInputRef = useRef<HTMLInputElement | null>(null)
-  const csvMenuRef = useRef<HTMLDivElement | null>(null)
-  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
 
   const vehicleTotalPages = Math.max(1, Math.ceil(vehicles.length / vehiclesPageSize))
 
@@ -149,29 +144,6 @@ function VehiclesSection({
     return Array.from({ length: end - start + 1 }, (_, index) => start + index)
   }, [vehiclePage, vehicleTotalPages])
 
-  useEffect(() => {
-    if (!csvMenuOpen) return
-
-    const onMouseDown = (event: MouseEvent) => {
-      if (!csvMenuRef.current) return
-      if (csvMenuRef.current.contains(event.target as Node)) return
-      setCsvMenuOpen(false)
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCsvMenuOpen(false)
-      }
-    }
-
-    window.addEventListener('mousedown', onMouseDown)
-    window.addEventListener('keydown', onKeyDown)
-
-    return () => {
-      window.removeEventListener('mousedown', onMouseDown)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [csvMenuOpen])
 
   const getVehicleDisplayLabel = (vehicle: VehicleRow) => {
     const vehicleName = vehicle.vehicle_name?.trim()
@@ -216,58 +188,17 @@ function VehiclesSection({
           </button>
         </div>
 
-        <div className="csv-menu" ref={csvMenuRef}>
+        <div className="csv-menu">
           <button
             type="button"
             className="csv-action-button"
-            onClick={() => setCsvMenuOpen((prev) => !prev)}
-            aria-haspopup="menu"
-            aria-expanded={csvMenuOpen}
+            onClick={onExportCsv}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span>Import/Export</span>
+            <span>Export CSV</span>
           </button>
-          {csvMenuOpen && (
-            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
-              <button
-                type="button"
-                className="csv-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setCsvMenuOpen(false)
-                  onExportCsv()
-                }}
-              >
-                Export CSV
-              </button>
-              <button
-                type="button"
-                className="csv-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setCsvMenuOpen(false)
-                  vehiclesCsvInputRef.current?.click()
-                }}
-              >
-                Import CSV
-              </button>
-            </div>
-          )}
-          <input
-            ref={vehiclesCsvInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) {
-                void onImportCsv(file)
-              }
-              e.currentTarget.value = ''
-            }}
-          />
         </div>
       </section>
 

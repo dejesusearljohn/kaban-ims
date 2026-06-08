@@ -7,7 +7,6 @@ import '../styles/App.css'
 
 // Auto-logout after 5 minutes of inactivity for session security
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
-const SHIFT_TURNOVER_LOCK_WINDOW_MS = 48 * 60 * 60 * 1000 // 48 hours
 
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
@@ -100,33 +99,7 @@ function App() {
 
 				const departmentCode = department?.dept_code?.trim() || ''
 				const isNebruStaff = departmentCode.toUpperCase() === 'NEBRU'
-				let isLocked = Boolean(data.is_locked)
-
-				if (isNebruStaff) {
-					const { data: latestTurnover } = await supabase
-						.from('shift_turnovers')
-						.select('created_at')
-						.eq('outgoing_staff_id', userId)
-						.order('created_at', { ascending: false })
-						.limit(1)
-						.maybeSingle()
-
-					const referenceDate = latestTurnover?.created_at ?? data.created_at ?? null
-					const isOverdueForTurnover = referenceDate
-						? Date.now() - new Date(referenceDate).getTime() > SHIFT_TURNOVER_LOCK_WINDOW_MS
-						: false
-
-					if (isOverdueForTurnover && !isLocked) {
-						const { error: lockError } = await supabase
-							.from('users')
-							.update({ is_locked: true })
-							.eq('id', userId)
-
-						if (!lockError) {
-							isLocked = true
-						}
-					}
-				}
+				const isLocked = Boolean(data.is_locked)
 
 				if (isLocked && !isNebruStaff) return null
 

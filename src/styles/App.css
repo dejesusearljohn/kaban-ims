@@ -189,6 +189,12 @@
 	padding-right: 42px;
 }
 
+/* Hide browser's default password visibility toggle */
+.password-input-wrapper input[type="password"]::-webkit-contacts-auto-fill-button,
+.password-input-wrapper input[type="password"]::-webkit-credentials-auto-fill-button {
+	display: none !important;
+}
+
 .password-toggle {
 	position: absolute;
 	right: 10px;

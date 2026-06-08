@@ -10,6 +10,7 @@ type StockpileReleaseLog = {
   itemName: string
   unit: string
   quantity: number
+  attachmentUrls: string[]
 }
 
 type StockpileReleaseDraftItem = {
@@ -30,6 +31,8 @@ type StockpileSectionProps = {
   filteredExpiredStockpileItems: StockpileRow[]
   stockpileReleaseLogs: StockpileReleaseLog[]
   stockpileReleaseItems: StockpileReleaseDraftItem[]
+  stockpileReleaseAttachmentFiles: File[]
+  setStockpileReleaseAttachmentFiles: (files: File[]) => void
   setStockpileReleaseIssuedToInput: (value: string) => void
   stockpileReleaseIssuedToInput: string
   setStockpileReleaseReasonInput: (value: string) => void
@@ -44,7 +47,6 @@ type StockpileSectionProps = {
   handlePrintReleaseLogs: () => void
   formatDisplayDate: (dateString: string | null) => string
   onExportCsv: () => void
-  onImportCsv: (file: File) => void | Promise<void>
 }
 
 function StockpileSection({
@@ -60,6 +62,8 @@ function StockpileSection({
   filteredExpiredStockpileItems,
   stockpileReleaseLogs,
   stockpileReleaseItems,
+  stockpileReleaseAttachmentFiles,
+  setStockpileReleaseAttachmentFiles,
   setStockpileReleaseIssuedToInput,
   stockpileReleaseIssuedToInput,
   setStockpileReleaseReasonInput,
@@ -74,19 +78,16 @@ function StockpileSection({
   handlePrintReleaseLogs,
   formatDisplayDate,
   onExportCsv,
-  onImportCsv,
 }: StockpileSectionProps) {
   const stockpilePageSize = useResponsivePageSize(10)
   const [stockpilePage, setStockpilePage] = useState(1)
-  const stockpileCsvInputRef = useRef<HTMLInputElement | null>(null)
-  const csvMenuRef = useRef<HTMLDivElement | null>(null)
-  const [csvMenuOpen, setCsvMenuOpen] = useState(false)
   const [releaseItemPickerRowIndex, setReleaseItemPickerRowIndex] = useState<number | null>(null)
   const [releaseItemPickerSearch, setReleaseItemPickerSearch] = useState('')
   const [releaseItemPickerCategory, setReleaseItemPickerCategory] = useState('all')
   const [releaseItemPickerSelectedIds, setReleaseItemPickerSelectedIds] = useState<string[]>([])
   const [releaseItemPickerPage, setReleaseItemPickerPage] = useState(1)
   const releaseItemPickerModalRef = useRef<HTMLDivElement | null>(null)
+  const releaseAttachmentInputRef = useRef<HTMLInputElement | null>(null)
 
   const currentStockpileItems = useMemo(
     () => (stockpileMode === 'expired' ? filteredExpiredStockpileItems : filteredStockpileItems),
@@ -106,29 +107,6 @@ function StockpileSection({
     }
   }, [stockpilePage, stockpileTotalPages])
 
-  useEffect(() => {
-    if (!csvMenuOpen) return
-
-    const onMouseDown = (event: MouseEvent) => {
-      if (!csvMenuRef.current) return
-      if (csvMenuRef.current.contains(event.target as Node)) return
-      setCsvMenuOpen(false)
-    }
-
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setCsvMenuOpen(false)
-      }
-    }
-
-    window.addEventListener('mousedown', onMouseDown)
-    window.addEventListener('keydown', onKeyDown)
-
-    return () => {
-      window.removeEventListener('mousedown', onMouseDown)
-      window.removeEventListener('keydown', onKeyDown)
-    }
-  }, [csvMenuOpen])
 
   const paginatedStockpileItems = useMemo(() => {
     const start = (stockpilePage - 1) * stockpilePageSize
@@ -370,58 +348,17 @@ function StockpileSection({
           </button>
         </div>
 
-        <div className="csv-menu" ref={csvMenuRef}>
+        <div className="csv-menu">
           <button
             type="button"
             className="csv-action-button"
-            onClick={() => setCsvMenuOpen((prev) => !prev)}
-            aria-haspopup="menu"
-            aria-expanded={csvMenuOpen}
+            onClick={onExportCsv}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            <span>Import/Export</span>
+            <span>Export CSV</span>
           </button>
-          {csvMenuOpen && (
-            <div className="csv-menu-panel" role="menu" aria-label="Import or export CSV">
-              <button
-                type="button"
-                className="csv-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setCsvMenuOpen(false)
-                  onExportCsv()
-                }}
-              >
-                Export CSV
-              </button>
-              <button
-                type="button"
-                className="csv-menu-item"
-                role="menuitem"
-                onClick={() => {
-                  setCsvMenuOpen(false)
-                  stockpileCsvInputRef.current?.click()
-                }}
-              >
-                Import CSV
-              </button>
-            </div>
-          )}
-          <input
-            ref={stockpileCsvInputRef}
-            type="file"
-            accept=".csv,text/csv"
-            style={{ display: 'none' }}
-            onChange={(e) => {
-              const file = e.target.files?.[0]
-              if (file) {
-                void onImportCsv(file)
-              }
-              e.currentTarget.value = ''
-            }}
-          />
         </div>
       </section>
 
@@ -580,6 +517,28 @@ function StockpileSection({
                     onChange={(e) => setStockpileReleaseReasonInput(e.target.value)}
                     disabled={releasingStockpile}
                   />
+                </div>
+
+                <div className="inventory-field" style={{ gridColumn: '1 / -1' }}>
+                  <label htmlFor="stockpile-release-attachments">Attachments</label>
+                  <input
+                    id="stockpile-release-attachments"
+                    ref={releaseAttachmentInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="inventory-input"
+                    onChange={(e) => {
+                      const files = Array.from(e.target.files ?? [])
+                      setStockpileReleaseAttachmentFiles(files)
+                    }}
+                    disabled={releasingStockpile}
+                  />
+                  {stockpileReleaseAttachmentFiles.length > 0 && (
+                    <p className="inventory-help-text" style={{ marginTop: 8 }}>
+                      {stockpileReleaseAttachmentFiles.length} photo(s) selected
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -747,16 +706,17 @@ function StockpileSection({
                   <th scope="col">Unit</th>
                   <th scope="col">Issued To</th>
                   <th scope="col">Reason</th>
+                  <th scope="col">Attachments</th>
                 </tr>
               </thead>
               <tbody>
                 {stockpileLoading ? (
                   <tr>
-                    <td colSpan={6}>Loading release logs...</td>
+                    <td colSpan={7}>Loading release logs...</td>
                   </tr>
                 ) : stockpileReleaseLogs.length === 0 ? (
                   <tr>
-                    <td colSpan={6}>No release logs found.</td>
+                    <td colSpan={7}>No release logs found.</td>
                   </tr>
                 ) : (
                   paginatedStockpileReleaseLogs.map((entry) => (
@@ -767,6 +727,26 @@ function StockpileSection({
                       <td>{entry.unit || '—'}</td>
                       <td>{entry.log.recipient_info ?? '—'}</td>
                       <td>{entry.log.calamity_name ?? '—'}</td>
+                      <td>
+                        {entry.attachmentUrls.length > 0 ? (
+                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                            {entry.attachmentUrls.map((url, idx) => (
+                              <a
+                                key={`${entry.log.log_id}-attachment-${idx}`}
+                                href={url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="stockpile-row-remove-link"
+                                style={{ textDecoration: 'none' }}
+                              >
+                                Attachment {idx + 1}
+                              </a>
+                            ))}
+                          </div>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
                     </tr>
                   ))
                 )}

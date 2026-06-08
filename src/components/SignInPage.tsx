@@ -211,7 +211,19 @@ function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetCo
     })
 
     if (signInError) {
-      setError(signInError.message)
+      // Provide specific error messages based on the result
+      if (!lookupRow) {
+        // Email/username not found in the system
+        setError('Email or username not found. Please check and try again.')
+      } else {
+        // Email exists but auth failed - likely wrong password
+        const errorMessage = signInError.message.toLowerCase()
+        if (errorMessage.includes('invalid') || errorMessage.includes('credentials')) {
+          setError('Password is incorrect. Please try again.')
+        } else {
+          setError(signInError.message)
+        }
+      }
     } else {
       const userId = signInData.user?.id
 

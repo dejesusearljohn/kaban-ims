@@ -156,7 +156,7 @@
 .vehicle-info-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px 28px;
+  gap: 16px;
 }
 
 .vehicle-info-grid .wmr-modal-text {
@@ -166,18 +166,21 @@
 .vehicle-info-grid .wmr-modal-text input,
 .vehicle-info-grid .wmr-modal-text select,
 .vehicle-info-grid .wmr-modal-text textarea {
-  margin-top: 8px;
+  margin-top: 0 !important;
   width: 100%;
   box-sizing: border-box;
 }
 
 .vehicle-info-grid-editing .wmr-modal-text {
-  min-height: 64px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .vehicle-info-grid-editing .wmr-modal-text strong {
   display: block;
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .vehicle-info-grid-editing .inventory-input {
@@ -185,7 +188,34 @@
 }
 
 .vehicle-info-grid-editing .wmr-modal-text textarea.inventory-input {
-  min-height: 96px;
+  min-height: 56px;
+}
+
+.vehicle-edit-modal-shell {
+  display: flex;
+  flex-direction: column;
+  max-height: min(82vh, 760px);
+  overflow: hidden;
+}
+
+.vehicle-edit-modal-shell .panel-header {
+  flex-shrink: 0;
+}
+
+.vehicle-edit-modal-shell .panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.vehicle-edit-modal-footer {
+  flex-shrink: 0;
+  border-top: 1px solid #e5e7eb;
+  padding: 12px 18px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  background: #ffffff;
 }
 
 .shift-turnover-preview-backdrop {

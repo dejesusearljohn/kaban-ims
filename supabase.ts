@@ -315,6 +315,68 @@ export type Database = {
         }
         Relationships: []
       }
+      borrowed_items: {
+        Row: {
+          amount: number | null
+          borrowed_id: number
+          borrower_name: string
+          contact_number: string | null
+          created_at: string | null
+          date_borrowed: string
+          date_returned: string | null
+          item_id: number | null
+          item_remarks: string | null
+          location: string | null
+          quantity: number
+          remarks: string | null
+          return_date: string
+          status: string | null
+          uid: string | null
+        }
+        Insert: {
+          amount?: number | null
+          borrowed_id?: number
+          borrower_name: string
+          contact_number?: string | null
+          created_at?: string | null
+          date_borrowed: string
+          date_returned?: string | null
+          item_id?: number | null
+          item_remarks?: string | null
+          location?: string | null
+          quantity: number
+          remarks?: string | null
+          return_date: string
+          status?: string | null
+          uid?: string | null
+        }
+        Update: {
+          amount?: number | null
+          borrowed_id?: number
+          borrower_name?: string
+          contact_number?: string | null
+          created_at?: string | null
+          date_borrowed?: string
+          date_returned?: string | null
+          item_id?: number | null
+          item_remarks?: string | null
+          location?: string | null
+          quantity?: number
+          remarks?: string | null
+          return_date?: string
+          status?: string | null
+          uid?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "borrowed_items_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "inventory"
+            referencedColumns: ["item_id"]
+          },
+        ]
+      }
       daily_check_items: {
         Row: {
           check_id: number
@@ -476,6 +538,7 @@ export type Database = {
           created_at: string | null
           date_acquired: string
           department_id: number | null
+          donor_identification: string | null
           expiration_date: string | null
           item_id: number
           item_name: string
@@ -496,6 +559,7 @@ export type Database = {
           created_at?: string | null
           date_acquired: string
           department_id?: number | null
+          donor_identification?: string | null
           expiration_date?: string | null
           item_id?: number
           item_name: string
@@ -516,6 +580,7 @@ export type Database = {
           created_at?: string | null
           date_acquired?: string
           department_id?: number | null
+          donor_identification?: string | null
           expiration_date?: string | null
           item_id?: number
           item_name?: string
@@ -855,39 +920,66 @@ export type Database = {
       }
       vehicles: {
         Row: {
+          account_code: string | null
           archived_at: string | null
+          classification: string | null
+          color: string | null
           cr_number: string | null
+          depreciation_rate: number | null
+          description: string | null
           engine_number: string | null
+          estimated_useful_life_years: number | null
           id: number
           is_archived: boolean
           is_serviceable: boolean | null
           make_model: string | null
+          plate_number: string | null
+          property_number: string | null
           repair_history_log: string | null
           uid: string
+          vehicle_name: string | null
           year_model: number | null
         }
         Insert: {
+          account_code?: string | null
           archived_at?: string | null
+          classification?: string | null
+          color?: string | null
           cr_number?: string | null
+          depreciation_rate?: number | null
+          description?: string | null
           engine_number?: string | null
+          estimated_useful_life_years?: number | null
           id?: number
           is_archived?: boolean
           is_serviceable?: boolean | null
           make_model?: string | null
+          plate_number?: string | null
+          property_number?: string | null
           repair_history_log?: string | null
           uid?: string
+          vehicle_name?: string | null
           year_model?: number | null
         }
         Update: {
+          account_code?: string | null
           archived_at?: string | null
+          classification?: string | null
+          color?: string | null
           cr_number?: string | null
+          depreciation_rate?: number | null
+          description?: string | null
           engine_number?: string | null
+          estimated_useful_life_years?: number | null
           id?: number
           is_archived?: boolean
           is_serviceable?: boolean | null
           make_model?: string | null
+          plate_number?: string | null
+          property_number?: string | null
           repair_history_log?: string | null
           uid?: string
+          vehicle_name?: string | null
           year_model?: number | null
         }
         Relationships: []
