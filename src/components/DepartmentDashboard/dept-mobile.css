@@ -1021,6 +1021,12 @@
   gap: 8px;
 }
 
+.dept-turnover-status-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .dept-turnover-status-btn {
   border: 1px solid var(--dept-border);
   border-radius: 8px;
@@ -1032,16 +1038,55 @@
   cursor: pointer;
 }
 
-.dept-turnover-status-btn.serviceable.active {
+.dept-turnover-status-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dept-turnover-status-btn.good.active,
+.dept-turnover-status-btn.increased.active {
   border-color: #16a34a;
   background: #16a34a;
   color: #ffffff;
 }
 
-.dept-turnover-status-btn.unserviceable.active {
+.dept-turnover-status-btn.defective.active,
+.dept-turnover-status-btn.missing.active {
   border-color: #dc2626;
   background: #dc2626;
   color: #ffffff;
+}
+
+.dept-turnover-status-btn.used.active {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.dept-turnover-quantity-input {
+  width: 68px;
+  min-height: 32px;
+  border: 1px solid var(--dept-border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dept-text);
+  background: var(--dept-surface);
+  box-sizing: border-box;
+}
+
+.dept-turnover-quantity-input:focus {
+  border-color: var(--dept-green);
+  box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.15);
+  outline: none;
+}
+
+.dept-turnover-quantity-total {
+  margin: 10px 0 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--dept-text-muted);
 }
 
 .dept-turnover-remarks {

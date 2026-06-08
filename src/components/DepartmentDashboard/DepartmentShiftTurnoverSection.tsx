@@ -14,7 +14,8 @@ interface InventoryItem {
   quantity: number | null
   unit_of_measure: string | null
   qr_code: string | null
-  condition: 'serviceable' | 'unserviceable' | null
+  selectedConditions: Record<TurnoverCondition, boolean>
+  conditionQuantities: Record<TurnoverCondition, string>
   remarks: string
   confirmed: boolean
 }
@@ -29,6 +30,7 @@ interface CheckItemRow {
   check_item_id: number
   item_id: number
   condition: string
+  quantity_checked: number | null
   scanned_at: string
   remarks: string | null
   item: { item_name: string; property_no: string | null } | null
@@ -45,8 +47,52 @@ interface TurnoverRequest {
 }
 
 type TabKey = 'submit' | 'incoming'
+type TurnoverCondition = 'good' | 'defective' | 'missing' | 'used' | 'increased'
 
 const formatDateTime = (value: string | null) => (value ? new Date(value).toLocaleString() : '--')
+const TURNOVER_CONDITIONS: Array<{ key: TurnoverCondition; label: string }> = [
+  { key: 'good', label: 'Good' },
+  { key: 'defective', label: 'Defective' },
+  { key: 'missing', label: 'Missing' },
+  { key: 'used', label: 'Used' },
+  { key: 'increased', label: 'Increased' },
+]
+
+const REPORTABLE_CONDITIONS: TurnoverCondition[] = ['defective', 'missing']
+const BASE_QUANTITY_CONDITIONS: TurnoverCondition[] = ['good', 'defective', 'missing', 'used']
+
+const createEmptyConditionQuantities = (): Record<TurnoverCondition, string> => ({
+  good: '',
+  defective: '',
+  missing: '',
+  used: '',
+  increased: '',
+})
+
+const createEmptyConditionSelections = (): Record<TurnoverCondition, boolean> => ({
+  good: false,
+  defective: false,
+  missing: false,
+  used: false,
+  increased: false,
+})
+
+const getConditionQuantity = (item: InventoryItem, condition: TurnoverCondition) => {
+  const quantity = Number(item.conditionQuantities[condition])
+  return Number.isFinite(quantity) ? quantity : 0
+}
+
+const getItemTurnoverQuantity = (item: InventoryItem) =>
+  TURNOVER_CONDITIONS.reduce((total, condition) => total + getConditionQuantity(item, condition.key), 0)
+
+const getItemBaseTurnoverQuantity = (item: InventoryItem) =>
+  BASE_QUANTITY_CONDITIONS.reduce((total, condition) => total + getConditionQuantity(item, condition), 0)
+
+const getItemIncreasedQuantity = (item: InventoryItem) => getConditionQuantity(item, 'increased')
+
+const getItemResultQuantity = (item: InventoryItem) => (item.quantity ?? 0) + getItemIncreasedQuantity(item)
+
+const getItemQuantityLimit = (item: InventoryItem) => Math.max(0, item.quantity ?? 0)
 
 export default function DepartmentShiftTurnoverSection({ userId, departmentId, isReadOnly = false }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('submit')
@@ -98,7 +144,8 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
         setInventoryItems(
           (invRes.data ?? []).map((item) => ({
             ...item,
-            condition: null,
+            selectedConditions: createEmptyConditionSelections(),
+            conditionQuantities: createEmptyConditionQuantities(),
             remarks: '',
             confirmed: false,
           })),
@@ -174,7 +221,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
 
     const { data, error } = await supabase
       .from('daily_check_items')
-      .select('check_item_id, item_id, condition, scanned_at, remarks, item:inventory(item_name, property_no)')
+      .select('check_item_id, item_id, condition, quantity_checked, scanned_at, remarks, item:inventory(item_name, property_no)')
       .eq('check_id', turnover.daily_check_id)
       .order('scanned_at')
 
@@ -203,11 +250,59 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
     )
   }
 
-  const setItemCondition = (itemId: number, condition: 'serviceable' | 'unserviceable') => {
+  const toggleItemCondition = (itemId: number, condition: TurnoverCondition) => {
     setInventoryItems((prev) =>
-      prev.map((item) =>
-        item.item_id === itemId ? { ...item, condition, confirmed: true } : item,
-      ),
+      prev.map((item) => {
+        if (item.item_id !== itemId) return item
+
+        const nextQuantities = { ...item.conditionQuantities }
+        const nextSelections = { ...item.selectedConditions }
+        const otherQuantity = BASE_QUANTITY_CONDITIONS.reduce(
+          (total, entry) => total + (entry === condition ? 0 : getConditionQuantity(item, entry)),
+          0,
+        )
+        const remainingQuantity =
+          condition === 'increased' || item.quantity === null
+            ? Number.MAX_SAFE_INTEGER
+            : Math.max(0, getItemQuantityLimit(item) - otherQuantity)
+        nextSelections[condition] = !nextSelections[condition]
+        nextQuantities[condition] = nextSelections[condition] ? String(Math.min(1, remainingQuantity)) : ''
+        const nextItem = { ...item, selectedConditions: nextSelections, conditionQuantities: nextQuantities }
+
+        return {
+          ...nextItem,
+          confirmed: getItemTurnoverQuantity(nextItem) > 0,
+        }
+      }),
+    )
+  }
+
+  const setItemConditionQuantity = (itemId: number, condition: TurnoverCondition, value: string) => {
+    setInventoryItems((prev) =>
+      prev.map((item) => {
+        if (item.item_id !== itemId) return item
+
+        const otherQuantity = BASE_QUANTITY_CONDITIONS.reduce(
+          (total, entry) => total + (entry === condition ? 0 : getConditionQuantity(item, entry)),
+          0,
+        )
+        const maxQuantity =
+          condition === 'increased' || item.quantity === null
+            ? Number.MAX_SAFE_INTEGER
+            : Math.max(0, getItemQuantityLimit(item) - otherQuantity)
+        const numericValue = Number(value)
+        const nextValue =
+          value === ''
+            ? ''
+            : String(Math.max(0, Math.min(Number.isFinite(numericValue) ? Math.floor(numericValue) : 0, maxQuantity)))
+        const nextQuantities = { ...item.conditionQuantities, [condition]: nextValue }
+        const nextItem = { ...item, conditionQuantities: nextQuantities }
+
+        return {
+          ...nextItem,
+          confirmed: getItemTurnoverQuantity(nextItem) > 0,
+        }
+      }),
     )
   }
 
@@ -224,7 +319,8 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
     setInventoryItems((prev) =>
       prev.map((item) => ({
         ...item,
-        condition: null,
+        selectedConditions: createEmptyConditionSelections(),
+        conditionQuantities: createEmptyConditionQuantities(),
         remarks: '',
         confirmed: false,
       })),
@@ -256,6 +352,28 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
       return
     }
 
+    const selectedWithoutQuantity = inventoryItems.find((item) =>
+      TURNOVER_CONDITIONS.some(
+        (condition) => item.selectedConditions[condition.key] && getConditionQuantity(item, condition.key) <= 0,
+      ),
+    )
+    if (selectedWithoutQuantity) {
+      setSubmitError(`Please enter a quantity for ${selectedWithoutQuantity.item_name}.`)
+      return
+    }
+
+    const overLimit = inventoryItems.find((item) => item.quantity !== null && getItemBaseTurnoverQuantity(item) > getItemQuantityLimit(item))
+    if (overLimit) {
+      setSubmitError(`The logged quantity for ${overLimit.item_name} exceeds its recorded quantity.`)
+      return
+    }
+
+    const zeroQuantity = inventoryItems.find((item) => getItemTurnoverQuantity(item) <= 0)
+    if (zeroQuantity) {
+      setSubmitError(`Please enter a quantity for ${zeroQuantity.item_name}.`)
+      return
+    }
+
     setSubmitting(true)
 
     const today = new Date().toISOString().split('T')[0]
@@ -276,12 +394,15 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
       return
     }
 
-    const checkItems = inventoryItems.map((item) => ({
-      check_id: checkData.check_id,
-      item_id: item.item_id,
-      condition: item.condition as string,
-      remarks: item.remarks || null,
-    }))
+    const checkItems = inventoryItems.flatMap((item) =>
+      TURNOVER_CONDITIONS.map((condition) => ({
+        check_id: checkData.check_id,
+        item_id: item.item_id,
+        condition: condition.key,
+        quantity_checked: getConditionQuantity(item, condition.key),
+        remarks: REPORTABLE_CONDITIONS.includes(condition.key) ? item.remarks || null : null,
+      })).filter((row) => row.quantity_checked > 0),
+    )
 
     const { error: checkItemsError } = await supabase
       .from('daily_check_items')
@@ -294,17 +415,53 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
       return
     }
 
-    const unserviceableItems = inventoryItems.filter((item) => item.condition === 'unserviceable')
-    if (unserviceableItems.length > 0) {
-      const wmrRows = unserviceableItems.map((item) => ({
+    const reportableRows = inventoryItems.flatMap((item) =>
+      REPORTABLE_CONDITIONS.map((condition) => ({
+        item,
+        condition,
+        quantity: getConditionQuantity(item, condition),
+      })).filter((entry) => entry.quantity > 0),
+    )
+    if (reportableRows.length > 0) {
+      const wmrRows = reportableRows.map(({ item, condition, quantity }) => ({
         item_id: item.item_id,
         last_user_id: userId,
         status: 'pending',
-        reason_damage: item.remarks || 'Reported unserviceable during shift turnover',
+        reason_damage: item.remarks || `Reported ${condition} during shift turnover`,
         location: null as string | null,
-        quantity_reported: 1,
+        quantity_reported: quantity,
       }))
       await supabase.from('wmr_reports').insert(wmrRows)
+    }
+
+    const increasedItems = inventoryItems
+      .map((item) => ({
+        item,
+        quantity: getItemIncreasedQuantity(item),
+      }))
+      .filter((entry) => entry.quantity > 0)
+    const updatedIncreasedItems: typeof increasedItems = []
+
+    for (const { item, quantity } of increasedItems) {
+      const { error: updateQuantityError } = await supabase
+        .from('inventory')
+        .update({ quantity: (item.quantity ?? 0) + quantity })
+        .eq('item_id', item.item_id)
+
+      if (updateQuantityError) {
+        for (const updated of updatedIncreasedItems) {
+          await supabase
+            .from('inventory')
+            .update({ quantity: updated.item.quantity ?? 0 })
+            .eq('item_id', updated.item.item_id)
+        }
+        await supabase.from('daily_checks').delete().eq('check_id', checkData.check_id)
+        setSubmitError(updateQuantityError.message)
+        setSubmitting(false)
+        return
+      }
+
+      updatedIncreasedItems.push({ item, quantity })
     }
 
     const { error: turnoverError } = await supabase.from('shift_turnovers').insert({
@@ -316,16 +473,23 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
     })
 
     if (turnoverError) {
+      for (const updated of updatedIncreasedItems) {
+        await supabase
+          .from('inventory')
+          .update({ quantity: updated.item.quantity ?? 0 })
+          .eq('item_id', updated.item.item_id)
+      }
       await supabase.from('daily_checks').delete().eq('check_id', checkData.check_id)
       setSubmitError(turnoverError.message)
       setSubmitting(false)
       return
     }
 
-    const unserviceableCount = unserviceableItems.length
+    const reportableCount = reportableRows.reduce((total, row) => total + row.quantity, 0)
+    const increasedCount = increasedItems.reduce((total, row) => total + row.quantity, 0)
     setSubmitSuccess(
-      unserviceableCount > 0
-        ? `Shift turnover submitted. ${unserviceableCount} item(s) were marked unserviceable and drafted to WMR.`
+      reportableCount > 0 || increasedCount > 0
+        ? `Shift turnover submitted. ${reportableCount} item(s) were drafted to WMR and ${increasedCount} item(s) were added to inventory.`
         : 'Shift turnover submitted successfully.',
     )
     setSubmitting(false)
@@ -459,16 +623,26 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
 
                   <ul className="dept-turnover-list" aria-label="Department inventory turnover checklist">
                     {inventoryItems.map((item) => {
-                      const itemStateClass = item.condition === 'serviceable'
-                        ? ' is-serviceable'
-                        : item.condition === 'unserviceable'
+                      const selectedConditions = TURNOVER_CONDITIONS.filter((condition) => item.selectedConditions[condition.key])
+                      const hasReportableCondition = REPORTABLE_CONDITIONS.some((condition) => getConditionQuantity(item, condition) > 0)
+                      const totalLoggedQuantity = getItemTurnoverQuantity(item)
+                      const baseLoggedQuantity = getItemBaseTurnoverQuantity(item)
+                      const increasedQuantity = getItemIncreasedQuantity(item)
+                      const itemStateClass = selectedConditions.length > 0
+                        ? hasReportableCondition
                           ? ' is-unserviceable'
-                          : ''
+                          : ' is-serviceable'
+                        : ''
                       const quantityLabel = item.quantity === null
                         ? 'Qty: --'
                         : item.unit_of_measure
                           ? `Qty: ${item.quantity} ${item.unit_of_measure}`
                           : `Qty: ${item.quantity}`
+                      const totalQuantityLabel = item.quantity === null
+                        ? `Logged: ${totalLoggedQuantity}`
+                        : increasedQuantity > 0
+                          ? `Logged: ${baseLoggedQuantity}/${item.quantity} | New total: ${getItemResultQuantity(item)}`
+                          : `Logged: ${baseLoggedQuantity}/${item.quantity}`
 
                       return (
                         <li key={item.item_id} className={`dept-turnover-item${itemStateClass}`}>
@@ -482,28 +656,50 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
                             </div>
 
                             <div className="dept-turnover-status-actions">
-                              <button
-                                type="button"
-                                className={`dept-turnover-status-btn serviceable${item.condition === 'serviceable' ? ' active' : ''}`}
-                                onClick={() => setItemCondition(item.item_id, 'serviceable')}
-                                disabled={isReadOnly}
-                              >
-                                Serviceable
-                              </button>
-                              <button
-                                type="button"
-                                className={`dept-turnover-status-btn unserviceable${item.condition === 'unserviceable' ? ' active' : ''}`}
-                                onClick={() => setItemCondition(item.item_id, 'unserviceable')}
-                                disabled={isReadOnly}
-                              >
-                                Unserviceable
-                              </button>
+                              {TURNOVER_CONDITIONS.map((condition) => {
+                                const isSelected = item.selectedConditions[condition.key]
+                                const otherQuantity = BASE_QUANTITY_CONDITIONS.reduce(
+                                  (total, entry) => total + (entry === condition.key ? 0 : getConditionQuantity(item, entry)),
+                                  0,
+                                )
+                                const maxQuantity = condition.key === 'increased' || item.quantity === null
+                                  ? undefined
+                                  : Math.max(0, getItemQuantityLimit(item) - otherQuantity)
+
+                                return (
+                                  <div key={condition.key} className="dept-turnover-status-control">
+                                    <button
+                                      type="button"
+                                      className={`dept-turnover-status-btn ${condition.key}${isSelected ? ' active' : ''}`}
+                                      onClick={() => toggleItemCondition(item.item_id, condition.key)}
+                                      disabled={isReadOnly || (maxQuantity === 0 && !isSelected)}
+                                    >
+                                      {condition.label}
+                                    </button>
+                                    {isSelected && (
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        max={maxQuantity}
+                                        inputMode="numeric"
+                                        aria-label={`${condition.label} quantity for ${item.item_name}`}
+                                        className="dept-turnover-quantity-input"
+                                        value={item.conditionQuantities[condition.key]}
+                                        onChange={(event) => setItemConditionQuantity(item.item_id, condition.key, event.target.value)}
+                                        disabled={isReadOnly}
+                                      />
+                                    )}
+                                  </div>
+                                )
+                              })}
                             </div>
                           </div>
 
-                          {item.condition === 'unserviceable' && (
+                          <p className="dept-turnover-quantity-total">{totalQuantityLabel}</p>
+
+                          {hasReportableCondition && (
                             <div className="dept-form-group dept-turnover-remarks">
-                              <label htmlFor={`turnover-remarks-${item.item_id}`}>Damage remarks (optional)</label>
+                              <label htmlFor={`turnover-remarks-${item.item_id}`}>Remarks for defective or missing quantity (optional)</label>
                               <input
                                 id={`turnover-remarks-${item.item_id}`}
                                 type="text"
@@ -630,6 +826,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
                               <th>Item</th>
                               <th>Property No.</th>
                               <th>Condition</th>
+                              <th>Quantity</th>
                               <th>Remarks</th>
                             </tr>
                           </thead>
@@ -639,10 +836,11 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
                                 <td>{checkItem.item?.item_name ?? `Item #${checkItem.item_id}`}</td>
                                 <td>{checkItem.item?.property_no ?? '--'}</td>
                                 <td>
-                                  <span className={checkItem.condition === 'serviceable' ? 'dept-turnover-condition-ok' : 'dept-turnover-condition-bad'}>
+                                  <span className={REPORTABLE_CONDITIONS.includes(checkItem.condition as TurnoverCondition) ? 'dept-turnover-condition-bad' : 'dept-turnover-condition-ok'}>
                                     {checkItem.condition}
                                   </span>
                                 </td>
+                                <td>{checkItem.quantity_checked ?? '--'}</td>
                                 <td>{checkItem.remarks ?? '--'}</td>
                               </tr>
                             ))}

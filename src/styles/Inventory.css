@@ -1073,6 +1073,14 @@
   flex-wrap: wrap;
 }
 
+.stockpile-repack-actions {
+  padding: 12px 16px 0;
+}
+
+.stockpile-repack-add-button {
+  font-size: 13px;
+}
+
 .stockpile-release-picker-button {
   width: 100%;
   border: 1px solid #d1d5db;

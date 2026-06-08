@@ -383,6 +383,7 @@ export type Database = {
           check_item_id: number
           condition: string
           item_id: number
+          quantity_checked: number
           remarks: string | null
           scanned_at: string
           uid: string
@@ -392,6 +393,7 @@ export type Database = {
           check_item_id?: never
           condition: string
           item_id: number
+          quantity_checked?: number
           remarks?: string | null
           scanned_at?: string
           uid?: string
@@ -401,6 +403,7 @@ export type Database = {
           check_item_id?: never
           condition?: string
           item_id?: number
+          quantity_checked?: number
           remarks?: string | null
           scanned_at?: string
           uid?: string

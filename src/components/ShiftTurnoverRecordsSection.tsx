@@ -30,6 +30,7 @@ type ShiftTurnoverDetailItem = {
   propertyNo: string
   unit: string
   condition: string
+  quantityChecked: number | null
   remarks: string
   scannedAt: string
 }
@@ -37,6 +38,7 @@ type ShiftTurnoverDetailItem = {
 type RawShiftTurnoverDetailItem = {
   check_item_id: number
   condition: string
+  quantity_checked: number | null
   remarks: string | null
   scanned_at: string
   item_id: number
@@ -265,7 +267,7 @@ function ShiftTurnoverRecordsSection() {
 
     const { data, error: detailLoadError } = await supabase
       .from('daily_check_items')
-      .select('check_item_id, item_id, condition, remarks, scanned_at, item:inventory(item_name, property_no, unit_of_measure)')
+      .select('check_item_id, item_id, condition, quantity_checked, remarks, scanned_at, item:inventory(item_name, property_no, unit_of_measure)')
       .eq('check_id', record.dailyCheckId)
       .order('scanned_at', { ascending: true })
 
@@ -281,6 +283,7 @@ function ShiftTurnoverRecordsSection() {
       propertyNo: item.item?.property_no ?? '—',
       unit: item.item?.unit_of_measure ?? 'units',
       condition: item.condition,
+      quantityChecked: item.quantity_checked,
       remarks: item.remarks ?? '—',
       scannedAt: formatDateTimeLabel(item.scanned_at),
     }))
@@ -493,6 +496,7 @@ function ShiftTurnoverRecordsSection() {
                       <th scope="col">Item</th>
                       <th scope="col">Property No.</th>
                       <th scope="col">Condition</th>
+                      <th scope="col">Quantity</th>
                       <th scope="col">Remarks</th>
                       <th scope="col">Scanned At</th>
                     </tr>
@@ -500,11 +504,11 @@ function ShiftTurnoverRecordsSection() {
                   <tbody>
                     {detailLoading ? (
                       <tr>
-                        <td colSpan={5}>Loading checklist items...</td>
+                        <td colSpan={6}>Loading checklist items...</td>
                       </tr>
                     ) : detailItems.length === 0 ? (
                       <tr>
-                        <td colSpan={5}>No checklist items found.</td>
+                        <td colSpan={6}>No checklist items found.</td>
                       </tr>
                     ) : (
                       detailItems.map((item) => (
@@ -512,6 +516,7 @@ function ShiftTurnoverRecordsSection() {
                           <td>{item.itemName} ({item.unit})</td>
                           <td>{item.propertyNo}</td>
                           <td style={{ textTransform: 'capitalize' }}>{item.condition}</td>
+                          <td>{item.quantityChecked ?? '—'}</td>
                           <td>{item.remarks}</td>
                           <td>{item.scannedAt}</td>
                         </tr>

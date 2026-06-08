@@ -65,6 +65,7 @@ type VehicleRow = Tables<'vehicles'> & {
 }
 type VehicleRepairRow = Tables<'vehicle_repairs'>
 type UserRow = Tables<'users'>
+type BorrowedItemRow = Tables<'borrowed_items'>
 
 type StockpileReleaseLog = {
   log: DistributionLogRow
@@ -442,8 +443,6 @@ function DashboardPage() {
     | 'total'
     | 'serviceable'
     | 'unserviceable'
-    | 'purchased'
-    | 'donated'
     | 'low'
     | 'fullStock'
     | 'expired'
@@ -453,6 +452,9 @@ function DashboardPage() {
     | 'stockpileLow'
     | 'stockpileFull'
     | 'stockpileExpired'
+    | 'borrowedActive'
+    | 'borrowedOverdue'
+    | 'borrowedReturned'
     | null
   >(null)
   const [dashboardDrilldownPage, setDashboardDrilldownPage] = useState(1)
@@ -563,7 +565,7 @@ function DashboardPage() {
   const [stockpileItems, setStockpileItems] = useState<StockpileRow[]>([])
   const [stockpileLoading, setStockpileLoading] = useState(false)
   const [stockpileError, setStockpileError] = useState<string | null>(null)
-  const [stockpileMode, setStockpileMode] = useState<'list' | 'logs' | 'expired' | 'release'>('list')
+  const [stockpileMode, setStockpileMode] = useState<'list' | 'logs' | 'expired' | 'release' | 'repack'>('list')
   const [stockpileReleaseLogs, setStockpileReleaseLogs] = useState<DistributionLogRow[]>([])
   const [stockpileReleaseLoading, setStockpileReleaseLoading] = useState(false)
   const [stockpileReleaseItems, setStockpileReleaseItems] = useState<StockpileReleaseDraftItem[]>([
@@ -573,6 +575,12 @@ function DashboardPage() {
   const [stockpileReleaseIssuedToInput, setStockpileReleaseIssuedToInput] = useState('')
   const [stockpileReleaseReasonInput, setStockpileReleaseReasonInput] = useState('')
   const [releasingStockpile, setReleasingStockpile] = useState(false)
+  const [repackItems, setRepackItems] = useState<Array<{ stockpileId: string; quantity: string }>>([{ stockpileId: '', quantity: '' }])
+  const [repackResultName, setRepackResultName] = useState('')
+  const [repackResultQuantity, setRepackResultQuantity] = useState('1')
+  const [repackingStockpile, setRepackingStockpile] = useState(false)
+  const [borrowedDashboardItems, setBorrowedDashboardItems] = useState<BorrowedItemRow[]>([])
+  const [borrowedDashboardLoading, setBorrowedDashboardLoading] = useState(false)
 
   useAutoDismissMessage(inventoryError, () => setInventoryError(null))
   useAutoDismissMessage(wmrError, () => setWmrError(null))
@@ -850,6 +858,27 @@ function DashboardPage() {
   }, [realtimeTick])
 
   useEffect(() => {
+    const fetchBorrowedDashboardItems = async () => {
+      setBorrowedDashboardLoading(true)
+
+      const { data, error: borrowedFetchError } = await supabase
+        .from('borrowed_items')
+        .select('*')
+        .order('date_borrowed', { ascending: false })
+
+      if (borrowedFetchError) {
+        setError((prev) => prev ?? borrowedFetchError.message)
+      } else {
+        setBorrowedDashboardItems(data ?? [])
+      }
+
+      setBorrowedDashboardLoading(false)
+    }
+
+    void fetchBorrowedDashboardItems()
+  }, [realtimeTick])
+
+  useEffect(() => {
     const fetchWmrReports = async () => {
       setWmrLoading(true)
       setWmrError(null)
@@ -1107,6 +1136,9 @@ function DashboardPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_photos' }, () =>
         setRealtimeTick((t) => t + 1),
       )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowed_items' }, () =>
+        setRealtimeTick((t) => t + 1),
+      )
       .subscribe()
 
     return () => {
@@ -1164,6 +1196,20 @@ function DashboardPage() {
     const day = String(parsedDate.getDate()).padStart(2, '0')
 
     return `${year}/${month}/${day}`
+  }
+  const getBorrowedItemStatus = (item: BorrowedItemRow): 'Returned' | 'Overdue' | 'Borrowed' => {
+    if ((item.status ?? '').trim().toLowerCase() === 'returned') return 'Returned'
+
+    const returnDate = parseDateLikeValue(item.return_date)
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+
+    if (returnDate) {
+      returnDate.setHours(0, 0, 0, 0)
+      if (returnDate < now) return 'Overdue'
+    }
+
+    return 'Borrowed'
   }
   const parseNumericInput = (value: string) => {
     const parsed = value.trim() ? Number(value) : null
@@ -1760,18 +1806,31 @@ function DashboardPage() {
     )
   }
 
-  const purchasedCount = inventoryItems.filter(
-    (item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'purchased',
-  ).length
-  const donatedCount = inventoryItems.filter((item) => (item.acquisition_mode ?? '').trim().toLowerCase() === 'donated').length
   const lowStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'Low').length
   const fullStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'Full Stock').length
+  const inventoryById = new Map(inventoryItems.map((item) => [item.item_id, item]))
+  const borrowedTotalCount = borrowedDashboardItems.length
+  const borrowedReturnedCount = borrowedDashboardItems.filter(
+    (item) => getBorrowedItemStatus(item) === 'Returned',
+  ).length
+  const borrowedOverdueCount = borrowedDashboardItems.filter(
+    (item) => getBorrowedItemStatus(item) === 'Overdue',
+  ).length
+  const borrowedActiveCount = borrowedDashboardItems.filter(
+    (item) => getBorrowedItemStatus(item) === 'Borrowed',
+  ).length
+  const recentBorrowedDashboardItems = borrowedDashboardItems
+    .slice()
+    .sort((a, b) => {
+      const aTime = parseDateLikeValue(a.date_borrowed)?.getTime() ?? 0
+      const bTime = parseDateLikeValue(b.date_borrowed)?.getTime() ?? 0
+      return bTime - aTime
+    })
+    .slice(0, 5)
   const dashboardMetricLabelMap = {
     total: 'Total Items',
     serviceable: 'Serviceable',
     unserviceable: 'Unserviceable',
-    purchased: 'Purchased',
-    donated: 'Donated',
     low: 'Low Stock',
     fullStock: 'Full Stock',
     expired: 'Expired Items',
@@ -1781,6 +1840,9 @@ function DashboardPage() {
     stockpileLow: 'Low Stock Stockpiles',
     stockpileFull: 'Full Stock Stockpiles',
     stockpileExpired: 'Expired Stockpiles',
+    borrowedActive: 'Borrowed Items',
+    borrowedOverdue: 'Overdue Borrowed Items',
+    borrowedReturned: 'Returned Borrowed Items',
   } as const
 
   const isVehicleDrilldown =
@@ -1791,19 +1853,20 @@ function DashboardPage() {
     dashboardMetricDrilldown === 'stockpileLow' ||
     dashboardMetricDrilldown === 'stockpileFull' ||
     dashboardMetricDrilldown === 'stockpileExpired'
+  const isBorrowedDrilldown =
+    dashboardMetricDrilldown === 'borrowedActive' ||
+    dashboardMetricDrilldown === 'borrowedOverdue' ||
+    dashboardMetricDrilldown === 'borrowedReturned'
 
   const dashboardDrilldownItems = dashboardMetricDrilldown
     ? inventoryItems.filter((item) => {
         const status = getInventoryStatus(item)
-        const source = (item.acquisition_mode ?? '').trim().toLowerCase()
 
         if (status === 'Archived') return false
 
         if (dashboardMetricDrilldown === 'total') return true
         if (dashboardMetricDrilldown === 'serviceable') return status === 'Serviceable'
         if (dashboardMetricDrilldown === 'unserviceable') return status === 'Unserviceable'
-        if (dashboardMetricDrilldown === 'purchased') return source === 'purchased'
-        if (dashboardMetricDrilldown === 'donated') return source === 'donated'
         if (dashboardMetricDrilldown === 'low') return status === 'Low'
         if (dashboardMetricDrilldown === 'fullStock') return status === 'Full Stock'
         if (dashboardMetricDrilldown === 'expired') return status === 'Expired'
@@ -1842,11 +1905,24 @@ function DashboardPage() {
         return false
       })
     : []
+  const dashboardDrilldownBorrowedItems = isBorrowedDrilldown
+    ? borrowedDashboardItems.filter((item) => {
+        const status = getBorrowedItemStatus(item)
+
+        if (dashboardMetricDrilldown === 'borrowedActive') return status === 'Borrowed'
+        if (dashboardMetricDrilldown === 'borrowedOverdue') return status === 'Overdue'
+        if (dashboardMetricDrilldown === 'borrowedReturned') return status === 'Returned'
+
+        return false
+      })
+    : []
   const dashboardDrilldownItemCount = isVehicleDrilldown
     ? dashboardDrilldownVehicles.length
     : isStockpileDrilldown
       ? dashboardDrilldownStockpiles.length
-      : dashboardDrilldownItems.length
+      : isBorrowedDrilldown
+        ? dashboardDrilldownBorrowedItems.length
+        : dashboardDrilldownItems.length
   const dashboardDrilldownTotalPages = Math.max(
     1,
     Math.ceil(dashboardDrilldownItemCount / DASHBOARD_DRILLDOWN_PAGE_SIZE),
@@ -1860,6 +1936,10 @@ function DashboardPage() {
     (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
   )
   const dashboardDrilldownPaginatedStockpiles = dashboardDrilldownStockpiles.slice(
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE,
+    (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
+  )
+  const dashboardDrilldownPaginatedBorrowedItems = dashboardDrilldownBorrowedItems.slice(
     (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE,
     (dashboardDrilldownPage - 1) * DASHBOARD_DRILLDOWN_PAGE_SIZE + DASHBOARD_DRILLDOWN_PAGE_SIZE,
   )
@@ -4050,6 +4130,31 @@ function DashboardPage() {
     setStockpileReleaseItems((prev) => (prev.length === 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index)))
   }
 
+  const addRepackItem = () => {
+    setRepackItems((prev) => [...prev, { stockpileId: '', quantity: '' }])
+  }
+
+  const updateRepackItem = (index: number, field: keyof StockpileReleaseDraftItem, value: string) => {
+    if (field === 'quantity') {
+      const repackItem = repackItems[index]
+      if (repackItem && repackItem.stockpileId) {
+        const stockpileId = Number(repackItem.stockpileId)
+        const selectedItem = stockpileItems.find((item) => item.stockpile_id === stockpileId)
+        const availableQty = Number(selectedItem?.quantity_on_hand ?? 0)
+        const enteredQty = Number(value)
+        
+        if (!Number.isNaN(enteredQty) && enteredQty > availableQty) {
+          value = String(availableQty)
+        }
+      }
+    }
+    setRepackItems((prev) => prev.map((item, itemIndex) => (itemIndex === index ? { ...item, [field]: value } : item)))
+  }
+
+  const removeRepackItem = (index: number) => {
+    setRepackItems((prev) => (prev.length === 1 ? prev : prev.filter((_, itemIndex) => itemIndex !== index)))
+  }
+
   const handleReleaseStockpile = async () => {
     const validReleaseItems = stockpileReleaseItems
       .map((item, index) => ({ ...item, index }))
@@ -4219,6 +4324,167 @@ function DashboardPage() {
     setStockpileReleaseAttachmentFiles([])
     setStockpileReleaseIssuedToInput('')
     setStockpileReleaseReasonInput('')
+  }
+
+  const handleRepackStockpile = async () => {
+    const validRepackItems = repackItems
+      .map((item, index) => ({ ...item, index }))
+      .filter((item) => item.stockpileId.trim() && item.quantity.trim())
+
+    if (!repackResultName.trim()) {
+      setStockpileError('Result item name is required.')
+      return
+    }
+
+    if (!repackResultQuantity.trim()) {
+      setStockpileError('Result quantity is required.')
+      return
+    }
+
+    const resultQty = Number(repackResultQuantity)
+    if (Number.isNaN(resultQty) || resultQty <= 0) {
+      setStockpileError('Result quantity must be a positive number.')
+      return
+    }
+
+    if (validRepackItems.length === 0) {
+      setStockpileError('Add at least one stockpile item to repack.')
+      return
+    }
+
+    const groupedRepacks = new Map<number, { perPackQuantity: number; row: StockpileRow }>()
+
+    for (const item of validRepackItems) {
+      const stockpileId = Number(item.stockpileId)
+      const repackQty = Number(item.quantity)
+
+      if (!Number.isInteger(stockpileId)) {
+        setStockpileError(`Line ${item.index + 1}: select a stockpile item.`)
+        return
+      }
+
+      if (Number.isNaN(repackQty) || repackQty <= 0) {
+        setStockpileError(`Line ${item.index + 1}: repack quantity must be a positive number.`)
+        return
+      }
+
+      const row = stockpileItems.find((entry) => entry.stockpile_id === stockpileId)
+      if (!row) {
+        setStockpileError(`Line ${item.index + 1}: selected stockpile item was not found.`)
+        return
+      }
+
+      const nextPerPackQuantity = (groupedRepacks.get(stockpileId)?.perPackQuantity ?? 0) + repackQty
+      const availableQty = Number(row.quantity_on_hand ?? 0)
+
+      if (!Number.isFinite(availableQty) || availableQty <= 0) {
+        setStockpileError(`Line ${item.index + 1}: selected item has no quantity on hand.`)
+        return
+      }
+
+      const totalRequiredQty = nextPerPackQuantity * resultQty
+
+      if (totalRequiredQty > availableQty) {
+        setStockpileError(
+          `Line ${item.index + 1}: requires ${totalRequiredQty} total units for ${resultQty} pack(s), which exceeds quantity on hand.`,
+        )
+        return
+      }
+
+      groupedRepacks.set(stockpileId, { perPackQuantity: nextPerPackQuantity, row })
+    }
+
+    const repackEntries = Array.from(groupedRepacks.values())
+    const repackSources = repackEntries
+      .map((entry) => (entry.row.category ?? '').trim().toLowerCase())
+      .filter((source) => source.length > 0)
+    const hasPurchasedSource = repackSources.includes('purchased')
+    const hasDonatedSource = repackSources.includes('donated')
+    const repackAcquisitionMode =
+      hasPurchasedSource && !hasDonatedSource
+        ? 'Purchased'
+        : hasDonatedSource && !hasPurchasedSource
+          ? 'Donated'
+          : null
+    const repackUnit = 'Pack'
+
+    setRepackingStockpile(true)
+    setStockpileError(null)
+
+    try {
+      const updates = Array.from(groupedRepacks.entries()).map(async ([stockpileId, entry]) => {
+        const updatedQty = Number(entry.row.quantity_on_hand ?? 0) - entry.perPackQuantity * resultQty
+        const result = await supabase.from('inventory').update({ quantity: updatedQty }).eq('item_id', stockpileId)
+        return { stockpileId, updatedQty, error: result.error }
+      })
+
+      const updateResults = await Promise.all(updates)
+      const failedUpdate = updateResults.find((result) => result.error)
+
+      if (failedUpdate) {
+        await Promise.all(
+          updateResults
+            .filter((result) => !result.error)
+            .map((result) =>
+              supabase
+                .from('inventory')
+                .update({ quantity: groupedRepacks.get(result.stockpileId)?.row.quantity_on_hand ?? 0 })
+                .eq('item_id', result.stockpileId),
+            ),
+        )
+        setStockpileError(failedUpdate.error?.message ?? 'Unable to update stockpile quantities.')
+        setRepackingStockpile(false)
+        return
+      }
+
+      const { error: insertError } = await supabase.from('inventory').insert([
+        {
+          item_name: repackResultName.trim(),
+          item_type: 'Stockpile',
+          acquisition_mode: repackAcquisitionMode,
+          quantity: resultQty,
+          unit_of_measure: repackUnit,
+          date_acquired: new Date().toISOString().slice(0, 10),
+          status: null,
+        },
+      ])
+
+      if (insertError) {
+        await Promise.all(
+          updateResults.map((result) =>
+            supabase
+              .from('inventory')
+              .update({ quantity: groupedRepacks.get(result.stockpileId)?.row.quantity_on_hand ?? 0 })
+              .eq('item_id', result.stockpileId),
+          ),
+        )
+        setStockpileError(insertError.message)
+        setRepackingStockpile(false)
+        return
+      }
+
+      const { data: reloadedStockpiles, error: reloadStockpileError } = await supabase
+        .from('inventory')
+        .select('*')
+        .eq('item_type', 'Stockpile')
+        .order('item_id', { ascending: false })
+
+      if (reloadStockpileError) {
+        setStockpileError(reloadStockpileError.message)
+      } else {
+        setStockpileItems((reloadedStockpiles ?? []).map(mapInventoryItemToStockpileRow))
+      }
+
+      setRepackingStockpile(false)
+      setStockpileMode('list')
+      setRepackItems([{ stockpileId: '', quantity: '' }])
+      setRepackResultName('')
+      setRepackResultQuantity('1')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Repacking failed.'
+      setStockpileError(message)
+      setRepackingStockpile(false)
+    }
   }
 
   const handlePrintStockpileReleaseLogs = (period?: ReportPeriod, startDate?: string, endDate?: string) => {
@@ -4929,10 +5195,14 @@ function DashboardPage() {
   const availableReleaseStockpileItems = stockpileItems.filter((item) => {
     const explicitStatus = item.status?.trim() || null
     const expiration = item.expiration_date ? new Date(item.expiration_date) : null
-    return !(
+    const isExpired =
       explicitStatus === 'Expired' ||
       (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
-    )
+
+    if (isExpired) return false
+
+    // Stockpile Release should only release repack-generated packs.
+    return (item.unit_of_measure ?? '').trim().toLowerCase() === 'pack'
   })
 
   const parsedStockpileReleaseLogs: StockpileReleaseLog[] = stockpileReleaseLogs.flatMap((log) => {
@@ -5263,71 +5533,6 @@ function DashboardPage() {
                 </div>
               </article>
 
-              <article className="metric-group-card" aria-label="Acquisition classification">
-                <header className="metric-group-header">
-                  <h3>Acquisition Source</h3>
-                </header>
-                <div className="metric-group-grid metric-group-grid-2">
-                  <article
-                    className="metric-card dashboard-source-card dashboard-source-card-purchased metric-card-clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDashboardMetricDrilldown('purchased')}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setDashboardMetricDrilldown('purchased')
-                      }
-                    }}
-                  >
-                    <div className="metric-text">
-                      <div className="dashboard-source-card-label">Purchased</div>
-                      <div className="dashboard-source-card-value">{formatValue(purchasedCount)}</div>
-                    </div>
-                    <div className="metric-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path
-                          d="M6 8.5h12l-1 10.5H7L6 8.5Zm2.2 0V7.2A3.8 3.8 0 0 1 12 3.4a3.8 3.8 0 0 1 3.8 3.8v1.3"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  </article>
-                  <article
-                    className="metric-card dashboard-source-card dashboard-source-card-donated metric-card-clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDashboardMetricDrilldown('donated')}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setDashboardMetricDrilldown('donated')
-                      }
-                    }}
-                  >
-                    <div className="metric-text">
-                      <div className="dashboard-source-card-label">Donated</div>
-                      <div className="dashboard-source-card-value">{formatValue(donatedCount)}</div>
-                    </div>
-                    <div className="metric-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path
-                          d="M12 21s-6.8-4.3-9-8.8C1.2 8.9 3.2 5.5 6.8 5.2c1.9-.2 3.8.8 5.2 2.5 1.4-1.7 3.3-2.7 5.2-2.5 3.6.3 5.6 3.7 3.8 7-2.2 4.5-9 8.8-9 8.8Z"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  </article>
-                </div>
-              </article>
 
               <article className="metric-group-card" aria-label="Vehicle classification">
                 <header className="metric-group-header">
@@ -5418,6 +5623,100 @@ function DashboardPage() {
                   </article>
                 </div>
               </article>
+
+              <article className="metric-group-card" aria-label="Borrowed item classification">
+                <header className="metric-group-header">
+                  <h3>Borrowed Items</h3>
+                </header>
+                <div className="metric-group-grid metric-group-grid-3">
+                  <article
+                    className="metric-card metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('borrowedActive')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('borrowedActive')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Borrowed</div>
+                      <div className="metric-value">{formatValue(borrowedActiveCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M8 6.5h10M8 11.5h10M8 16.5h6M5.5 5.5h.01M5.5 10.5h.01M5.5 15.5h.01"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.5"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-low-stock metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('borrowedOverdue')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('borrowedOverdue')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Overdue</div>
+                      <div className="metric-value">{formatValue(borrowedOverdueCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeWidth="1.4" />
+                        <path
+                          d="M12 8v4l2.6 1.6"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
+                          strokeLinecap="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-serviceable metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('borrowedReturned')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('borrowedReturned')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Returned</div>
+                      <div className="metric-value">{formatValue(borrowedReturnedCount)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M4.5 12.5 9 17l10.5-10.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                </div>
+              </article>
             </section>
 
           <section className="dashboard-row" aria-label="Charts">
@@ -5479,6 +5778,67 @@ function DashboardPage() {
               )}
             </div>
           </article>
+          </section>
+
+          <section className="dashboard-row" aria-label="Borrowed items overview">
+            <article className="panel panel-wide" aria-label="Recent Borrowed Items">
+              <header className="panel-header borrowed-items-panel-header">
+                <h3>Recent Borrowed Items</h3>
+                <button
+                  type="button"
+                  className="borrowed-items-panel-link"
+                  onClick={() => setActiveSection('borrowed-items')}
+                >
+                  View all ({formatValue(borrowedTotalCount)})
+                </button>
+              </header>
+              <div className="panel-body">
+                {borrowedDashboardLoading ? (
+                  <div className="panel-body-placeholder">Loading borrowed items...</div>
+                ) : recentBorrowedDashboardItems.length === 0 ? (
+                  <div className="panel-body-placeholder">No borrowed items yet.</div>
+                ) : (
+                  <div className="dashboard-drilldown-table-wrap">
+                    <table className="dashboard-drilldown-table borrowed-items-dashboard-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Item</th>
+                          <th scope="col">Borrower</th>
+                          <th scope="col">Borrowed Date</th>
+                          <th scope="col">Due Date</th>
+                          <th scope="col">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {recentBorrowedDashboardItems.map((entry) => {
+                          const linkedItem = entry.item_id != null ? inventoryById.get(entry.item_id) : null
+                          const itemName = linkedItem?.item_name?.trim() || `Item #${entry.item_id ?? 'N/A'}`
+                          const propertyNo = linkedItem?.property_no?.trim() || ''
+                          const borrowedStatus = getBorrowedItemStatus(entry)
+
+                          return (
+                            <tr key={entry.borrowed_id}>
+                              <td>
+                                <strong>{itemName}</strong>
+                                {propertyNo ? <span className="borrowed-items-dashboard-meta">{propertyNo}</span> : null}
+                              </td>
+                              <td>{entry.borrower_name}</td>
+                              <td>{formatDisplayDate(entry.date_borrowed)}</td>
+                              <td>{formatDisplayDate(entry.return_date)}</td>
+                              <td>
+                                <span className={`borrowed-items-dashboard-status borrowed-items-dashboard-status-${borrowedStatus.toLowerCase()}`}>
+                                  {borrowedStatus}
+                                </span>
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </article>
           </section>
 
           </>
@@ -6657,6 +7017,17 @@ function DashboardPage() {
               closeStockpileReleasePage={closeStockpileReleasePage}
               handleReleaseStockpile={handleReleaseStockpile}
               releasingStockpile={releasingStockpile}
+            repackItems={repackItems}
+            setRepackItems={setRepackItems}
+            repackResultName={repackResultName}
+            setRepackResultName={setRepackResultName}
+            repackResultQuantity={repackResultQuantity}
+            setRepackResultQuantity={setRepackResultQuantity}
+            addRepackItem={addRepackItem}
+            updateRepackItem={updateRepackItem}
+            removeRepackItem={removeRepackItem}
+            handleRepackStockpile={handleRepackStockpile}
+            repackingStockpile={repackingStockpile}
             handlePrintReleaseLogs={handlePrintStockpileReleaseLogs}
             formatDisplayDate={formatDisplayDate}
             onExportCsv={handleExportStockpileCsv}
@@ -7670,7 +8041,7 @@ function DashboardPage() {
           >
             <header className="panel-header dashboard-drilldown-header">
               <h3 id="dashboard-drilldown-modal-title">
-                {dashboardMetricLabelMap[dashboardMetricDrilldown]} {isVehicleDrilldown ? 'Vehicles' : isStockpileDrilldown ? 'Stockpiles' : 'Items'} ({formatValue(dashboardDrilldownItemCount)})
+                {dashboardMetricLabelMap[dashboardMetricDrilldown]} {isVehicleDrilldown ? 'Vehicles' : isStockpileDrilldown ? 'Stockpiles' : isBorrowedDrilldown ? 'Records' : 'Items'} ({formatValue(dashboardDrilldownItemCount)})
               </h3>
               <button
                 type="button"
@@ -7688,7 +8059,9 @@ function DashboardPage() {
                     ? 'No vehicles found for this metric.'
                     : isStockpileDrilldown
                       ? 'No stockpiles found for this metric.'
-                      : 'No items found for this metric.'}
+                      : isBorrowedDrilldown
+                        ? 'No borrowed records found for this metric.'
+                        : 'No items found for this metric.'}
                 </div>
               ) : (
                 <div className="dashboard-drilldown-table-wrap">
@@ -7736,6 +8109,35 @@ function DashboardPage() {
                             <td>{formatDisplayDate(item.expiration_date)}</td>
                           </tr>
                         ))}
+                      </tbody>
+                    </table>
+                  ) : isBorrowedDrilldown ? (
+                    <table className="dashboard-drilldown-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Item</th>
+                          <th scope="col">Borrower</th>
+                          <th scope="col">Borrowed Date</th>
+                          <th scope="col">Due Date</th>
+                          <th scope="col">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dashboardDrilldownPaginatedBorrowedItems.map((entry) => {
+                          const linkedItem = entry.item_id != null ? inventoryById.get(entry.item_id) : null
+                          const itemName = linkedItem?.item_name?.trim() || `Item #${entry.item_id ?? 'N/A'}`
+                          const borrowedStatus = getBorrowedItemStatus(entry)
+
+                          return (
+                            <tr key={`drilldown-borrowed-${entry.borrowed_id}`}>
+                              <td>{itemName}</td>
+                              <td>{entry.borrower_name}</td>
+                              <td>{formatDisplayDate(entry.date_borrowed)}</td>
+                              <td>{formatDisplayDate(entry.return_date)}</td>
+                              <td>{borrowedStatus}</td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   ) : (
