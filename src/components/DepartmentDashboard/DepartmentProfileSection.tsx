@@ -33,6 +33,20 @@ interface EditForm {
   confirm_password: string
 }
 
+const hashPasswordForStorage = async (password: string) => {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('Secure hashing is not available in this environment.')
+  }
+
+  const encoded = new TextEncoder().encode(password)
+  const digest = await window.crypto.subtle.digest('SHA-256', encoded)
+  const hashHex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+
+  return `sha256:${hashHex}`
+}
+
 export default function DepartmentProfileSection({ userId, onSignOut, isReadOnly = false }: Props) {
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -132,6 +146,14 @@ export default function DepartmentProfileSection({ userId, onSignOut, isReadOnly
       if (form.new_password) {
         const { error: pwErr } = await supabase.auth.updateUser({ password: form.new_password })
         if (pwErr) throw pwErr
+
+        const passwordHash = await hashPasswordForStorage(form.new_password)
+        const { error: pwStatusErr } = await supabase
+          .from('users')
+          .update({ password_hash: passwordHash, must_change_password: false })
+          .eq('id', userId)
+
+        if (pwStatusErr) throw pwStatusErr
       }
       setProfile((prev) => prev ? { ...prev, ...updates } : prev)
       setEditing(false)

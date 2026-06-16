@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import SignInPage from './SignInPage.tsx'
 import DashboardPage from './DashboardPage'
 import { DepartmentDashboardPage } from './DepartmentDashboard'
@@ -8,9 +8,126 @@ import '../styles/App.css'
 // Auto-logout after 5 minutes of inactivity for session security
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 
+const hashPasswordForStorage = async (password: string) => {
+	if (typeof window === 'undefined' || !window.crypto?.subtle) {
+		throw new Error('Secure hashing is not available in this environment.')
+	}
+
+	const encoded = new TextEncoder().encode(password)
+	const digest = await window.crypto.subtle.digest('SHA-256', encoded)
+	const hashHex = Array.from(new Uint8Array(digest))
+		.map((byte) => byte.toString(16).padStart(2, '0'))
+		.join('')
+
+	return `sha256:${hashHex}`
+}
+
+function ForcePasswordChange({ userId, onComplete }: { userId: string; onComplete: () => void }) {
+	const [newPassword, setNewPassword] = useState('')
+	const [confirmPassword, setConfirmPassword] = useState('')
+	const [loading, setLoading] = useState(false)
+	const [error, setError] = useState<string | null>(null)
+
+	const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+		event.preventDefault()
+		setError(null)
+
+		if (newPassword.length < 8) {
+			setError('New password must be at least 8 characters.')
+			return
+		}
+
+		if (newPassword !== confirmPassword) {
+			setError('Password confirmation does not match.')
+			return
+		}
+
+		setLoading(true)
+
+		const { error: updatePasswordError } = await supabase.auth.updateUser({ password: newPassword })
+		if (updatePasswordError) {
+			setError(updatePasswordError.message)
+			setLoading(false)
+			return
+		}
+
+		try {
+			const passwordHash = await hashPasswordForStorage(newPassword)
+			const { error: updateProfileError } = await supabase
+				.from('users')
+				.update({ password_hash: passwordHash, must_change_password: false })
+				.eq('id', userId)
+
+			if (updateProfileError) {
+				setError(updateProfileError.message)
+				setLoading(false)
+				return
+			}
+		} catch (hashError) {
+			setError(hashError instanceof Error ? hashError.message : 'Failed to save password status.')
+			setLoading(false)
+			return
+		}
+
+		setLoading(false)
+		onComplete()
+	}
+
+	return (
+		<main className="signin-page">
+			<div className="signin-shell">
+				<section className="signin-card" aria-label="Change initial password">
+					<div className="signin-right" style={{ margin: '0 auto' }}>
+						<h2 className="signin-heading">CHANGE PASSWORD</h2>
+						<p className="signin-forgot-desc">
+							For account security, set a new password before using KABAN.
+						</p>
+
+						<form className="signin-form" onSubmit={handleSubmit}>
+							<div className="field-group">
+								<label htmlFor="forced-new-password">New Password</label>
+								<input
+									id="forced-new-password"
+									type="password"
+									placeholder="Enter new password"
+									autoComplete="new-password"
+									value={newPassword}
+									onChange={(event) => setNewPassword(event.target.value)}
+									required
+								/>
+							</div>
+
+							<div className="field-group">
+								<label htmlFor="forced-confirm-password">Confirm New Password</label>
+								<input
+									id="forced-confirm-password"
+									type="password"
+									placeholder="Confirm new password"
+									autoComplete="new-password"
+									value={confirmPassword}
+									onChange={(event) => setConfirmPassword(event.target.value)}
+									required
+								/>
+							</div>
+
+							{error && <p className="signin-error">{error}</p>}
+
+							<button type="submit" className="primary-button" disabled={loading}>
+								{loading ? 'Updating...' : 'Update Password'}
+							</button>
+						</form>
+					</div>
+				</section>
+			</div>
+		</main>
+	)
+}
+
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null)
 	const [dashboardTarget, setDashboardTarget] = useState<'admin' | 'department' | null>(null)
+	const [mustChangePassword, setMustChangePassword] = useState(false)
+	const [currentUserId, setCurrentUserId] = useState<string | null>(null)
 	const [isReadOnlyAccount, setIsReadOnlyAccount] = useState(false)
 	const [departmentName, setDepartmentName] = useState('Department')
 	const [departmentCode, setDepartmentCode] = useState('')
@@ -71,7 +188,7 @@ function App() {
 		const getDashboardTarget = async (userId: string) => {
 			const { data, error } = await supabase
 				.from('users')
-				.select('role, department_id, is_archived, is_locked, created_at')
+				.select('role, department_id, is_archived, is_locked, created_at, must_change_password')
 				.eq('id', userId)
 				.maybeSingle()
 
@@ -82,13 +199,13 @@ function App() {
 
 			if (normalizedRole === 'super admin' || normalizedRole === 'admin') {
 				if (data.is_locked) return null
-				return { kind: 'admin' as const, isReadOnly: false }
+				return { kind: 'admin' as const, isReadOnly: false, mustChangePassword: Boolean(data.must_change_password) }
 			}
 
 			if (normalizedRole === 'staff') {
 				if (!data.department_id) {
 					if (data.is_locked) return null
-					return { kind: 'department' as const, departmentName: 'Department', departmentId: null, isReadOnly: false }
+					return { kind: 'department' as const, departmentName: 'Department', departmentId: null, isReadOnly: false, mustChangePassword: Boolean(data.must_change_password) }
 				}
 
 				const { data: department } = await supabase
@@ -109,6 +226,7 @@ function App() {
 					departmentCode,
 					departmentId: data.department_id,
 					isReadOnly: isLocked && isNebruStaff,
+					mustChangePassword: Boolean(data.must_change_password),
 				}
 			}
 
@@ -122,6 +240,8 @@ function App() {
 				if (isMounted) {
 					setIsAuthenticated(false)
 					setDashboardTarget(null)
+					setMustChangePassword(false)
+					setCurrentUserId(null)
 					setIsReadOnlyAccount(false)
 				}
 				return
@@ -134,6 +254,8 @@ function App() {
 				if (isMounted) {
 					setIsAuthenticated(false)
 					setDashboardTarget(null)
+					setMustChangePassword(false)
+					setCurrentUserId(null)
 					setIsReadOnlyAccount(false)
 				}
 				return
@@ -142,6 +264,8 @@ function App() {
 			if (isMounted) {
 				setIsAuthenticated(true)
 				setDashboardTarget(target.kind)
+				setMustChangePassword(Boolean(target.mustChangePassword))
+				setCurrentUserId(session.user.id)
 				setIsReadOnlyAccount(Boolean(target.isReadOnly))
 				if (target.kind === 'department') {
 					setDepartmentName(target.departmentName)
@@ -204,6 +328,18 @@ function App() {
 	}
 
 	if (isAuthenticated) {
+		if (mustChangePassword) {
+			return (
+				<>
+					<ForcePasswordChange
+						userId={currentUserId ?? ''}
+						onComplete={() => setMustChangePassword(false)}
+					/>
+					{sessionTimeoutToast}
+				</>
+			)
+		}
+
 		if (dashboardTarget === 'department') {
 			return (
 				<>

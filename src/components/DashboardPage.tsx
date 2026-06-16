@@ -1102,7 +1102,7 @@ function DashboardPage() {
     setParUnitInput(selectedItem.unit_of_measure ?? '')
     setParDescriptionInput(selectedItem.item_name ?? '')
     setParPropertyNoInput(
-      selectedItem.property_no ?? `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
+      selectedItem.property_no ?? formatItemId(selectedItem.item_id, selectedItem.item_type),
     )
     setParDateAcquiredInput(selectedItem.date_acquired ?? '')
     setParCostInput(selectedItem.unit_cost != null ? String(selectedItem.unit_cost) : '')
@@ -1587,7 +1587,7 @@ function DashboardPage() {
       return false
     }
 
-    const paddedId = `ITEM-${item.item_id.toString().padStart(3, '0')}`
+    const paddedId = formatItemId(item.item_id, item.item_type)
     const matchesSearch =
       !normalizedSearch ||
       paddedId.toLowerCase().includes(normalizedSearch) ||
@@ -2417,7 +2417,7 @@ function DashboardPage() {
           propertyNo:
             record.property_no_snapshot ??
             item?.property_no ??
-            (record.item_id != null ? `ITEM-${record.item_id.toString().padStart(3, '0')}` : '—'),
+            (record.item_id != null ? formatItemId(record.item_id, item?.item_type) : '—'),
           issuedDate: formatInventoryDate(record.issue_date),
           dateAcquired: formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired),
           cost:
@@ -2604,7 +2604,7 @@ function DashboardPage() {
             property_no_snapshot:
               parPropertyNoInput ||
               selectedItem.property_no ||
-              `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
+              formatItemId(selectedItem.item_id, selectedItem.item_type),
             date_acquired_snapshot: parDateAcquiredInput || selectedItem.date_acquired,
             cost_snapshot: costSnapshot ?? selectedItem.unit_cost ?? null,
           },
@@ -2683,7 +2683,7 @@ function DashboardPage() {
               row.propertyId.trim() ||
               existingRecord.property_no_snapshot ||
               selectedItem.property_no ||
-              `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
+              formatItemId(selectedItem.item_id, selectedItem.item_type),
             cost_snapshot: row.costSnapshot ?? existingRecord.cost_snapshot ?? null,
           })
           .eq('par_id', existingRecord.par_id)
@@ -2714,7 +2714,7 @@ function DashboardPage() {
               property_no_snapshot:
                 row.propertyId.trim() ||
                 selectedItem.property_no ||
-                `ITEM-${selectedItem.item_id.toString().padStart(3, '0')}`,
+                formatItemId(selectedItem.item_id, selectedItem.item_type),
               date_acquired_snapshot: selectedItem.date_acquired,
               cost_snapshot: row.costSnapshot ?? selectedItem.unit_cost ?? null,
             },
@@ -3421,7 +3421,7 @@ function DashboardPage() {
 
       const { error: updatePasswordHashError } = await supabase
         .from('users')
-        .update({ password_hash: passwordHash })
+        .update({ password_hash: passwordHash, must_change_password: false })
         .eq('id', settingsUserId)
 
       if (updatePasswordHashError) {
@@ -3646,6 +3646,7 @@ function DashboardPage() {
           recovery_email: staffFormRecoveryEmail.trim() || null,
           is_locked: false,
           is_online: false,
+          must_change_password: true,
         },
       ], { onConflict: 'id' })
       .select('*')
@@ -4068,7 +4069,7 @@ function DashboardPage() {
     setQrGeneratingId(item.item_id)
     setInventoryError(null)
 
-    const qrValue = item.uid ?? `ITEM-${item.item_id.toString().padStart(3, '0')}`
+    const qrValue = item.uid ?? formatItemId(item.item_id, item.item_type)
 
     const { data, error: qrError } = await supabase
       .from('inventory')
@@ -4584,7 +4585,7 @@ function DashboardPage() {
       .slice()
       .sort((a, b) => a.item_id - b.item_id)
       .map((item) => ({
-        itemNo: `ITEM-${item.item_id.toString().padStart(3, '0')}`,
+        itemNo: formatItemId(item.item_id, item.item_type),
         item: item.item_name,
         type: item.item_type,
         quantity: String(item.quantity ?? '—'),
@@ -6134,7 +6135,7 @@ function DashboardPage() {
                             <tbody>
                               {archivedInventoryItems.map((item) => (
                                 <tr key={`archived-${item.item_id}`}>
-                                  <td>{`ITEM-${item.item_id.toString().padStart(3, '0')}`}</td>
+                                  <td>{formatItemId(item.item_id, item.item_type)}</td>
                                   <td>{item.item_name}</td>
                                   <td>{item.item_type}</td>
                                   <td>{item.quantity ?? '—'}</td>
@@ -7279,7 +7280,7 @@ function DashboardPage() {
                               <td>
                                 {record.property_no_snapshot ??
                                   item?.property_no ??
-                                  (record.item_id != null ? `ITEM-${record.item_id.toString().padStart(3, '0')}` : '—')}
+                                  (record.item_id != null ? formatItemId(record.item_id, item?.item_type) : '—')}
                               </td>
                               <td className="inventory-date-column">
                                 {formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired)}
@@ -8540,7 +8541,7 @@ function DashboardPage() {
                   onClick={() => {
                     const canvas = document.querySelector<HTMLCanvasElement>('#inventory-qr-canvas-wrapper canvas')
                     if (!canvas) return
-                    const paddedId = `ITEM-${viewQrItem.item_id.toString().padStart(3, '0')}`
+                    const paddedId = formatItemId(viewQrItem.item_id, viewQrItem.item_type)
                     const link = document.createElement('a')
                     link.href = canvas.toDataURL('image/png')
                     link.download = `${paddedId}-QR.png`

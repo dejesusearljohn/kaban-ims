@@ -815,6 +815,7 @@ export type Database = {
           is_archived: boolean
           is_locked: boolean | null
           is_online: boolean | null
+          must_change_password: boolean
           password_hash: string | null
           position: string | null
           qr_code: string | null
@@ -835,6 +836,7 @@ export type Database = {
           is_archived?: boolean
           is_locked?: boolean | null
           is_online?: boolean | null
+          must_change_password?: boolean
           password_hash?: string | null
           position?: string | null
           qr_code?: string | null
@@ -855,6 +857,7 @@ export type Database = {
           is_archived?: boolean
           is_locked?: boolean | null
           is_online?: boolean | null
+          must_change_password?: boolean
           password_hash?: string | null
           position?: string | null
           qr_code?: string | null

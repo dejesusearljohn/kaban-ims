@@ -94,6 +94,48 @@ const getItemResultQuantity = (item: InventoryItem) => (item.quantity ?? 0) + ge
 
 const getItemQuantityLimit = (item: InventoryItem) => Math.max(0, item.quantity ?? 0)
 
+const isMissingColumnError = (error: unknown, column: string) => {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : ''
+
+  return message.toLowerCase().includes(column.toLowerCase())
+}
+
+const isConditionConstraintError = (error: unknown) => {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === 'object' && error !== null && 'message' in error
+        ? String((error as { message?: unknown }).message ?? '')
+        : ''
+
+  return message.toLowerCase().includes('daily_check_items_condition_check')
+}
+
+const getConditionLabel = (condition: TurnoverCondition) =>
+  TURNOVER_CONDITIONS.find((entry) => entry.key === condition)?.label ?? condition
+
+const formatQuantityRemark = (quantity: number, remarks: string | null) =>
+  remarks ? `Qty: ${quantity} | ${remarks}` : `Qty: ${quantity}`
+
+const getFallbackQuantity = (checkItem: CheckItemRow) => {
+  if (checkItem.quantity_checked !== null && checkItem.quantity_checked !== undefined) {
+    return checkItem.quantity_checked
+  }
+
+  const match = checkItem.remarks?.match(/^Qty:\s*(\d+)/i)
+  return match ? Number(match[1]) : null
+}
+
+const getFallbackRemarks = (checkItem: CheckItemRow) => {
+  const remarks = checkItem.remarks?.replace(/^Qty:\s*\d+\s*\|\s*/i, '').replace(/^Qty:\s*\d+$/i, '') ?? ''
+  return remarks || '--'
+}
+
 export default function DepartmentShiftTurnoverSection({ userId, departmentId, isReadOnly = false }: Props) {
   const [activeTab, setActiveTab] = useState<TabKey>('submit')
 
@@ -219,11 +261,22 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
       ),
     )
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('daily_check_items')
       .select('check_item_id, item_id, condition, quantity_checked, scanned_at, remarks, item:inventory(item_name, property_no)')
       .eq('check_id', turnover.daily_check_id)
       .order('scanned_at')
+
+    if (error && isMissingColumnError(error, 'quantity_checked')) {
+      const fallback = await supabase
+        .from('daily_check_items')
+        .select('check_item_id, item_id, condition, scanned_at, remarks, item:inventory(item_name, property_no)')
+        .eq('check_id', turnover.daily_check_id)
+        .order('scanned_at')
+
+      data = fallback.data as typeof data
+      error = fallback.error
+    }
 
     if (error) {
       setActionError(error.message)
@@ -404,9 +457,45 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
       })).filter((row) => row.quantity_checked > 0),
     )
 
-    const { error: checkItemsError } = await supabase
+    let { error: checkItemsError } = await supabase
       .from('daily_check_items')
       .insert(checkItems)
+
+    if (checkItemsError && isMissingColumnError(checkItemsError, 'quantity_checked')) {
+      const fallbackCheckItems = checkItems.map(({ quantity_checked, remarks, ...row }) => ({
+        ...row,
+        remarks: formatQuantityRemark(quantity_checked, remarks),
+      }))
+
+      const fallbackInsert = await supabase
+        .from('daily_check_items')
+        .insert(fallbackCheckItems)
+
+      checkItemsError = fallbackInsert.error
+    }
+
+    if (checkItemsError && isConditionConstraintError(checkItemsError)) {
+      const legacyCheckItems = checkItems.map(({ quantity_checked, condition, remarks, ...row }) => {
+        const turnoverCondition = condition as TurnoverCondition
+        const legacyCondition = REPORTABLE_CONDITIONS.includes(turnoverCondition) ? 'unserviceable' : 'serviceable'
+        const originalConditionRemark = `Condition: ${getConditionLabel(turnoverCondition)}`
+
+        return {
+          ...row,
+          condition: legacyCondition,
+          remarks: formatQuantityRemark(
+            quantity_checked,
+            remarks ? `${originalConditionRemark} | ${remarks}` : originalConditionRemark,
+          ),
+        }
+      })
+
+      const legacyInsert = await supabase
+        .from('daily_check_items')
+        .insert(legacyCheckItems)
+
+      checkItemsError = legacyInsert.error
+    }
 
     if (checkItemsError) {
       await supabase.from('daily_checks').delete().eq('check_id', checkData.check_id)
@@ -840,8 +929,8 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
                                     {checkItem.condition}
                                   </span>
                                 </td>
-                                <td>{checkItem.quantity_checked ?? '--'}</td>
-                                <td>{checkItem.remarks ?? '--'}</td>
+                                <td>{getFallbackQuantity(checkItem) ?? '--'}</td>
+                                <td>{getFallbackRemarks(checkItem)}</td>
                               </tr>
                             ))}
                           </tbody>

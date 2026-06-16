@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { formatItemId } from '../utils/itemUtils'
 
 type InventoryRow = Tables<'inventory'>
 
@@ -76,6 +77,89 @@ type InventorySectionProps = {
   acquisitionModeOptions: string[]
   newItemTotalCost: number | null
   onExportCsv: () => void
+}
+
+const ITEM_TYPE_KEYWORDS: Array<{ type: string; keywords: RegExp[] }> = [
+  {
+    type: 'ICT Equipment',
+    keywords: [
+      /\b(computer|desktop|laptop|monitor|printer|scanner|keyboard|mouse|router|modem|switch|tablet|projector|webcam|camera|cctv|ups)\b/i,
+    ],
+  },
+  {
+    type: 'Office Supplies/Equipment',
+    keywords: [
+      /\b(paper|bond paper|folder|envelope|pen|pencil|marker|stapler|staple|puncher|calculator|clipboard|whiteboard|ink|toner|file box)\b/i,
+    ],
+  },
+  {
+    type: 'Disaster/Emergency Equipment',
+    keywords: [
+      /\b(first aid|stretcher|fire extinguisher|megaphone|siren|rescue|life vest|life jacket|emergency|disaster|flashlight|radio|helmet|raincoat|go bag)\b/i,
+    ],
+  },
+  {
+    type: 'Maintenance Tools',
+    keywords: [
+      /\b(hammer|screwdriver|wrench|pliers|drill|saw|shovel|rake|trowel|toolbox|paint brush|roller|spade|crowbar)\b/i,
+    ],
+  },
+  {
+    type: 'Electrical Items',
+    keywords: [
+      /\b(wire|cable|extension cord|bulb|lamp|switch|outlet|breaker|socket|battery|charger|electrical|led|fuse)\b/i,
+    ],
+  },
+  {
+    type: 'Furniture/Fixtures',
+    keywords: [
+      /\b(chair|table|desk|cabinet|shelf|rack|drawer|bench|sofa|fixture|partition|locker)\b/i,
+    ],
+  },
+  {
+    type: 'Cleaning Materials',
+    keywords: [
+      /\b(mop|broom|dustpan|detergent|soap|disinfectant|alcohol|bleach|cleaner|trash bag|garbage bag|sponge|rag|tissue)\b/i,
+    ],
+  },
+  {
+    type: 'Tools & Light Equipment',
+    keywords: [
+      /\b(ladder|wheelbarrow|grass cutter|blower|sprayer|hose|nozzle|light equipment|portable tool|pressure washer)\b/i,
+    ],
+  },
+  {
+    type: 'Mechanical Equipment',
+    keywords: [
+      /\b(engine|pump|compressor|generator|motor|chainsaw|mechanical|water pump)\b/i,
+    ],
+  },
+  {
+    type: 'Transportation Equipment',
+    keywords: [
+      /\b(vehicle|motorcycle|tricycle|bicycle|bike|truck|van|ambulance|boat|car|tire|wheel|transport)\b/i,
+    ],
+  },
+  {
+    type: 'Stockpile',
+    keywords: [
+      /\b(rice|canned goods|noodles|bottled water|relief goods|food pack|stockpile|sack of rice)\b/i,
+    ],
+  },
+]
+
+const findAvailableType = (type: string, typeOptions: string[]) =>
+  typeOptions.find((option) => option.trim().toLowerCase() === type.trim().toLowerCase()) ?? ''
+
+const inferItemTypeFromName = (itemName: string, typeOptions: string[]) => {
+  const normalizedName = itemName.trim()
+  if (!normalizedName) return ''
+
+  const match = ITEM_TYPE_KEYWORDS.find((entry) =>
+    entry.keywords.some((keyword) => keyword.test(normalizedName)),
+  )
+
+  return match ? findAvailableType(match.type, typeOptions) : ''
 }
 
 function InventorySection({
@@ -326,7 +410,7 @@ function InventorySection({
                     </tr>
                   ) : (
                     paginatedInventoryItems.map((item) => {
-                        const paddedId = `ITEM-${item.item_id.toString().padStart(3, '0')}`
+                        const paddedId = formatItemId(item.item_id, item.item_type)
                         const acquisitionMode = item.acquisition_mode?.trim() || null
                         const status = getItemStatus(item)
                         const locationCode = departments.find((dept) => dept.id === item.department_id)?.code ?? 'Unassigned'
@@ -641,7 +725,14 @@ function InventorySection({
                   className="inventory-input"
                   placeholder="Enter item name"
                   value={newItemName}
-                  onChange={(e) => setNewItemName(e.target.value)}
+                  onChange={(e) => {
+                    const nextName = e.target.value
+                    const inferredType = inferItemTypeFromName(nextName, typeOptions)
+                    setNewItemName(nextName)
+                    if (inferredType) {
+                      setNewItemType(inferredType)
+                    }
+                  }}
                 />
               </div>
               <div className="inventory-field">

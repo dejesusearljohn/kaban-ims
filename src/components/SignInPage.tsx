@@ -103,6 +103,20 @@ function maskEmail(email: string): string {
 
 export const BANICAIN_LOGO_URL = '/Banicain-logo.png'
 
+const hashPasswordForStorage = async (password: string) => {
+  if (typeof window === 'undefined' || !window.crypto?.subtle) {
+    throw new Error('Secure hashing is not available in this environment.')
+  }
+
+  const encoded = new TextEncoder().encode(password)
+  const digest = await window.crypto.subtle.digest('SHA-256', encoded)
+  const hashHex = Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('')
+
+  return `sha256:${hashHex}`
+}
+
 type SignInPageProps = {
 	onSignInSuccess?: () => void
   initialView?: 'signin' | 'forgot' | 'reset'
@@ -329,6 +343,28 @@ function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetCo
       setResetError(updateError.message)
       setResetLoading(false)
       return
+    }
+
+    const { data: authUserData } = await supabase.auth.getUser()
+    const resetUserId = authUserData.user?.id
+    if (resetUserId) {
+      try {
+        const passwordHash = await hashPasswordForStorage(newPassword)
+        const { error: profileUpdateError } = await supabase
+          .from('users')
+          .update({ password_hash: passwordHash, must_change_password: false })
+          .eq('id', resetUserId)
+
+        if (profileUpdateError) {
+          setResetError(profileUpdateError.message)
+          setResetLoading(false)
+          return
+        }
+      } catch (hashError) {
+        setResetError(hashError instanceof Error ? hashError.message : 'Failed to save password status.')
+        setResetLoading(false)
+        return
+      }
     }
 
     setResetSuccess('Password updated successfully. You can now sign in with your new password.')
