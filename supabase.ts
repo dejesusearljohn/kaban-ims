@@ -537,19 +537,28 @@ export type Database = {
         Row: {
           acquisition_mode: string | null
           archived_at: string | null
+          assigned_to_name: string | null
           condition: string | null
           created_at: string | null
           date_acquired: string
+          date_last_restocked: string | null
           department_id: number | null
           donor_identification: string | null
+          estimated_useful_life_years: number | null
           expiration_date: string | null
+          inventory_kind: string | null
+          item_category: string | null
+          item_description: string | null
           item_id: number
           item_name: string
           item_type: string
+          kind_item_no: number | null
           photo_path: string | null
+          par_no: string | null
           property_no: string | null
           qr_code: string | null
           quantity: number | null
+          remarks: string | null
           status: string | null
           uid: string
           unit_cost: number | null
@@ -558,19 +567,28 @@ export type Database = {
         Insert: {
           acquisition_mode?: string | null
           archived_at?: string | null
+          assigned_to_name?: string | null
           condition?: string | null
           created_at?: string | null
           date_acquired: string
+          date_last_restocked?: string | null
           department_id?: number | null
           donor_identification?: string | null
+          estimated_useful_life_years?: number | null
           expiration_date?: string | null
+          inventory_kind?: string | null
+          item_category?: string | null
+          item_description?: string | null
           item_id?: number
           item_name: string
           item_type: string
+          kind_item_no?: number | null
+          par_no?: string | null
           photo_path?: string | null
           property_no?: string | null
           qr_code?: string | null
           quantity?: number | null
+          remarks?: string | null
           status?: string | null
           uid?: string
           unit_cost?: number | null
@@ -579,19 +597,28 @@ export type Database = {
         Update: {
           acquisition_mode?: string | null
           archived_at?: string | null
+          assigned_to_name?: string | null
           condition?: string | null
           created_at?: string | null
           date_acquired?: string
+          date_last_restocked?: string | null
           department_id?: number | null
           donor_identification?: string | null
+          estimated_useful_life_years?: number | null
           expiration_date?: string | null
+          inventory_kind?: string | null
+          item_category?: string | null
+          item_description?: string | null
           item_id?: number
           item_name?: string
           item_type?: string
+          kind_item_no?: number | null
+          par_no?: string | null
           photo_path?: string | null
           property_no?: string | null
           qr_code?: string | null
           quantity?: number | null
+          remarks?: string | null
           status?: string | null
           uid?: string
           unit_cost?: number | null
@@ -816,6 +843,7 @@ export type Database = {
           is_locked: boolean | null
           is_online: boolean | null
           must_change_password: boolean
+          par_no: string | null
           password_hash: string | null
           position: string | null
           qr_code: string | null
@@ -837,6 +865,7 @@ export type Database = {
           is_locked?: boolean | null
           is_online?: boolean | null
           must_change_password?: boolean
+          par_no?: string | null
           password_hash?: string | null
           position?: string | null
           qr_code?: string | null
@@ -858,6 +887,7 @@ export type Database = {
           is_locked?: boolean | null
           is_online?: boolean | null
           must_change_password?: boolean
+          par_no?: string | null
           password_hash?: string | null
           position?: string | null
           qr_code?: string | null

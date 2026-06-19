@@ -1,8 +1,9 @@
+import { formatStockpileRowId, isPackedStockpileItem, type StockpileListKind } from '../utils/itemUtils'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
-type StockpileRow = Tables<'stockpile'> & { status?: string | null }
+type StockpileRow = Tables<'stockpile'> & { status?: string | null; kind_item_no?: number | null; property_no?: string | null }
 type DistributionLogRow = Tables<'distribution_logs'>
 
 type StockpileReleaseLog = {
@@ -38,6 +39,7 @@ type StockpileSectionProps = {
   setStockpileReleaseReasonInput: (value: string) => void
   stockpileReleaseReasonInput: string
   availableReleaseItems: StockpileRow[]
+  availableRepackItems: StockpileRow[]
   addStockpileReleaseItem: () => void
   updateStockpileReleaseItem: (index: number, field: keyof StockpileReleaseDraftItem, value: string) => void
   removeStockpileReleaseItem: (index: number) => void
@@ -57,7 +59,7 @@ type StockpileSectionProps = {
   repackingStockpile: boolean
   handlePrintReleaseLogs: () => void
   formatDisplayDate: (dateString: string | null) => string
-  onExportCsv: () => void
+  onExportCsv: (listKind: StockpileListKind | 'all') => void
 }
 
 function StockpileSection({
@@ -80,6 +82,7 @@ function StockpileSection({
   setStockpileReleaseReasonInput,
   stockpileReleaseReasonInput,
   availableReleaseItems,
+  availableRepackItems,
   addStockpileReleaseItem,
   updateStockpileReleaseItem,
   removeStockpileReleaseItem,
@@ -110,18 +113,35 @@ function StockpileSection({
   const [releaseItemPickerPage, setReleaseItemPickerPage] = useState(1)
   const releaseItemPickerModalRef = useRef<HTMLDivElement | null>(null)
   const releaseAttachmentInputRef = useRef<HTMLInputElement | null>(null)
+  const [stockpileListKind, setStockpileListKind] = useState<StockpileListKind>('individual')
 
-  const currentStockpileItems = useMemo(
-    () => (stockpileMode === 'expired' ? filteredExpiredStockpileItems : filteredStockpileItems),
-    [stockpileMode, filteredStockpileItems, filteredExpiredStockpileItems],
+  const individualStockpileItems = useMemo(
+    () => filteredStockpileItems.filter((item) => !isPackedStockpileItem(item)),
+    [filteredStockpileItems],
   )
+
+  const packedStockpileItems = useMemo(
+    () => filteredStockpileItems.filter((item) => isPackedStockpileItem(item)),
+    [filteredStockpileItems],
+  )
+
+  const activeListStockpileItems = useMemo(
+    () => (stockpileListKind === 'packed' ? packedStockpileItems : individualStockpileItems),
+    [stockpileListKind, packedStockpileItems, individualStockpileItems],
+  )
+
+  const currentStockpileItems = useMemo(() => {
+    if (stockpileMode === 'expired') return filteredExpiredStockpileItems
+    if (stockpileMode === 'list') return activeListStockpileItems
+    return filteredStockpileItems
+  }, [stockpileMode, filteredExpiredStockpileItems, activeListStockpileItems, filteredStockpileItems])
   const currentStockpileRowCount = stockpileMode === 'logs' ? stockpileReleaseLogs.length : currentStockpileItems.length
 
   const stockpileTotalPages = Math.max(1, Math.ceil(currentStockpileRowCount / stockpilePageSize))
 
   useEffect(() => {
     setStockpilePage(1)
-  }, [stockpileMode])
+  }, [stockpileMode, stockpileListKind])
 
   useEffect(() => {
     if (stockpilePage > stockpileTotalPages) {
@@ -201,20 +221,25 @@ function StockpileSection({
     })
   }
 
+  const pickerCatalogItems = useMemo(
+    () => (releaseItemPickerSource === 'repack' ? availableRepackItems : availableReleaseItems),
+    [releaseItemPickerSource, availableRepackItems, availableReleaseItems],
+  )
+
   const releaseItemPickerCategoryOptions = useMemo(() => {
     return Array.from(
       new Set(
-        availableReleaseItems
+        pickerCatalogItems
           .map((item) => item.category?.trim() || 'Uncategorized')
           .filter((category) => category.length > 0),
       ),
     ).sort((a, b) => a.localeCompare(b))
-  }, [availableReleaseItems])
+  }, [pickerCatalogItems])
 
   const filteredReleasePickerItems = useMemo(() => {
     const normalizedSearch = releaseItemPickerSearch.trim().toLowerCase()
 
-    return availableReleaseItems
+    return pickerCatalogItems
       .filter((item) => {
         const category = item.category?.trim() || 'Uncategorized'
 
@@ -224,7 +249,10 @@ function StockpileSection({
 
         if (!normalizedSearch) return true
 
+        const displayId = formatStockpileRowId(item).toLowerCase()
+
         return (
+          displayId.includes(normalizedSearch) ||
           (item.item_name ?? '').toLowerCase().includes(normalizedSearch) ||
           category.toLowerCase().includes(normalizedSearch)
         )
@@ -237,7 +265,7 @@ function StockpileSection({
 
         return (a.item_name ?? '').localeCompare(b.item_name ?? '')
       })
-  }, [availableReleaseItems, releaseItemPickerCategory, releaseItemPickerSearch])
+  }, [pickerCatalogItems, releaseItemPickerCategory, releaseItemPickerSearch])
 
   const releaseItemPickerPageSize = 8
   const releaseItemPickerTotalPages = Math.max(1, Math.ceil(filteredReleasePickerItems.length / releaseItemPickerPageSize))
@@ -264,11 +292,15 @@ function StockpileSection({
   }, [releaseItemPickerPage, releaseItemPickerTotalPages])
 
   const getReleaseItemDisplayLabel = (stockpileId: string, source: 'release' | 'repack') => {
-    const emptyLabel = source === 'release' ? 'Select repack item' : 'Select stockpile item'
+    const emptyLabel = source === 'release' ? 'Select pack to release' : 'Select stockpile item'
     if (!stockpileId) return emptyLabel
 
-    const found = availableReleaseItems.find((item) => String(item.stockpile_id) === stockpileId)
-    return found ? (found.item_name ?? 'Unnamed') : emptyLabel
+    const catalog = source === 'repack' ? availableRepackItems : availableReleaseItems
+    const found = catalog.find((item) => String(item.stockpile_id) === stockpileId)
+    if (!found) return emptyLabel
+
+    const displayId = formatStockpileRowId(found)
+    return `${displayId} — ${found.item_name ?? 'Unnamed'}`
   }
 
   const handleApplySelectedReleaseItems = () => {
@@ -368,7 +400,15 @@ function StockpileSection({
       <header className="dashboard-header">
         <div>
           <h2>Stockpile</h2>
-          <p>{loading ? 'Loading stockpiles…' : `${formatValue(totalStockpiles)} total items in stock`}</p>
+          <p>
+            {loading
+              ? 'Loading stockpiles…'
+              : stockpileMode === 'list'
+                ? stockpileListKind === 'packed'
+                  ? `${formatValue(packedStockpileItems.length)} packed relief goods`
+                  : `${formatValue(individualStockpileItems.length)} individual stockpile items`
+                : `${formatValue(totalStockpiles)} total items in stock`}
+          </p>
         </div>
       </header>
 
@@ -417,7 +457,7 @@ function StockpileSection({
           <button
             type="button"
             className="csv-action-button"
-            onClick={onExportCsv}
+            onClick={() => onExportCsv(stockpileMode === 'list' ? stockpileListKind : 'all')}
           >
             <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
               <path d="M4 6h16M4 12h16M4 18h16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
@@ -429,6 +469,34 @@ function StockpileSection({
 
       {stockpileMode === 'list' && (
         <>
+          <div className="stockpile-list-toolbar" aria-label="Stockpile list filters">
+            <div className="inventory-kind-switch" role="tablist" aria-label="Stockpile item type">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={stockpileListKind === 'individual'}
+                className={`inventory-kind-switch-btn ${stockpileListKind === 'individual' ? 'inventory-kind-switch-btn-active' : ''}`}
+                onClick={() => setStockpileListKind('individual')}
+              >
+                Individual
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={stockpileListKind === 'packed'}
+                className={`inventory-kind-switch-btn ${stockpileListKind === 'packed' ? 'inventory-kind-switch-btn-active' : ''}`}
+                onClick={() => setStockpileListKind('packed')}
+              >
+                Packed
+              </button>
+            </div>
+            <p className="inventory-help-text stockpile-list-kind-help">
+              {stockpileListKind === 'individual'
+                ? 'Bulk stockpile items added from Inventory (rice, canned goods, etc.).'
+                : 'Relief packs created from the Repack tab, ready for Stockpile Release.'}
+            </p>
+          </div>
+
           <section className="inventory-table-section" aria-label="Stockpile table">
             <div className="inventory-table-card">
               <table className="inventory-table">
@@ -439,7 +507,7 @@ function StockpileSection({
                     <th scope="col">Category</th>
                     <th scope="col">Quantity</th>
                     <th scope="col">Unit</th>
-                    <th scope="col">Packed Date</th>
+                    <th scope="col">{stockpileListKind === 'packed' ? 'Packed Date' : 'Acquired'}</th>
                     <th scope="col">Expiration Date</th>
                   </tr>
                 </thead>
@@ -448,13 +516,17 @@ function StockpileSection({
                     <tr>
                       <td colSpan={7}>Loading stockpiles…</td>
                     </tr>
-                  ) : filteredStockpileItems.length === 0 ? (
+                  ) : activeListStockpileItems.length === 0 ? (
                     <tr>
-                      <td colSpan={7}>No stockpiles found.</td>
+                      <td colSpan={7}>
+                        {stockpileListKind === 'packed'
+                          ? 'No packed relief goods yet. Use Repack to combine stockpile items into packs.'
+                          : 'No individual stockpile items found. Add stockpile items from Inventory.'}
+                      </td>
                     </tr>
                   ) : (
                     paginatedStockpileItems.map((item) => {
-                      const paddedId = `STOCK-${item.stockpile_id.toString().padStart(3, '0')}`
+                      const paddedId = formatStockpileRowId(item)
                       const isExpired =
                         item.expiration_date && new Date(item.expiration_date) < new Date()
 
@@ -724,8 +796,14 @@ function StockpileSection({
               </div>
 
               <p className="inventory-help-text stockpile-release-help">
-                Recombine stockpile items into a new consolidated package.
+                Combine bulk stockpile inventory (rice, canned goods, etc.) into new pack units for release.
               </p>
+
+              {availableRepackItems.length === 0 && !stockpileLoading && (
+                <p className="inventory-help-text stockpile-repack-empty-notice">
+                  No bulk stockpile items are available to repack. Add stockpile inventory with quantity on hand first.
+                </p>
+              )}
 
               <div className="inventory-add-grid">
                 <div className="inventory-field">
@@ -780,7 +858,7 @@ function StockpileSection({
                 </thead>
                 <tbody>
                   {repackItems.map((item, index) => {
-                    const selectedItem = availableReleaseItems.find(
+                    const selectedItem = availableRepackItems.find(
                       (stockpileItem) => stockpileItem.stockpile_id === Number(item.stockpileId),
                     )
 
@@ -835,7 +913,7 @@ function StockpileSection({
                         type="button"
                         className="stockpile-release-add-button stockpile-repack-add-button"
                         onClick={addRepackItem}
-                        disabled={repackingStockpile}
+                        disabled={repackingStockpile || availableRepackItems.length === 0}
                       >
                         <span className="stockpile-release-add-icon">+</span>
                         <span>Add Item</span>
@@ -859,7 +937,7 @@ function StockpileSection({
                 type="button"
                 className="inventory-add-submit"
                 onClick={handleRepackStockpile}
-                disabled={repackingStockpile}
+                disabled={repackingStockpile || availableRepackItems.length === 0}
               >
                 {repackingStockpile ? 'Repacking…' : 'Submit Repack'}
               </button>
@@ -1052,9 +1130,9 @@ function StockpileSection({
                     </tr>
                   ) : (
                     paginatedStockpileItems.map((item) => {
-                      const paddedId = `STOCK-${item.stockpile_id.toString().padStart(3, '0')}`
+                      const paddedId = formatStockpileRowId(item)
                       const isExpired =
-                        item.status?.trim() === 'Expired' ||
+                        (item.status ?? '').trim().toUpperCase() === 'EXPIRED' ||
                         (item.expiration_date && new Date(item.expiration_date) < new Date())
 
                       return (
@@ -1155,7 +1233,9 @@ function StockpileSection({
             onClick={(event) => event.stopPropagation()}
           >
             <header className="panel-header dashboard-drilldown-header">
-              <h3 id="stockpile-picker-title">Select Stockpile Item</h3>
+              <h3 id="stockpile-picker-title">
+                {releaseItemPickerSource === 'repack' ? 'Select Stockpile Inventory' : 'Select Pack to Release'}
+              </h3>
               <button
                 type="button"
                 className="dashboard-drilldown-close-button"
@@ -1171,7 +1251,7 @@ function StockpileSection({
                 <input
                   type="search"
                   className="inventory-input"
-                  placeholder="Search item name or category"
+                  placeholder={releaseItemPickerSource === 'repack' ? 'Search by ID, name, or category' : 'Search item name or category'}
                   value={releaseItemPickerSearch}
                   onChange={(event) => setReleaseItemPickerSearch(event.target.value)}
                 />
@@ -1193,6 +1273,7 @@ function StockpileSection({
                 <table className="dashboard-drilldown-table">
                   <thead>
                     <tr>
+                      <th scope="col">ID</th>
                       <th scope="col">Item</th>
                       <th scope="col">Category</th>
                       <th scope="col">Unit</th>
@@ -1203,11 +1284,16 @@ function StockpileSection({
                   <tbody>
                     {filteredReleasePickerItems.length === 0 ? (
                       <tr>
-                        <td colSpan={5}>No stockpile items match your search/category filter.</td>
+                        <td colSpan={6}>
+                          {releaseItemPickerSource === 'repack'
+                            ? 'No bulk stockpile items available. Add stockpile inventory with quantity on hand.'
+                            : 'No repack packages available. Create packs using the Repack tab first.'}
+                        </td>
                       </tr>
                     ) : (
                       paginatedReleasePickerItems.map((stockpileItem) => {
                         const stockpileId = String(stockpileItem.stockpile_id)
+                        const displayId = formatStockpileRowId(stockpileItem)
                         const currentRowId =
                           releaseItemPickerRowIndex != null
                             ? activePickerItems[releaseItemPickerRowIndex]?.stockpileId ?? ''
@@ -1216,6 +1302,7 @@ function StockpileSection({
 
                         return (
                           <tr key={`stockpile-picker-${stockpileItem.stockpile_id}`} onClick={() => !selectedInAnotherLine && toggleReleaseItemPickerSelection(stockpileId)} style={{ cursor: selectedInAnotherLine ? 'not-allowed' : 'pointer' }}>
+                            <td>{displayId}</td>
                             <td>{stockpileItem.item_name ?? 'Unnamed'}</td>
                             <td>{stockpileItem.category ?? 'Uncategorized'}</td>
                             <td>{stockpileItem.unit_of_measure ?? '—'}</td>
