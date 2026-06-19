@@ -33,7 +33,7 @@ import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
 import { downloadExcel, downloadVehicleLedgerExcel } from '../utils/excel'
-import { formatInventoryItemId, formatItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, isPackedStockpileItem, isParInventoryItem, equalsDbText, normalizeDbText, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, type InventoryKind, type InventoryKindFilter, type StockpileListKind } from '../utils/itemUtils'
+import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, isPackedStockpileItem, isParInventoryItem, equalsDbText, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, type InventoryKind, type InventoryKindFilter, type StockpileListKind } from '../utils/itemUtils'
 
 type SummaryMetrics = {
   totalItems: number
@@ -55,7 +55,11 @@ type DepartmentOverview = {
 
 type InventoryRow = Tables<'inventory'>
 type InventoryPhotoRow = Tables<'inventory_photos'>
-type StockpileRow = Tables<'stockpile'> & { status?: string | null }
+type StockpileRow = Tables<'stockpile'> & {
+  status?: string | null
+  kind_item_no?: number | null
+  property_no?: string | null
+}
 type DistributionLogRow = Tables<'distribution_logs'>
 type WmrReportRow = Tables<'wmr_reports'>
 type ParRecordRow = Tables<'par_records'>

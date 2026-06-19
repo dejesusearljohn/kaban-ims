@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
-import { formatInventoryItemId, formatItemId, generateParPropertyNumber, getCategoryOptionsForInventoryKind, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryTypeColumnDisplay, getInventoryUnitDisplay, getMaxKindItemNo, inferCategoryFromItemName, INVENTORY_KIND_FILTER_OPTIONS, OFFICE_SUPPLY_CATEGORY_OPTIONS, PAR_CATEGORY_OPTIONS, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, previewAutoItemId, STOCKPILE_CATEGORY_OPTIONS, type InventoryKind, type InventoryKindFilter } from '../utils/itemUtils'
+import { formatInventoryItemId, generateParPropertyNumber, getCategoryOptionsForInventoryKind, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryTypeColumnDisplay, getInventoryUnitDisplay, getMaxKindItemNo, inferCategoryFromItemName, INVENTORY_KIND_FILTER_OPTIONS, OFFICE_SUPPLY_CATEGORY_OPTIONS, PAR_CATEGORY_OPTIONS, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, previewAutoItemId, STOCKPILE_CATEGORY_OPTIONS, type InventoryKind, type InventoryKindFilter } from '../utils/itemUtils'
 
 type InventoryRow = Tables<'inventory'>
 

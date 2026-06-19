@@ -777,7 +777,7 @@ export const normalizeUserRecord = <T extends Record<string, unknown>>(record: T
   }
 
   if ('staff_id' in normalized && typeof normalized.staff_id === 'string') {
-    normalized.staff_id = normalized.staff_id.trim().toUpperCase()
+    ;(normalized as Record<string, unknown>).staff_id = normalized.staff_id.trim().toUpperCase()
   }
 
   return normalized
