@@ -33,7 +33,7 @@ import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
 import { downloadExcel, downloadVehicleLedgerExcel } from '../utils/excel'
-import { formatItemId } from '../utils/itemUtils'
+import { formatInventoryItemId, formatItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, isPackedStockpileItem, isParInventoryItem, equalsDbText, normalizeDbText, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, type InventoryKind, type InventoryKindFilter, type StockpileListKind } from '../utils/itemUtils'
 
 type SummaryMetrics = {
   totalItems: number
@@ -110,8 +110,10 @@ const getVisiblePageNumbers = (currentPage: number, totalPages: number, maxVisib
 
 const mapInventoryItemToStockpileRow = (item: InventoryRow): StockpileRow => ({
   stockpile_id: item.item_id,
+  kind_item_no: item.kind_item_no,
+  property_no: item.property_no,
   item_name: item.item_name,
-  category: item.acquisition_mode,
+  category: item.item_category ?? item.acquisition_mode,
   quantity_on_hand: item.quantity,
   unit_of_measure: item.unit_of_measure,
   packed_date: item.date_acquired,
@@ -152,28 +154,12 @@ const DEFAULT_ITEM_TYPES = [
   'Equipment',
   'Mechanical Equipment',
   'Transportation Equipment',
+  'Personal Protective Equipment/Uniform',
+  'Office Supplies',
+  'Stockpile',
 ]
 
-// Mapping of item types to their ID code prefixes
-const ITEM_TYPE_CODE_MAP: { [key: string]: string } = {
-  'ICT Equipment': 'ICT',
-  'Office Supplies/Equipment': 'OFC',
-  'Disaster/Emergency Equipment': 'EMG',
-  'Maintenance Tools': 'MNT',
-  'Electrical Items': 'ELE',
-  'Furniture/Fixtures': 'FUR',
-  'Cleaning Materials': 'CLN',
-  'Tools & Light Equipment': 'TLE',
-  'Equipment': 'EQP',
-  'Mechanical Equipment': 'MEQ',
-  'Transportation Equipment': 'TE',
-}
-
-const isLoanableParItem = (item: InventoryRow) => {
-  const normalizedType = item.item_type.trim().toLowerCase()
-  const loanableTypes = ['ict equipment', 'office supplies/equipment', 'disaster/emergency equipment', 'maintenance tools', 'electrical items', 'tools & light equipment', 'equipment', 'mechanical equipment', 'transportation equipment']
-  return loanableTypes.includes(normalizedType)
-}
+const isLoanableParItem = (item: InventoryRow) => isParInventoryItem(item)
 
 const DEFAULT_UNITS_OF_MEASURE = [
   'Piece(s)',
@@ -190,20 +176,6 @@ const DEFAULT_UNITS_OF_MEASURE = [
   'Gram',
   'Meter',
 ]
-
-// Helper function to generate property number based on item type
-const generatePropertyNumber = (itemType: string, existingItems: InventoryRow[]): string => {
-  const typeCode = ITEM_TYPE_CODE_MAP[itemType] || 'GEN'
-  
-  // Count how many items already have this type code
-  const itemsWithTypeCode = existingItems.filter((item) => {
-    const itemTypeCode = ITEM_TYPE_CODE_MAP[item.item_type] || 'GEN'
-    return itemTypeCode === typeCode
-  })
-  
-  const nextNumber = itemsWithTypeCode.length + 1
-  return `${typeCode}-${nextNumber.toString().padStart(3, '0')}`
-}
 
 const INVENTORY_PHOTO_BUCKET = 'inventory-photos'
 const TYPE_CHART_COLORS = ['#059669', '#0284c7', '#d97706', '#7c3aed', '#e11d48']
@@ -289,10 +261,12 @@ function DashboardPage() {
   const [settingsProfileLoading, setSettingsProfileLoading] = useState(false)
   const [settingsUserId, setSettingsUserId] = useState<string | null>(null)
   const [settingsStaffId, setSettingsStaffId] = useState('')
+  const [settingsParNoInput, setSettingsParNoInput] = useState('')
   const [settingsNameInput, setSettingsNameInput] = useState('')
   const [settingsFirstNameInput, setSettingsFirstNameInput] = useState('')
   const [settingsLastNameInput, setSettingsLastNameInput] = useState('')
   const [settingsPositionInput, setSettingsPositionInput] = useState('')
+  const [settingsDepartmentId, setSettingsDepartmentId] = useState('')
   const [settingsNameSaving, setSettingsNameSaving] = useState(false)
   const [settingsPasswordInput, setSettingsPasswordInput] = useState('')
   const [settingsConfirmPasswordInput, setSettingsConfirmPasswordInput] = useState('')
@@ -315,6 +289,8 @@ function DashboardPage() {
   const [staffFormLastName, setStaffFormLastName] = useState('')
   const [staffFormFirstName, setStaffFormFirstName] = useState('')
   const [staffFormStaffId, setStaffFormStaffId] = useState('')
+  const [staffFormParNo, setStaffFormParNo] = useState('')
+  const staffFormParNoTouchedRef = useRef(false)
   const [staffFormPosition, setStaffFormPosition] = useState('')
   const [staffFormRole, setStaffFormRole] = useState('Staff')
   const [staffFormContact, setStaffFormContact] = useState('')
@@ -412,16 +388,26 @@ function DashboardPage() {
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
   const [inventoryLoading, setInventoryLoading] = useState(false)
   const [inventoryError, setInventoryError] = useState<string | null>(null)
+  const [newInventoryKind, setNewInventoryKind] = useState<InventoryKind>('par')
   const [newItemName, setNewItemName] = useState('')
   const [newItemType, setNewItemType] = useState('')
+  const [newItemCategory, setNewItemCategory] = useState('')
+  const [newItemDescription, setNewItemDescription] = useState('')
   const [newCondition, setNewCondition] = useState('')
   const [newDonorIdentification, setNewDonorIdentification] = useState('')
   const [newItemDepartmentId, setNewItemDepartmentId] = useState('')
+  const [newAssignedTo, setNewAssignedTo] = useState('')
+  const [newRemarks, setNewRemarks] = useState('')
+  const [newEstimatedUsefulLife, setNewEstimatedUsefulLife] = useState('')
   const [newQuantity, setNewQuantity] = useState('')
   const [newUnitOfMeasure, setNewUnitOfMeasure] = useState('')
   const [newUnitCost, setNewUnitCost] = useState('')
   const [newDateAcquired, setNewDateAcquired] = useState('')
   const [newExpirationDate, setNewExpirationDate] = useState('')
+  const [newDateLastRestocked, setNewDateLastRestocked] = useState('')
+  const [officeSuppliesAssignee, setOfficeSuppliesAssignee] = useState(
+    formatOfficeSuppliesAssignee('Super Admin'),
+  )
   const [newSource, setNewSource] = useState('')
   const [newPhotoFiles, setNewPhotoFiles] = useState<File[]>([])
   const [addingItem, setAddingItem] = useState(false)
@@ -432,7 +418,8 @@ function DashboardPage() {
   const addPhotoInputRef = useRef<HTMLInputElement | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [wmrSearchQuery, setWmrSearchQuery] = useState('')
-  const [typeFilter, setTypeFilter] = useState('all')
+  const [inventoryKindFilter, setInventoryKindFilter] = useState<InventoryKindFilter>('all')
+  const [categoryFilter, setCategoryFilter] = useState('all')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [sourceFilter, setSourceFilter] = useState('all')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -476,6 +463,7 @@ function DashboardPage() {
   const [editDeleting, setEditDeleting] = useState(false)
   const [archiveModalConfig, setArchiveModalConfig] = useState<ArchiveModalConfig | null>(null)
   const [viewImageItem, setViewImageItem] = useState<InventoryRow | null>(null)
+  const [viewInventoryItem, setViewInventoryItem] = useState<InventoryRow | null>(null)
   const [viewImageIndex, setViewImageIndex] = useState(0)
   const [viewQrItem, setViewQrItem] = useState<InventoryRow | null>(null)
   const [qrGeneratingId, setQrGeneratingId] = useState<number | null>(null)
@@ -496,6 +484,7 @@ function DashboardPage() {
   // [STATE] PAR section
   const [parRecords, setParRecords] = useState<ParRecordRow[]>([])
   const [parUsers, setParUsers] = useState<UserRow[]>([])
+  const [inventoryStaffUsers, setInventoryStaffUsers] = useState<UserRow[]>([])
   const [parLoading, setParLoading] = useState(false)
   const [parSaving, setParSaving] = useState(false)
   const [parError, setParError] = useState<string | null>(null)
@@ -737,14 +726,16 @@ function DashboardPage() {
           supabase
             .from('inventory')
             .select('*', { count: 'exact', head: true })
-            .eq('status', 'Serviceable')
-            .neq('item_type', 'Stockpile'),
+            .eq('status', 'SERVICEABLE')
+            .neq('inventory_kind', 'stockpile')
+            .not('item_type', 'ilike', 'stockpile'),
           supabase
             .from('inventory')
             .select('*', { count: 'exact', head: true })
-            .eq('status', 'Unserviceable')
-            .neq('item_type', 'Stockpile'),
-          supabase.from('inventory').select('*', { count: 'exact', head: true }).eq('status', 'Expired'),
+            .eq('status', 'UNSERVICEABLE')
+            .neq('inventory_kind', 'stockpile')
+            .not('item_type', 'ilike', 'stockpile'),
+          supabase.from('inventory').select('*', { count: 'exact', head: true }).eq('status', 'EXPIRED'),
         ])
 
         if (totalRes.error || serviceableRes.error || unserviceableRes.error || expiredRes.error) {
@@ -777,14 +768,16 @@ function DashboardPage() {
               .from('inventory')
               .select('*', { count: 'exact', head: true })
               .eq('department_id', dept.id)
-              .eq('status', 'Serviceable')
-              .neq('item_type', 'Stockpile'),
+              .eq('status', 'SERVICEABLE')
+              .neq('inventory_kind', 'stockpile')
+              .not('item_type', 'ilike', 'stockpile'),
             supabase
               .from('inventory')
               .select('*', { count: 'exact', head: true })
               .eq('department_id', dept.id)
-              .eq('status', 'Unserviceable')
-              .neq('item_type', 'Stockpile'),
+              .eq('status', 'UNSERVICEABLE')
+              .neq('inventory_kind', 'stockpile')
+              .not('item_type', 'ilike', 'stockpile'),
             supabase
               .from('users')
               .select('*', { count: 'exact', head: true })
@@ -965,6 +958,49 @@ function DashboardPage() {
   }, [realtimeTick])
 
   useEffect(() => {
+    const fetchInventoryStaffUsers = async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('id, full_name, staff_id, department_id, position, role, is_archived, par_no')
+        .eq('is_archived', false)
+        .order('full_name', { ascending: true })
+
+      if (error) {
+        setInventoryError((prev) => prev ?? error.message)
+      } else {
+        setInventoryStaffUsers((data ?? []) as UserRow[])
+      }
+    }
+
+    void fetchInventoryStaffUsers()
+  }, [realtimeTick])
+
+  useEffect(() => {
+    const loadBarangayTreasurer = async () => {
+      const { data } = await supabase.from('users').select('full_name, role, is_archived').eq('is_archived', false)
+
+      const superAdmin = (data ?? []).find(
+        (user) => (user.role ?? '').trim().toLowerCase() === 'super admin',
+      )
+
+      if (superAdmin?.full_name?.trim()) {
+        setOfficeSuppliesAssignee(formatOfficeSuppliesAssignee(superAdmin.full_name))
+      }
+    }
+
+    void loadBarangayTreasurer()
+  }, [realtimeTick])
+
+  useEffect(() => {
+    if (newInventoryKind === 'office_supplies') {
+      const assignee = currentAdminName.trim()
+        ? formatOfficeSuppliesAssignee(currentAdminName)
+        : officeSuppliesAssignee
+      setNewAssignedTo(assignee)
+    }
+  }, [newInventoryKind, officeSuppliesAssignee, currentAdminName])
+
+  useEffect(() => {
     const fetchSettingsProfile = async () => {
       setSettingsProfileLoading(true)
       setSettingsErrorMessage(null)
@@ -990,7 +1026,7 @@ function DashboardPage() {
 
       const { data: userRow, error: userRowError } = await supabase
         .from('users')
-        .select('id, full_name, email, staff_id, position, role')
+        .select('id, full_name, email, staff_id, position, role, department_id, par_no')
         .eq('id', user.id)
         .maybeSingle()
 
@@ -1003,7 +1039,11 @@ function DashboardPage() {
         setSettingsFirstNameInput(parsedName.firstName)
         setSettingsLastNameInput(parsedName.lastName)
         setSettingsStaffId(userRow?.staff_id ?? '')
+        setSettingsParNoInput(
+          userRow?.par_no?.trim() || (userRow?.staff_id ? formatStaffParNumber(userRow.staff_id) : ''),
+        )
         setSettingsPositionInput(userRow?.position ?? '')
+        setSettingsDepartmentId(userRow?.department_id != null ? String(userRow.department_id) : '')
         setCurrentAdminPosition(userRow?.position ?? '')
         setCurrentAdminName(userRow?.full_name?.trim() || 'Admin')
         setCurrentAdminFirstName(parsedName.firstName)
@@ -1049,7 +1089,7 @@ function DashboardPage() {
       const { data, error: stockpileFetchError } = await supabase
         .from('inventory')
         .select('*')
-        .eq('item_type', 'Stockpile')
+        .or('inventory_kind.eq.stockpile,item_type.ilike.stockpile')
         .order('item_id', { ascending: false })
 
       if (stockpileFetchError) {
@@ -1102,7 +1142,7 @@ function DashboardPage() {
     setParUnitInput(selectedItem.unit_of_measure ?? '')
     setParDescriptionInput(selectedItem.item_name ?? '')
     setParPropertyNoInput(
-      selectedItem.property_no ?? formatItemId(selectedItem.item_id, selectedItem.item_type),
+      selectedItem.property_no ?? formatInventoryItemId(selectedItem),
     )
     setParDateAcquiredInput(selectedItem.date_acquired ?? '')
     setParCostInput(selectedItem.unit_cost != null ? String(selectedItem.unit_cost) : '')
@@ -1234,8 +1274,8 @@ function DashboardPage() {
     return Number.isNaN(parsedDate.getTime()) ? null : parsedDate
   }
   const getInventoryStatus = (item: InventoryRow) => {
-    const explicitStatus = item.status?.trim() || null
-    if (explicitStatus === 'Archived') return 'Archived'
+    const explicitStatus = item.status?.trim().toUpperCase() || null
+    if (explicitStatus === 'ARCHIVED') return 'ARCHIVED'
 
     if (item.item_type.trim().toLowerCase() === 'stockpile') {
       const expirationDate = parseDateLikeValue(item.expiration_date)
@@ -1245,10 +1285,10 @@ function DashboardPage() {
 
       if (expirationDate) {
         expirationDate.setHours(0, 0, 0, 0)
-        if (expirationDate < now) return 'Expired'
+        if (expirationDate < now) return 'EXPIRED'
       }
 
-      return Number.isFinite(quantityValue) && quantityValue <= 10 ? 'Low' : 'Full Stock'
+      return Number.isFinite(quantityValue) && quantityValue <= 10 ? 'LOW' : 'FULL STOCK'
     }
 
     if (explicitStatus) return explicitStatus
@@ -1256,13 +1296,13 @@ function DashboardPage() {
     const quantityValue = item.quantity
     if (quantityValue == null || Number.isNaN(Number(quantityValue))) return null
 
-    return Number(quantityValue) <= 10 ? 'Low' : 'Full Stock'
+    return Number(quantityValue) <= 10 ? 'LOW' : 'FULL STOCK'
   }
   const isArchivedRow = (row: unknown) => {
     if (!row || typeof row !== 'object') return false
 
     const statusValue = (row as { status?: string | null }).status
-    if ((statusValue ?? '').trim() === 'Archived') return true
+    if ((statusValue ?? '').trim().toUpperCase() === 'ARCHIVED') return true
 
     return (row as { is_archived?: boolean | null }).is_archived === true
   }
@@ -1467,30 +1507,30 @@ function DashboardPage() {
       inventoryItems
         .map((item) => getInventoryStatus(item))
         .filter((s): s is string => !!s)
-        .filter((status) => status.trim() !== 'Archived'),
+        .filter((status) => status.trim() !== 'ARCHIVED'),
     ),
   )
   const statusOptions = Array.from(
     new Set<string>([
-      'Serviceable',
-      'Unserviceable',
-      'Valid',
-      'Expired',
-      'Low',
-      'Full Stock',
+      'SERVICEABLE',
+      'UNSERVICEABLE',
+      'VALID',
+      'EXPIRED',
+      'LOW',
+      'FULL STOCK',
       ...dynamicStatusOptions,
     ]),
   ).sort()
   const editableStatusOptions = statusOptions.filter(
-    (statusOption) => !['Valid', 'Full Stock', 'Low'].includes(statusOption),
+    (statusOption) => !['VALID', 'FULL STOCK', 'LOW'].includes(statusOption),
   )
   const acquisitionModeOptions = Array.from(
-    new Set(['Purchased', 'Donated', ...inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)]),
+    new Set(['PURCHASED', 'DONATED', ...inventoryItems.map((item) => item.acquisition_mode).filter((m): m is string => !!m)]),
   ).sort()
 
   const wasteInventoryItems = inventoryItems.filter((item) => {
     const s = getInventoryStatus(item)
-    return s === 'Unserviceable' || s === 'For Repair' || s === 'For Disposal' || s === 'Disposed'
+    return s === 'UNSERVICEABLE' || s === 'FOR REPAIR' || s === 'FOR DISPOSAL' || s === 'DISPOSED'
   })
   // Filter reports that have an item_id (these are inventory-based WMR from staff): includes both reported items and items explicitly updated to waste status
   const staffWmrReports = wmrReports.filter((report) => {
@@ -1583,33 +1623,40 @@ function DashboardPage() {
   const vehicleUnserviceableCount = activeVehicles.length - vehicleServiceableCount
 
   const filteredInventoryItems = inventoryItems.filter((item) => {
-    if (getInventoryStatus(item) === 'Archived') {
+    if (getInventoryStatus(item) === 'ARCHIVED') {
       return false
     }
 
-    const paddedId = formatItemId(item.item_id, item.item_type)
+    const paddedId = formatInventoryItemId(item)
     const matchesSearch =
       !normalizedSearch ||
       paddedId.toLowerCase().includes(normalizedSearch) ||
       item.item_name.toLowerCase().includes(normalizedSearch)
 
-    const matchesType = typeFilter === 'all' || item.item_type === typeFilter
+    const matchesKind =
+      inventoryKindFilter === 'all' || resolveInventoryKind(item) === inventoryKindFilter
+
+    const itemCategory = getInventoryItemCategoryValue(item)
+    const matchesCategory =
+      inventoryKindFilter === 'all' ||
+      categoryFilter === 'all' ||
+      itemCategory.toUpperCase() === categoryFilter.toUpperCase()
 
     const matchesDepartment =
       departmentFilter === 'all' || (item.department_id !== null && String(item.department_id) === departmentFilter)
 
     const matchesSource =
-      sourceFilter === 'all' || (item.acquisition_mode ?? '').trim() === sourceFilter
+      sourceFilter === 'all' || equalsDbText(item.acquisition_mode, sourceFilter)
 
     const derivedStatus = getInventoryStatus(item)
     const matchesStatus = statusFilter === 'all' || derivedStatus === statusFilter
 
-    return matchesSearch && matchesType && matchesDepartment && matchesSource && matchesStatus
+    return matchesSearch && matchesKind && matchesCategory && matchesDepartment && matchesSource && matchesStatus
   }).sort((a, b) => b.item_id - a.item_id)
 
-  const archivedInventoryItems = inventoryItems.filter((item) => getInventoryStatus(item) === 'Archived')
+  const archivedInventoryItems = inventoryItems.filter((item) => getInventoryStatus(item) === 'ARCHIVED')
   const archivedWmrReports = wmrReports
-    .filter((report) => isArchivedRow(report) || (report.status ?? '').trim() === 'Archived')
+    .filter((report) => isArchivedRow(report) || equalsDbText(report.status, 'ARCHIVED'))
     .slice()
     .sort((a, b) => b.report_id - a.report_id)
   const archivedParRecords = parRecords
@@ -1621,6 +1668,43 @@ function DashboardPage() {
     .slice()
     .sort((a, b) => b.id - a.id)
   const visibleDepartments = departments.filter((department) => department.name !== 'Stockpile Room')
+  const inventoryStaffPickerOptions = (() => {
+    const options = inventoryStaffUsers
+      .filter((user) => !user.is_archived)
+      .map((user) => ({
+        id: user.id,
+        full_name: user.full_name,
+        staff_id: user.staff_id,
+        par_no: resolveStaffParNumber(user),
+        department_id: user.department_id,
+        position: user.position,
+      }))
+
+    if (settingsUserId && currentAdminName.trim()) {
+      const alreadyListed = options.some((user) => user.id === settingsUserId)
+      if (!alreadyListed) {
+        options.unshift({
+          id: settingsUserId,
+          full_name: currentAdminName.trim(),
+          staff_id: settingsStaffId,
+          par_no: settingsParNoInput.trim() || (settingsStaffId ? formatStaffParNumber(settingsStaffId) : ''),
+          department_id: settingsDepartmentId ? Number(settingsDepartmentId) : null,
+          position: currentAdminPosition || null,
+        })
+      }
+    }
+
+    return options.sort((a, b) => a.full_name.localeCompare(b.full_name))
+  })()
+  const officeSuppliesLocationLabel = (() => {
+    if (settingsDepartmentId) {
+      const settingsDepartment = departments.find((dept) => dept.id === Number(settingsDepartmentId))
+      if (settingsDepartment?.name?.trim()) return settingsDepartment.name.trim()
+    }
+
+    const pbOfficeDepartment = findPbOfficeDepartment(departments)
+    return pbOfficeDepartment?.name?.trim() || OFFICE_SUPPLIES_LOCATION_LABEL
+  })()
   const archivedStaff = parUsers
     .filter((user) => isArchivedRow(user))
     .filter((user) => (user.role ?? '').trim().toLowerCase() !== 'super admin')
@@ -1806,8 +1890,8 @@ function DashboardPage() {
     )
   }
 
-  const lowStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'Low').length
-  const fullStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'Full Stock').length
+  const lowStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'LOW').length
+  const fullStockCount = inventoryItems.filter((item) => getInventoryStatus(item) === 'FULL STOCK').length
   const inventoryById = new Map(inventoryItems.map((item) => [item.item_id, item]))
   const borrowedTotalCount = borrowedDashboardItems.length
   const borrowedReturnedCount = borrowedDashboardItems.filter(
@@ -1862,14 +1946,14 @@ function DashboardPage() {
     ? inventoryItems.filter((item) => {
         const status = getInventoryStatus(item)
 
-        if (status === 'Archived') return false
+        if (status === 'ARCHIVED') return false
 
         if (dashboardMetricDrilldown === 'total') return true
-        if (dashboardMetricDrilldown === 'serviceable') return status === 'Serviceable'
-        if (dashboardMetricDrilldown === 'unserviceable') return status === 'Unserviceable'
-        if (dashboardMetricDrilldown === 'low') return status === 'Low'
-        if (dashboardMetricDrilldown === 'fullStock') return status === 'Full Stock'
-        if (dashboardMetricDrilldown === 'expired') return status === 'Expired'
+        if (dashboardMetricDrilldown === 'serviceable') return status === 'SERVICEABLE'
+        if (dashboardMetricDrilldown === 'unserviceable') return status === 'UNSERVICEABLE'
+        if (dashboardMetricDrilldown === 'low') return status === 'LOW'
+        if (dashboardMetricDrilldown === 'fullStock') return status === 'FULL STOCK'
+        if (dashboardMetricDrilldown === 'expired') return status === 'EXPIRED'
 
         return false
       })
@@ -1888,7 +1972,7 @@ function DashboardPage() {
         const quantity = Number(item.quantity_on_hand ?? 0)
         const expiration = item.expiration_date ? new Date(item.expiration_date) : null
         const isExpired =
-          item.status?.trim() === 'Expired' ||
+          equalsDbText(item.status, 'EXPIRED') ||
           (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
 
         if (dashboardMetricDrilldown === 'stockpileExpired') return isExpired
@@ -2027,6 +2111,12 @@ function DashboardPage() {
         return
       }
 
+      if (viewInventoryItem) {
+        event.preventDefault()
+        setViewInventoryItem(null)
+        return
+      }
+
       if (viewImageItem) {
         event.preventDefault()
         setViewImageItem(null)
@@ -2082,6 +2172,7 @@ function DashboardPage() {
     editDeleting,
     dashboardMetricDrilldown,
     archiveModalConfig,
+    viewInventoryItem,
     viewImageItem,
     viewStaffQrItem,
     viewQrItem,
@@ -2110,6 +2201,11 @@ function DashboardPage() {
     .sort((a, b) => b.value - a.value)
     .slice(0, 5)
 
+  const findStaffUserById = (staffId: string) =>
+    parUsers.find((user) => user.id === staffId) ??
+    inventoryStaffUsers.find((user) => user.id === staffId) ??
+    null
+
   const groupedParByStaff = parRecords
     .filter((record) => !isArchivedRow(record))
     .reduce(
@@ -2128,30 +2224,55 @@ function DashboardPage() {
       new Map<string, ParRecordRow[]>(),
     )
 
-  const filteredParSummaries = Array.from(groupedParByStaff.entries())
-    .map(([staffId, records]) => {
-      const receiver = parUsers.find((user) => user.id === staffId) ?? null
-      const latestIssueDate = records
-        .map((record) => record.issue_date)
-        .filter((value): value is string => !!value)
+  const parAssignedInventoryItems = inventoryItems.filter(
+    (item) => isParInventoryItem(item) && !isArchivedRow(item) && Boolean(item.par_no?.trim()),
+  )
+
+  const staffIdsFromParInventory = new Set<string>()
+  parAssignedInventoryItems.forEach((item) => {
+    const staff = findStaffByParNumber(item.par_no!.trim(), [inventoryStaffUsers, parUsers])
+    if (staff) staffIdsFromParInventory.add(staff.id)
+  })
+
+  const allParStaffIds = new Set([...groupedParByStaff.keys(), ...staffIdsFromParInventory])
+
+  const filteredParSummaries = Array.from(allParStaffIds)
+    .map((staffId) => {
+      const records = groupedParByStaff.get(staffId) ?? []
+      const receiver = findStaffUserById(staffId)
+      const staffParNo = resolveStaffParNumber(receiver)
+      const assignedInventory = staffParNo
+        ? parAssignedInventoryItems.filter((item) => item.par_no?.trim() === staffParNo)
+        : []
+
+      const latestIssueDate = [
+        ...records
+          .map((record) => record.issue_date)
+          .filter((value): value is string => Boolean(value)),
+        ...assignedInventory.map((item) => item.date_acquired).filter(Boolean),
+      ]
         .sort((a, b) => b.localeCompare(a))[0] ?? null
 
-      const totalQuantity = records.reduce((sum, record) => sum + (record.quantity_issued ?? 0), 0)
+      const recordQuantity = records.reduce((sum, record) => sum + (record.quantity_issued ?? 0), 0)
+      const inventoryQuantity = assignedInventory.reduce((sum, item) => sum + (item.quantity ?? 0), 0)
+      const inventoryOnlyCount = assignedInventory.filter(
+        (item) => !records.some((record) => record.item_id === item.item_id),
+      ).length
 
       return {
         staffId,
         records,
         receiver,
+        assignedInventory,
         latestIssueDate,
-        totalQuantity,
+        totalQuantity: recordQuantity + inventoryQuantity,
+        itemCount: records.length + inventoryOnlyCount,
       }
     })
     .filter((summary) => {
       if (!normalizedParSearch) return true
 
-      const parNo = summary.receiver?.staff_id
-        ? `PAR-${summary.receiver.staff_id}`
-        : `PAR-${summary.staffId.slice(0, 8)}`
+      const parNo = resolveStaffParNumber(summary.receiver) || `PAR-${summary.staffId.slice(0, 8)}`
 
       const matchesSummary =
         parNo.toLowerCase().includes(normalizedParSearch) ||
@@ -2160,7 +2281,7 @@ function DashboardPage() {
 
       if (matchesSummary) return true
 
-      return summary.records.some((record) => {
+      const matchesRecord = summary.records.some((record) => {
         const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
 
         return (
@@ -2170,6 +2291,16 @@ function DashboardPage() {
           (record.property_no_snapshot?.toLowerCase().includes(normalizedParSearch) ?? false)
         )
       })
+
+      if (matchesRecord) return true
+
+      return summary.assignedInventory.some(
+        (item) =>
+          item.item_name.toLowerCase().includes(normalizedParSearch) ||
+          item.item_type.toLowerCase().includes(normalizedParSearch) ||
+          (item.property_no?.toLowerCase().includes(normalizedParSearch) ?? false) ||
+          (item.item_description?.toLowerCase().includes(normalizedParSearch) ?? false),
+      )
     })
 
   const reportPeriodParSummaries = Array.from(groupedParByStaff.entries())
@@ -2178,7 +2309,7 @@ function DashboardPage() {
         isDateWithinReportRange(record.issue_date, reportStartDate, reportEndDate),
       )
 
-      const receiver = parUsers.find((user) => user.id === staffId) ?? null
+      const receiver = findStaffUserById(staffId) ?? null
 
       return {
         staffId,
@@ -2222,31 +2353,77 @@ function DashboardPage() {
   }, [reportParOptions])
 
   const activeParRecords = activeParStaffId ? groupedParByStaff.get(activeParStaffId) ?? [] : []
-  const activeParReceiver = activeParStaffId
-    ? parUsers.find((user) => user.id === activeParStaffId) ?? null
-    : null
-  const activeParNo = activeParReceiver?.staff_id
-    ? `PAR-${activeParReceiver.staff_id}`
-    : activeParStaffId
-      ? `PAR-${activeParStaffId.slice(0, 8)}`
-      : 'PAR-'
+  const activeParReceiver = activeParStaffId ? findStaffUserById(activeParStaffId) : null
+  const activeParNo = resolveStaffParNumber(activeParReceiver) || (activeParStaffId ? `PAR-${activeParStaffId.slice(0, 8)}` : 'PAR-')
+  const activeParInventoryItems = activeParNo
+    ? parAssignedInventoryItems.filter((item) => item.par_no?.trim() === activeParNo)
+    : []
+  const activeParViewRows = (() => {
+    const rows: Array<{
+      key: string
+      quantity: string | number
+      unit: string
+      description: string
+      propertyNo: string
+      dateAcquired: string | null
+      cost: number | null
+    }> = []
+    const seenItemIds = new Set<number>()
+
+    activeParInventoryItems.forEach((item) => {
+      seenItemIds.add(item.item_id)
+      rows.push({
+        key: `inventory-${item.item_id}`,
+        quantity: item.quantity ?? 1,
+        unit: item.unit_of_measure ?? 'N/A',
+        description: item.item_description?.trim() || item.item_name,
+        propertyNo: item.property_no ?? formatInventoryItemId(item),
+        dateAcquired: item.date_acquired,
+        cost: item.unit_cost,
+      })
+    })
+
+    activeParRecords.forEach((record) => {
+      if (record.item_id != null && seenItemIds.has(record.item_id)) return
+      const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
+      rows.push({
+        key: `record-${record.par_id}`,
+        quantity: record.quantity_issued ?? 0,
+        unit: record.unit_snapshot ?? item?.unit_of_measure ?? 'N/A',
+        description: record.description_snapshot ?? item?.item_name ?? '—',
+        propertyNo:
+          record.property_no_snapshot ??
+          item?.property_no ??
+          (record.item_id != null && item ? formatInventoryItemId(item) : '—'),
+        dateAcquired: record.date_acquired_snapshot ?? item?.date_acquired ?? null,
+        cost: record.cost_snapshot ?? item?.unit_cost ?? null,
+      })
+    })
+
+    return rows
+  })()
   const activeParDepartment =
     activeParReceiver?.department_id != null
       ? departments.find((dept) => dept.id === activeParReceiver.department_id)?.name ?? '—'
       : '—'
-  const activeParCostTotals = activeParRecords.map((record) => {
-    const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
+  const activeParCostTotals = [
+    ...activeParInventoryItems.map((item) => calculateTotalCost(item.quantity ?? null, item.unit_cost)),
+    ...activeParRecords
+      .filter((record) => record.item_id == null || !activeParInventoryItems.some((item) => item.item_id === record.item_id))
+      .map((record) => {
+        const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
 
-    if (record.cost_snapshot != null) {
-      return calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot)
-    }
+        if (record.cost_snapshot != null) {
+          return calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot)
+        }
 
-    if (item?.unit_cost != null) {
-      return calculateTotalCost(record.quantity_issued ?? null, item.unit_cost)
-    }
+        if (item?.unit_cost != null) {
+          return calculateTotalCost(record.quantity_issued ?? null, item.unit_cost)
+        }
 
-    return null
-  })
+        return null
+      }),
+  ]
   const activeParHasCost = activeParCostTotals.some((value) => value != null)
   let activeParTotalCost = 0
   for (const value of activeParCostTotals) {
@@ -2392,7 +2569,7 @@ function DashboardPage() {
     })
     const receiver = parUsers.find((user) => user.id === staffId) ?? null
     const issuedByName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
-    const parNo = receiver?.staff_id ? `PAR-${receiver.staff_id}` : `PAR-${staffId.slice(0, 8)}`
+    const parNo = resolveStaffParNumber(receiver) || `PAR-${staffId.slice(0, 8)}`
     const departmentName =
       receiver?.department_id != null
         ? departments.find((dept) => dept.id === receiver.department_id)?.name ?? '—'
@@ -2417,7 +2594,7 @@ function DashboardPage() {
           propertyNo:
             record.property_no_snapshot ??
             item?.property_no ??
-            (record.item_id != null ? formatItemId(record.item_id, item?.item_type) : '—'),
+            (record.item_id != null && item ? formatInventoryItemId(item) : '—'),
           issuedDate: formatInventoryDate(record.issue_date),
           dateAcquired: formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired),
           cost:
@@ -2565,16 +2742,18 @@ function DashboardPage() {
 
       const { data, error: updateError } = await supabase
         .from('par_records')
-        .update({
-          quantity_issued: nextQuantity,
-          issue_date: parIssueDate || existingStaffItemRecord.issue_date || null,
-          contact_snapshot: selectedUser?.contact_info ?? existingStaffItemRecord.contact_snapshot ?? null,
-          unit_snapshot: parUnitInput || existingStaffItemRecord.unit_snapshot || null,
-          description_snapshot: parDescriptionInput || existingStaffItemRecord.description_snapshot || selectedItem.item_name,
-          property_no_snapshot: parPropertyNoInput || existingStaffItemRecord.property_no_snapshot || null,
-          date_acquired_snapshot: parDateAcquiredInput || existingStaffItemRecord.date_acquired_snapshot || null,
-          cost_snapshot: costSnapshot ?? existingStaffItemRecord.cost_snapshot ?? null,
-        })
+        .update(
+          normalizeParRecord({
+            quantity_issued: nextQuantity,
+            issue_date: parIssueDate || existingStaffItemRecord.issue_date || null,
+            contact_snapshot: selectedUser?.contact_info ?? existingStaffItemRecord.contact_snapshot ?? null,
+            unit_snapshot: parUnitInput || existingStaffItemRecord.unit_snapshot || null,
+            description_snapshot: parDescriptionInput || existingStaffItemRecord.description_snapshot || selectedItem.item_name,
+            property_no_snapshot: parPropertyNoInput || existingStaffItemRecord.property_no_snapshot || null,
+            date_acquired_snapshot: parDateAcquiredInput || existingStaffItemRecord.date_acquired_snapshot || null,
+            cost_snapshot: costSnapshot ?? existingStaffItemRecord.cost_snapshot ?? null,
+          }),
+        )
         .eq('par_id', existingStaffItemRecord.par_id)
         .select('*')
 
@@ -2593,7 +2772,7 @@ function DashboardPage() {
       const { data, error: insertError } = await supabase
         .from('par_records')
         .insert([
-          {
+          normalizeParRecord({
             item_id: selectedItem.item_id,
             issued_to_id: parIssuedToId,
             quantity_issued: quantityValue,
@@ -2604,10 +2783,10 @@ function DashboardPage() {
             property_no_snapshot:
               parPropertyNoInput ||
               selectedItem.property_no ||
-              formatItemId(selectedItem.item_id, selectedItem.item_type),
+              formatInventoryItemId(selectedItem),
             date_acquired_snapshot: parDateAcquiredInput || selectedItem.date_acquired,
             cost_snapshot: costSnapshot ?? selectedItem.unit_cost ?? null,
-          },
+          }),
         ])
         .select('*')
 
@@ -2673,19 +2852,21 @@ function DashboardPage() {
         const nextQuantity = (existingRecord.quantity_issued ?? 0) + quantityValue
         const { data, error: updateError } = await supabase
           .from('par_records')
-          .update({
-            quantity_issued: nextQuantity,
-            issue_date: issueDate || existingRecord.issue_date || null,
-            contact_snapshot: selectedUser?.contact_info ?? existingRecord.contact_snapshot ?? null,
-            unit_snapshot: row.unit || existingRecord.unit_snapshot || null,
-            description_snapshot: row.description || existingRecord.description_snapshot || selectedItem.item_name,
-            property_no_snapshot:
-              row.propertyId.trim() ||
-              existingRecord.property_no_snapshot ||
-              selectedItem.property_no ||
-              formatItemId(selectedItem.item_id, selectedItem.item_type),
-            cost_snapshot: row.costSnapshot ?? existingRecord.cost_snapshot ?? null,
-          })
+          .update(
+            normalizeParRecord({
+              quantity_issued: nextQuantity,
+              issue_date: issueDate || existingRecord.issue_date || null,
+              contact_snapshot: selectedUser?.contact_info ?? existingRecord.contact_snapshot ?? null,
+              unit_snapshot: row.unit || existingRecord.unit_snapshot || null,
+              description_snapshot: row.description || existingRecord.description_snapshot || selectedItem.item_name,
+              property_no_snapshot:
+                row.propertyId.trim() ||
+                existingRecord.property_no_snapshot ||
+                selectedItem.property_no ||
+                formatInventoryItemId(selectedItem),
+              cost_snapshot: row.costSnapshot ?? existingRecord.cost_snapshot ?? null,
+            }),
+          )
           .eq('par_id', existingRecord.par_id)
           .select('*')
 
@@ -2703,7 +2884,7 @@ function DashboardPage() {
         const { data, error: insertError } = await supabase
           .from('par_records')
           .insert([
-            {
+            normalizeParRecord({
               item_id: selectedItem.item_id,
               issued_to_id: issuedToId,
               quantity_issued: quantityValue,
@@ -2714,10 +2895,10 @@ function DashboardPage() {
               property_no_snapshot:
                 row.propertyId.trim() ||
                 selectedItem.property_no ||
-                formatItemId(selectedItem.item_id, selectedItem.item_type),
+                formatInventoryItemId(selectedItem),
               date_acquired_snapshot: selectedItem.date_acquired,
               cost_snapshot: row.costSnapshot ?? selectedItem.unit_cost ?? null,
-            },
+            }),
           ])
           .select('*')
 
@@ -3162,20 +3343,22 @@ function DashboardPage() {
 
     const { error: updateError } = await supabase
       .from('inventory')
-      .update({
-        item_name: editItemName,
-        item_type: editItemType,
-        department_id: Number(editDepartmentId),
-        quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
-        unit_of_measure: editUnitOfMeasure || null,
-        unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
-        date_acquired: editDateAcquired ? editDateAcquired : new Date().toISOString().split('T')[0],
-        expiration_date: isStockpileType ? editExpirationDate || null : null,
-        acquisition_mode: editSource || null,
-        status: isStockpileType ? stockpileStatusToSave : sanitizedEditStatus,
-        condition: editCondition || null,
-        donor_identification: editDonorIdentification || null,
-      } as any)
+      .update(
+        normalizeInventoryRecord({
+          item_name: editItemName,
+          item_type: editItemType,
+          department_id: Number(editDepartmentId),
+          quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
+          unit_of_measure: editUnitOfMeasure || null,
+          unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
+          date_acquired: editDateAcquired ? editDateAcquired : new Date().toISOString().split('T')[0],
+          expiration_date: isStockpileType ? editExpirationDate || null : null,
+          acquisition_mode: editSource || null,
+          status: isStockpileType ? stockpileStatusToSave : sanitizedEditStatus,
+          condition: editCondition || null,
+          donor_identification: editDonorIdentification || null,
+        }) as any,
+      )
       .eq('item_id', editingItem.item_id)
 
     if (updateError) {
@@ -3309,7 +3492,7 @@ function DashboardPage() {
 
     const { error: archiveInventoryError } = await supabase
       .from('inventory')
-      .update({ status: 'Archived' })
+      .update({ status: 'ARCHIVED' })
       .eq('item_id', targetItem.item_id)
 
     if (archiveInventoryError) {
@@ -3319,7 +3502,7 @@ function DashboardPage() {
     }
 
     setInventoryItems((prev) =>
-      prev.map((item) => (item.item_id === targetItem.item_id ? { ...item, status: 'Archived' } : item)),
+      prev.map((item) => (item.item_id === targetItem.item_id ? { ...item, status: 'ARCHIVED' } : item)),
     )
     setEditDeleting(false)
     setArchiveModalConfig(null)
@@ -3332,6 +3515,7 @@ function DashboardPage() {
     const combinedName = (settingsFirstNameInput.trim() + ' ' + settingsLastNameInput.trim()).trim()
     const trimmedName = combinedName || settingsNameInput.trim()
     const trimmedPosition = settingsPositionInput.trim()
+    const isSuperAdmin = currentUserRole.trim().toLowerCase() === 'super admin'
 
     if (!settingsUserId) {
       setSettingsErrorMessage('Unable to identify the signed-in user.')
@@ -3343,13 +3527,39 @@ function DashboardPage() {
       return
     }
 
+    if (isSuperAdmin && !settingsDepartmentId) {
+      setSettingsErrorMessage('Please select your department.')
+      return
+    }
+
+    const trimmedParNo = settingsParNoInput.trim()
+    if (!trimmedParNo) {
+      setSettingsErrorMessage('PAR number is required.')
+      return
+    }
+
     setSettingsNameSaving(true)
     setSettingsErrorMessage(null)
     setSettingsSuccessMessage(null)
 
+    const updatePayload: {
+      full_name: string
+      position: string | null
+      par_no: string
+      department_id?: number
+    } = {
+      full_name: trimmedName,
+      position: trimmedPosition || null,
+      par_no: trimmedParNo,
+    }
+
+    if (isSuperAdmin && settingsDepartmentId) {
+      updatePayload.department_id = Number(settingsDepartmentId)
+    }
+
     const { error: updateNameError } = await supabase
       .from('users')
-      .update({ full_name: trimmedName, position: trimmedPosition || null })
+      .update(normalizeUserRecord(updatePayload))
       .eq('id', settingsUserId)
 
     if (updateNameError) {
@@ -3361,10 +3571,30 @@ function DashboardPage() {
     setParUsers((prev) =>
       prev.map((user) =>
         user.id === settingsUserId
-          ? { ...user, full_name: trimmedName, position: trimmedPosition || null }
+          ? {
+              ...user,
+              full_name: trimmedName,
+              position: trimmedPosition || null,
+              par_no: trimmedParNo,
+              department_id: isSuperAdmin ? Number(settingsDepartmentId) : user.department_id,
+            }
           : user,
       ),
     )
+    setInventoryStaffUsers((prev) =>
+      prev.map((user) =>
+        user.id === settingsUserId
+          ? {
+              ...user,
+              full_name: trimmedName,
+              position: trimmedPosition || null,
+              par_no: trimmedParNo,
+              department_id: isSuperAdmin ? Number(settingsDepartmentId) : user.department_id,
+            }
+          : user,
+      ),
+    )
+    setSettingsParNoInput(trimmedParNo)
     setCurrentAdminName(trimmedName)
     setCurrentAdminPosition(trimmedPosition)
     setCurrentAdminLastName(settingsLastNameInput.trim())
@@ -3449,6 +3679,8 @@ function DashboardPage() {
     setStaffFormLastName('')
     setStaffFormFirstName('')
     setStaffFormStaffId('')
+    setStaffFormParNo('')
+    staffFormParNoTouchedRef.current = false
     setStaffFormPosition('')
     setStaffFormRole('Staff')
     setStaffFormContact('')
@@ -3475,6 +3707,8 @@ function DashboardPage() {
     setStaffFormFirstName(parsedName.firstName)
     setStaffFormLastName(parsedName.lastName)
     setStaffFormStaffId(user.staff_id)
+    setStaffFormParNo(resolveStaffParNumber(user))
+    staffFormParNoTouchedRef.current = false
     setStaffFormPosition(user.position ?? '')
     setStaffFormRole(mapStaffRoleToOption(user.role))
     setStaffFormContact(user.contact_info ?? '')
@@ -3489,6 +3723,8 @@ function DashboardPage() {
 
     if (!departmentId) {
       setStaffFormStaffId('')
+      setStaffFormParNo('')
+      staffFormParNoTouchedRef.current = false
       return
     }
 
@@ -3498,11 +3734,15 @@ function DashboardPage() {
 
     const generatedStaffId = buildStaffId(Number(departmentId), parUsers)
     setStaffFormStaffId(generatedStaffId)
+    if (!staffFormParNoTouchedRef.current) {
+      setStaffFormParNo(formatStaffParNumber(generatedStaffId))
+    }
   }
 
   const handleSaveStaff = async () => {
     const trimmedName = `${staffFormFirstName.trim()} ${staffFormLastName.trim()}`.trim()
     const trimmedStaffId = staffFormStaffId.trim()
+    const trimmedParNo = staffFormParNo.trim()
     const derivedEmail = buildStaffEmail(trimmedStaffId)
     const derivedQrCode = buildStaffQrCode(trimmedStaffId)
     const normalizedFormRole = staffFormRole.trim().toLowerCase()
@@ -3527,8 +3767,8 @@ function DashboardPage() {
       return
     }
 
-    if (!trimmedName || !derivedEmail || !trimmedStaffId || deptId == null || Number.isNaN(deptId)) {
-      setStaffError('Department and name are required.')
+    if (!trimmedName || !derivedEmail || !trimmedStaffId || !trimmedParNo || deptId == null || Number.isNaN(deptId)) {
+      setStaffError('Department, name, and PAR number are required.')
       return
     }
 
@@ -3545,19 +3785,22 @@ function DashboardPage() {
     if (staffFormMode === 'edit' && staffFormTargetId) {
       const { data: updatedUser, error: updateError } = await supabase
         .from('users')
-        .update({
-          department_id: deptId,
-          full_name: trimmedName,
-          email: derivedEmail,
-          staff_id: trimmedStaffId,
-          qr_code: existingStaffRecord?.uid ?? derivedQrCode,
-          uid: existingStaffRecord?.uid ?? undefined,
-          position: staffFormPosition.trim() || null,
-          role: trimmedRole,
-          contact_info: staffFormContact.trim() || null,
-          emergency_contact: staffFormEmergencyContact.trim() || null,
-          recovery_email: staffFormRecoveryEmail.trim() || null,
-        })
+        .update(
+          normalizeUserRecord({
+            department_id: deptId,
+            full_name: trimmedName,
+            email: derivedEmail,
+            staff_id: trimmedStaffId,
+            par_no: trimmedParNo,
+            qr_code: existingStaffRecord?.uid ?? derivedQrCode,
+            uid: existingStaffRecord?.uid ?? undefined,
+            position: staffFormPosition.trim() || null,
+            role: trimmedRole,
+            contact_info: staffFormContact.trim() || null,
+            emergency_contact: staffFormEmergencyContact.trim() || null,
+            recovery_email: staffFormRecoveryEmail.trim() || null,
+          }),
+        )
         .eq('id', staffFormTargetId)
         .select('*')
         .single()
@@ -3569,6 +3812,7 @@ function DashboardPage() {
       }
 
       setParUsers((prev) => prev.map((user) => (user.id === updatedUser.id ? updatedUser : user)))
+      setInventoryStaffUsers((prev) => prev.map((user) => (user.id === updatedUser.id ? updatedUser : user)))
       setStaffSuccess('Staff updated successfully.')
       resetStaffForm()
       setStaffSaving(false)
@@ -3631,13 +3875,14 @@ function DashboardPage() {
     const { data: createdUser, error: createError } = await supabase
       .from('users')
       .upsert([
-        {
+        normalizeUserRecord({
           id: authUserId,
           uid: staffUid,
           department_id: deptId,
           full_name: trimmedName,
           email: derivedEmail,
           staff_id: trimmedStaffId,
+          par_no: trimmedParNo,
           qr_code: staffUid,
           position: staffFormPosition.trim() || null,
           role: trimmedRole,
@@ -3647,7 +3892,7 @@ function DashboardPage() {
           is_locked: false,
           is_online: false,
           must_change_password: true,
-        },
+        }),
       ], { onConflict: 'id' })
       .select('*')
       .single()
@@ -3664,6 +3909,7 @@ function DashboardPage() {
       if (refetchedUser && !refetchError) {
         void transientAuthClient.auth.signOut()
         setParUsers((prev) => [refetchedUser, ...prev])
+        setInventoryStaffUsers((prev) => [refetchedUser, ...prev])
         setStaffSuccess('Staff added successfully. Authentication account was created.')
         resetStaffForm()
         setStaffSaving(false)
@@ -3678,6 +3924,7 @@ function DashboardPage() {
     void transientAuthClient.auth.signOut()
 
     setParUsers((prev) => [createdUser, ...prev])
+    setInventoryStaffUsers((prev) => [createdUser, ...prev])
     setStaffSuccess('Staff added successfully. Authentication account was created.')
     resetStaffForm()
     setStaffSaving(false)
@@ -3806,7 +4053,7 @@ function DashboardPage() {
 
     const { error: archiveError } = await supabase
       .from('wmr_reports')
-      .update({ status: 'Archived', is_archived: true, archived_at: new Date().toISOString() } as never)
+      .update({ status: 'ARCHIVED', is_archived: true, archived_at: new Date().toISOString() } as never)
       .eq('report_id', report.report_id)
 
     if (archiveError) {
@@ -3818,7 +4065,7 @@ function DashboardPage() {
     setWmrReports((prev) =>
       prev.map((current) =>
         current.report_id === report.report_id
-          ? ({ ...current, status: 'Archived', is_archived: true } as WmrReportRow)
+          ? ({ ...current, status: 'ARCHIVED', is_archived: true } as WmrReportRow)
           : current,
       ),
     )
@@ -3833,7 +4080,7 @@ function DashboardPage() {
 
     const { error: archiveError } = await supabase
       .from('wmr_reports')
-      .update({ status: 'Archived', is_archived: true, archived_at: new Date().toISOString() } as never)
+      .update({ status: 'ARCHIVED', is_archived: true, archived_at: new Date().toISOString() } as never)
       .eq('report_id', report.report_id)
 
     if (archiveError) {
@@ -3845,7 +4092,7 @@ function DashboardPage() {
     setWmrReports((prev) =>
       prev.map((current) =>
         current.report_id === report.report_id
-          ? ({ ...current, status: 'Archived', is_archived: true } as WmrReportRow)
+          ? ({ ...current, status: 'ARCHIVED', is_archived: true } as WmrReportRow)
           : current,
       ),
     )
@@ -3883,9 +4130,84 @@ function DashboardPage() {
     setArchiveModalConfig(null)
   }
 
+  const resetNewItemForm = (kind: InventoryKind = newInventoryKind) => {
+    setNewItemName('')
+    setNewItemType('')
+    setNewItemCategory('')
+    setNewItemDescription('')
+    setNewCondition('')
+    setNewDonorIdentification('')
+    setNewItemDepartmentId('')
+    setNewAssignedTo(
+      kind === 'office_supplies'
+        ? currentAdminName.trim()
+          ? formatOfficeSuppliesAssignee(currentAdminName)
+          : officeSuppliesAssignee
+        : '',
+    )
+    setNewRemarks('')
+    setNewEstimatedUsefulLife('')
+    setNewQuantity(kind === 'par' ? String(PAR_DEFAULT_QUANTITY) : '')
+    setNewUnitOfMeasure(kind === 'par' ? PAR_DEFAULT_UNIT : '')
+    setNewUnitCost('')
+    setNewDateAcquired('')
+    setNewExpirationDate('')
+    setNewDateLastRestocked('')
+    setNewSource('')
+    setNewPhotoFiles([])
+    if (addPhotoInputRef.current) addPhotoInputRef.current.value = ''
+  }
+
+  const handleInventoryKindChange = (kind: InventoryKind) => {
+    setNewInventoryKind(kind)
+    resetNewItemForm(kind)
+  }
+
   const handleAddItem = async () => {
     const normalizedSource = newSource.trim().toLowerCase()
-    const isStockpileType = newItemType.trim().toLowerCase() === 'stockpile'
+    const isStockpileKind = newInventoryKind === 'stockpile'
+    const isParKind = newInventoryKind === 'par'
+    const isOfficeKind = newInventoryKind === 'office_supplies'
+    const stockpileDepartment = departments.find((dept) =>
+      dept.name.trim().toLowerCase().includes('stockpile'),
+    )
+    const pbOfficeDepartment = findPbOfficeDepartment(departments)
+
+    if (!newItemName.trim()) {
+      setInventoryError('Item name is required.')
+      return
+    }
+
+    if (isStockpileKind && !newItemCategory.trim()) {
+      setInventoryError('Item category is required for stockpile items.')
+      return
+    }
+
+    if (isParKind && (!newItemType.trim() || !newItemDepartmentId)) {
+      setInventoryError('Item type and location are required for PAR items.')
+      return
+    }
+
+    if (isParKind && !newDateAcquired.trim()) {
+      setInventoryError('Date acquired is required for PAR items.')
+      return
+    }
+
+    if (isOfficeKind && !newItemCategory.trim()) {
+      setInventoryError('Item category is required for office supplies.')
+      return
+    }
+
+    if ((isStockpileKind || isOfficeKind) && (!newQuantity.trim() || !newUnitOfMeasure.trim())) {
+      setInventoryError('Quantity and unit are required.')
+      return
+    }
+
+    if (isParKind && normalizedSource === 'purchased' && !newUnitCost.trim()) {
+      setInventoryError('Cost is required for purchased PAR items.')
+      return
+    }
+
     const addExpirationValue = parseDateLikeValue(newExpirationDate)
     const addTodayStart = new Date()
     addTodayStart.setHours(0, 0, 0, 0)
@@ -3897,44 +4219,83 @@ function DashboardPage() {
         ? 'Expired'
         : null
 
-    if (!newItemName || !newItemType || !newItemDepartmentId) {
-      setInventoryError('Item name, type, and department are required.')
-      return
-    }
-
-    if (normalizedSource === 'purchased' && !newUnitCost.trim()) {
-      setInventoryError('Unit cost is required for purchased items.')
-      return
-    }
-
     setAddingItem(true)
     setInventoryError(null)
 
-    const quantityNumber = newQuantity ? Number(newQuantity) : null
-    const unitCostNumber = normalizedSource === 'purchased' ? Number(newUnitCost) : null
+    const quantityNumber = isParKind
+      ? PAR_DEFAULT_QUANTITY
+      : newQuantity
+        ? Number(newQuantity)
+        : null
+    const unitCostNumber =
+      isParKind && normalizedSource === 'purchased'
+        ? Number(newUnitCost)
+        : isParKind && newUnitCost.trim()
+          ? Number(newUnitCost)
+          : null
+    const usefulLifeNumber = newEstimatedUsefulLife.trim() ? Number(newEstimatedUsefulLife) : null
     const itemUid = crypto.randomUUID()
-    
-    // Generate property number based on item type
-    const propertyNo = generatePropertyNumber(newItemType, inventoryItems)
-    
+    const acquiredDate = newDateAcquired || new Date().toISOString().split('T')[0]
+
+    const resolvedItemType = isStockpileKind
+      ? 'Stockpile'
+      : isOfficeKind
+        ? 'Office Supplies'
+        : newItemType.trim()
+
+    const assignedStaff = isParKind && newAssignedTo.trim()
+      ? inventoryStaffPickerOptions.find((staff) => staff.full_name.trim() === newAssignedTo.trim())
+      : null
+    const inventoryParNo = isParKind ? assignedStaff?.par_no?.trim() || null : null
+
+    const propertyNo = isParKind
+      ? generateParPropertyNumber(newItemType, newItemName, acquiredDate, inventoryItems)
+      : null
+
+    const nextKindItemNo =
+      isStockpileKind || isOfficeKind ? getNextKindItemNo(inventoryItems, newInventoryKind) : null
+
+    const departmentId = isParKind
+      ? Number(newItemDepartmentId)
+      : isStockpileKind
+        ? stockpileDepartment?.id ?? null
+        : isOfficeKind
+          ? (settingsDepartmentId ? Number(settingsDepartmentId) : pbOfficeDepartment?.id ?? null)
+          : null
+
     const { data: insertedItems, error: insertError } = await supabase.from('inventory').insert([
-      {
+      normalizeInventoryRecord({
         uid: itemUid,
-        item_name: newItemName,
-        item_type: newItemType,
-        department_id: Number(newItemDepartmentId),
-        quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
-        unit_of_measure: newUnitOfMeasure || null,
+        inventory_kind: newInventoryKind,
+        kind_item_no: nextKindItemNo,
+        item_name: newItemName.trim(),
+        item_type: resolvedItemType,
+        item_category: isParKind ? null : newItemCategory.trim() || null,
+        item_description: isParKind ? newItemDescription.trim() || null : null,
+        department_id: departmentId,
+        quantity: Number.isNaN(quantityNumber as number) ? null : quantityNumber,
+        unit_of_measure: isParKind ? PAR_DEFAULT_UNIT : newUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
-        date_acquired: newDateAcquired || new Date().toISOString().split('T')[0],
-        expiration_date: isStockpileType ? newExpirationDate || null : null,
-        acquisition_mode: newSource || null,
-        status: isStockpileType ? stockpileStatusToInsert : null,
-        condition: newCondition || null,
-        donor_identification: newDonorIdentification || null,
+        date_acquired: isOfficeKind
+          ? newDateLastRestocked || acquiredDate
+          : acquiredDate,
+        expiration_date: isStockpileKind ? newExpirationDate || null : null,
+        date_last_restocked: isOfficeKind ? newDateLastRestocked || null : null,
+        acquisition_mode: isParKind ? newSource || null : null,
+        status: isStockpileKind ? stockpileStatusToInsert : null,
+        condition: isParKind ? newCondition || null : null,
+        donor_identification: isParKind && normalizedSource === 'donated' ? newDonorIdentification || null : null,
+        estimated_useful_life_years: isParKind && !Number.isNaN(usefulLifeNumber) ? usefulLifeNumber : null,
+        assigned_to_name: isParKind
+          ? newAssignedTo.trim() || null
+          : isOfficeKind
+            ? newAssignedTo.trim() || officeSuppliesAssignee
+            : null,
+        remarks: isOfficeKind ? newRemarks.trim() || null : null,
         property_no: propertyNo,
+        par_no: inventoryParNo,
         qr_code: itemUid,
-      } as any,
+      }) as any,
     ]).select('*')
 
     if (insertError) {
@@ -4019,32 +4380,22 @@ function DashboardPage() {
       }
     }
 
-    // Clear form
-    setNewItemName('')
-    setNewItemType('')
-    setNewCondition('')
-    setNewDonorIdentification('')
-    setNewItemDepartmentId('')
-    setNewQuantity('')
-    setNewUnitOfMeasure('')
-    setNewUnitCost('')
-    setNewDateAcquired('')
-    setNewExpirationDate('')
-    setNewSource('')
-    setNewPhotoFiles([])
+    const savedItemType = resolvedItemType
+    const savedItemName = newItemName.trim()
+    const savedCondition = newCondition
 
-    // Auto-register vehicle in vehicles table for Transportation Equipment
-    if (newItemType.trim().toLowerCase() === 'transportation equipment') {
+    resetNewItemForm(newInventoryKind)
+
+    if (isParKind && savedItemType.trim().toLowerCase() === 'transportation equipment') {
       await supabase.from('vehicles').insert([
         {
-          vehicle_name: newItemName,
-          make_model: newItemName,
-          is_serviceable: newCondition.trim().toLowerCase() !== 'defective',
+          vehicle_name: savedItemName,
+          make_model: savedItemName,
+          is_serviceable: savedCondition.trim().toLowerCase() !== 'defective',
         } as never,
       ])
     }
 
-    // Reload inventory list
     setInventoryLoading(true)
     const { data, error: reloadError } = await supabase.from('inventory').select('*').order('item_id', {
       ascending: false,
@@ -4069,7 +4420,7 @@ function DashboardPage() {
     setQrGeneratingId(item.item_id)
     setInventoryError(null)
 
-    const qrValue = item.uid ?? formatItemId(item.item_id, item.item_type)
+    const qrValue = item.uid ?? formatInventoryItemId(item)
 
     const { data, error: qrError } = await supabase
       .from('inventory')
@@ -4195,7 +4546,7 @@ function DashboardPage() {
 
       const expiration = row.expiration_date ? new Date(row.expiration_date) : null
       const isExpired =
-        row.status?.trim() === 'Expired' ||
+        equalsDbText(row.status, 'EXPIRED') ||
         (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < new Date())
 
       if (isExpired) {
@@ -4302,7 +4653,7 @@ function DashboardPage() {
         supabase
           .from('inventory')
           .select('*')
-          .eq('item_type', 'Stockpile')
+          .or('inventory_kind.eq.stockpile,item_type.ilike.stockpile')
           .order('item_id', { ascending: false }),
         supabase.from('distribution_logs').select('*').order('log_id', { ascending: false }),
       ])
@@ -4403,9 +4754,9 @@ function DashboardPage() {
     const hasDonatedSource = repackSources.includes('donated')
     const repackAcquisitionMode =
       hasPurchasedSource && !hasDonatedSource
-        ? 'Purchased'
+        ? 'PURCHASED'
         : hasDonatedSource && !hasPurchasedSource
-          ? 'Donated'
+          ? 'DONATED'
           : null
     const repackUnit = 'Pack'
 
@@ -4438,16 +4789,20 @@ function DashboardPage() {
         return
       }
 
+      const reliefGoodsId = getNextReliefGoodsId(inventoryItems)
+
       const { error: insertError } = await supabase.from('inventory').insert([
-        {
+        normalizeInventoryRecord({
           item_name: repackResultName.trim(),
           item_type: 'Stockpile',
+          inventory_kind: 'stockpile',
+          property_no: reliefGoodsId,
           acquisition_mode: repackAcquisitionMode,
           quantity: resultQty,
           unit_of_measure: repackUnit,
           date_acquired: new Date().toISOString().slice(0, 10),
           status: null,
-        },
+        }),
       ])
 
       if (insertError) {
@@ -4467,7 +4822,7 @@ function DashboardPage() {
       const { data: reloadedStockpiles, error: reloadStockpileError } = await supabase
         .from('inventory')
         .select('*')
-        .eq('item_type', 'Stockpile')
+        .or('inventory_kind.eq.stockpile,item_type.ilike.stockpile')
         .order('item_id', { ascending: false })
 
       if (reloadStockpileError) {
@@ -4476,6 +4831,7 @@ function DashboardPage() {
         setStockpileItems((reloadedStockpiles ?? []).map(mapInventoryItemToStockpileRow))
       }
 
+      setRealtimeTick((tick) => tick + 1)
       setRepackingStockpile(false)
       setStockpileMode('list')
       setRepackItems([{ stockpileId: '', quantity: '' }])
@@ -4576,7 +4932,7 @@ function DashboardPage() {
 
     const inventoryRows = inventoryItems
       .filter((item) => {
-        if (isArchivedRow(item) || getInventoryStatus(item) === 'Archived') {
+        if (isArchivedRow(item) || getInventoryStatus(item) === 'ARCHIVED') {
           return false
         }
 
@@ -4585,7 +4941,7 @@ function DashboardPage() {
       .slice()
       .sort((a, b) => a.item_id - b.item_id)
       .map((item) => ({
-        itemNo: formatItemId(item.item_id, item.item_type),
+        itemNo: formatInventoryItemId(item),
         item: item.item_name,
         type: item.item_type,
         quantity: String(item.quantity ?? '—'),
@@ -4597,7 +4953,7 @@ function DashboardPage() {
             ? (() => {
                 const expirationDate = item.expiration_date ? new Date(item.expiration_date) : null
                 const isExpired = expirationDate != null && !Number.isNaN(expirationDate.getTime()) && expirationDate < new Date()
-                return isExpired ? 'Expired' : 'Valid'
+                return isExpired ? 'EXPIRED' : 'VALID'
               })()
             : item.status ?? '—',
       }))
@@ -4679,13 +5035,13 @@ function DashboardPage() {
 
     const allRows = wmrReports
       .filter((report) => {
-        if (isArchivedRow(report) || (report.status ?? '').trim() === 'Archived') {
+        if (isArchivedRow(report) || equalsDbText(report.status, 'ARCHIVED')) {
           return false
         }
 
         if (report.item_id != null) {
           const mappedItem = inventoryItems.find((item) => item.item_id === report.item_id) ?? null
-          if (mappedItem && (isArchivedRow(mappedItem) || getInventoryStatus(mappedItem) === 'Archived')) {
+          if (mappedItem && (isArchivedRow(mappedItem) || getInventoryStatus(mappedItem) === 'ARCHIVED')) {
             return false
           }
         }
@@ -4889,21 +5245,48 @@ function DashboardPage() {
   const getCsvTimestamp = () => new Date().toISOString().slice(0, 10)
 
   const handleExportInventoryCsv = () => {
-    const rows = filteredInventoryItems.map((item) => ({
-      'Item ID': formatItemId(item.item_id, item.item_type),
-      Item: item.item_name,
-      Category: item.item_type,
-      Location: departments.find((dept) => dept.id === item.department_id)?.name ?? '',
-      Quantity: item.quantity ?? '',
-      unit: item.unit_of_measure ?? '',
-      cost: item.unit_cost ?? '',
-      'Date Acquired': item.date_acquired ?? '',
-      'Expiration Date': item.expiration_date ?? '',
-      Acquisition: item.acquisition_mode ?? '',
-      Status: getInventoryStatus(item) ?? '',
-      Condition: item.condition ?? '',
-      Donor: (item as InventoryRow & { donor_identification?: string | null }).donor_identification ?? '',
-    }))
+    const rows = filteredInventoryItems.map((item) => {
+      const kind = resolveInventoryKind(item)
+      const locationName = getInventoryLocationDisplay(item, departments.map((dept) => ({ id: dept.id, name: dept.name, code: dept.code })))
+      const totalCost = calculateTotalCost(item.quantity, item.unit_cost)
+
+      const parNo =
+        kind === 'par'
+          ? item.par_no?.trim() ||
+            (item.assigned_to_name
+              ? inventoryStaffPickerOptions.find(
+                  (staff) => staff.full_name.trim() === item.assigned_to_name?.trim(),
+                )?.par_no ?? ''
+              : '')
+          : ''
+
+      return {
+        'Item ID': formatInventoryItemId(item),
+        'PAR No.': parNo,
+        'Property No.': item.property_no ?? '',
+        'Record Type': getInventoryKindLabel(item),
+        Item: item.item_name,
+        Category: item.item_category ?? '',
+        'Item Type': item.item_type,
+        Description: item.item_description ?? '',
+        Location: locationName,
+        Quantity: getInventoryQuantityDisplay(item),
+        Unit: getInventoryUnitDisplay(item),
+        'Unit Cost': item.unit_cost ?? '',
+        'Total Cost': totalCost ?? '',
+        'Date Acquired': item.date_acquired ?? '',
+        'Expiration Date': item.expiration_date ?? '',
+        'Date Last Restocked': item.date_last_restocked ?? '',
+        Acquisition: item.acquisition_mode ?? '',
+        Status: getInventoryStatus(item) ?? '',
+        Condition: item.condition ?? '',
+        'Est. Useful Life (years)': item.estimated_useful_life_years ?? '',
+        'Assigned To': item.assigned_to_name ?? '',
+        Remarks: item.remarks ?? '',
+        Donor: item.donor_identification ?? '',
+        'Inventory Kind': kind ?? item.inventory_kind ?? '',
+      }
+    })
 
     downloadExcel(`inventory-${getCsvTimestamp()}.xlsx`, rows)
   }
@@ -4950,6 +5333,11 @@ function DashboardPage() {
       departments.find((dept) => dept.name.trim().toLowerCase() === 'stockpile room')?.id ?? null
     const payload: Array<Record<string, unknown>> = []
     let skippedRows = 0
+    const kindCounters: Record<InventoryKind, number> = {
+      stockpile: getMaxKindItemNo(inventoryItems, 'stockpile'),
+      par: getMaxKindItemNo(inventoryItems, 'par'),
+      office_supplies: getMaxKindItemNo(inventoryItems, 'office_supplies'),
+    }
 
     for (const row of inventoryImportRows) {
       const itemName = (row.item_name ?? row.name ?? '').trim()
@@ -4970,6 +5358,12 @@ function DashboardPage() {
         ? departments.find((dept) => dept.code.trim().toLowerCase() === deptCode)?.id ?? null
         : null
       const isStockpileType = itemType.trim().toLowerCase() === 'stockpile'
+      const isOfficeSuppliesType = itemType.trim().toLowerCase() === 'office supplies'
+      const inventoryKind: InventoryKind = isStockpileType
+        ? 'stockpile'
+        : isOfficeSuppliesType
+          ? 'office_supplies'
+          : 'par'
       const resolvedDepartmentId =
         deptIdFromCsv ?? deptIdFromName ?? deptIdFromCode ?? (isStockpileType ? stockpileRoomDepartmentId : null)
 
@@ -4983,10 +5377,13 @@ function DashboardPage() {
       const isExpired = expirationValue != null && expirationValue < new Date()
       const csvStatus = (row.status ?? '').trim() || null
 
+      kindCounters[inventoryKind] += 1
       const uid = crypto.randomUUID()
       payload.push({
         uid,
         qr_code: uid,
+        inventory_kind: inventoryKind,
+        kind_item_no: inventoryKind === 'par' ? null : kindCounters[inventoryKind],
         item_name: itemName,
         item_type: itemType,
         department_id: resolvedDepartmentId,
@@ -4996,7 +5393,7 @@ function DashboardPage() {
         date_acquired: (row.date_acquired ?? '').trim() || new Date().toISOString().slice(0, 10),
         expiration_date: isStockpileType ? expirationDate : null,
         acquisition_mode: (row.acquisition_mode ?? row.source ?? '').trim() || null,
-        status: isStockpileType ? (isExpired || csvStatus === 'Expired' ? 'Expired' : null) : csvStatus,
+        status: isStockpileType ? (isExpired || equalsDbText(csvStatus, 'EXPIRED') ? 'EXPIRED' : null) : csvStatus,
         condition: (row.condition ?? '').trim() || null,
         donor_identification: (row.donor_identification ?? '').trim() || null,
       })
@@ -5008,7 +5405,9 @@ function DashboardPage() {
       return
     }
 
-    const { error: insertError } = await supabase.from('inventory').insert(payload as never)
+    const { error: insertError } = await supabase
+      .from('inventory')
+      .insert(payload.map((row) => normalizeInventoryRecord(row)) as never)
     if (insertError) {
       setInventoryImportSaving(false)
       setInventoryImportError(insertError.message)
@@ -5021,8 +5420,15 @@ function DashboardPage() {
     window.alert(`Imported ${payload.length} inventory row(s).${skippedRows > 0 ? ` Skipped ${skippedRows} invalid row(s).` : ''}`)
   }
 
-  const handleExportStockpileCsv = () => {
-    const rows = filteredStockpileItems.map((item) => ({
+  const handleExportStockpileCsv = (listKind: StockpileListKind | 'all' = 'all') => {
+    const sourceItems =
+      listKind === 'all'
+        ? filteredStockpileItems
+        : listKind === 'packed'
+          ? filteredStockpileItems.filter((item) => isPackedStockpileItem(item))
+          : filteredStockpileItems.filter((item) => !isPackedStockpileItem(item))
+
+    const rows = sourceItems.map((item) => ({
       Item: item.item_name ?? '',
       Acquisitions: item.category ?? '',
       'Available Qty': item.quantity_on_hand ?? '',
@@ -5031,7 +5437,8 @@ function DashboardPage() {
       'Expiration Date': item.expiration_date ?? '',
     }))
 
-    downloadExcel(`stockpile-${getCsvTimestamp()}.xlsx`, rows)
+    const suffix = listKind === 'all' ? '' : `-${listKind}`
+    downloadExcel(`stockpile${suffix}-${getCsvTimestamp()}.xlsx`, rows)
   }
 
 
@@ -5146,10 +5553,7 @@ function DashboardPage() {
       .map(([staffId, records]) => ({
         staffId,
         issuedTo: parUsers.find((user) => user.id === staffId)?.full_name ?? '',
-        parNo: (() => {
-          const staff = parUsers.find((user) => user.id === staffId)
-          return staff?.staff_id ? `PAR-${staff.staff_id}` : `PAR-${staffId.slice(0, 8)}`
-        })(),
+        parNo: resolveStaffParNumber(parUsers.find((user) => user.id === staffId)) || `PAR-${staffId.slice(0, 8)}`,
         records: records.slice().sort((a, b) => b.par_id - a.par_id),
         latestParId: Math.max(...records.map((record) => record.par_id)),
       }))
@@ -5178,7 +5582,7 @@ function DashboardPage() {
     const explicitStatus = item.status?.trim() || null
     const expiration = item.expiration_date ? new Date(item.expiration_date) : null
     const isExpired =
-      explicitStatus === 'Expired' ||
+      equalsDbText(explicitStatus, 'EXPIRED') ||
       (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
     return !isExpired
   }).sort((a, b) => b.stockpile_id - a.stockpile_id)
@@ -5187,7 +5591,7 @@ function DashboardPage() {
     const explicitStatus = item.status?.trim() || null
     const expiration = item.expiration_date ? new Date(item.expiration_date) : null
     const isExpired =
-      explicitStatus === 'Expired' ||
+      equalsDbText(explicitStatus, 'EXPIRED') ||
       (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
 
     return isExpired
@@ -5197,13 +5601,29 @@ function DashboardPage() {
     const explicitStatus = item.status?.trim() || null
     const expiration = item.expiration_date ? new Date(item.expiration_date) : null
     const isExpired =
-      explicitStatus === 'Expired' ||
+      equalsDbText(explicitStatus, 'EXPIRED') ||
       (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
 
     if (isExpired) return false
 
     // Stockpile Release should only release repack-generated packs.
-    return (item.unit_of_measure ?? '').trim().toLowerCase() === 'pack'
+    return isPackedStockpileItem(item)
+  })
+
+  const availableRepackStockpileItems = stockpileItems.filter((item) => {
+    const explicitStatus = item.status?.trim() || null
+    const expiration = item.expiration_date ? new Date(item.expiration_date) : null
+    const isExpired =
+      equalsDbText(explicitStatus, 'EXPIRED') ||
+      (expiration != null && !Number.isNaN(expiration.getTime()) && expiration < today)
+
+    if (isExpired) return false
+
+    const quantityOnHand = Number(item.quantity_on_hand ?? 0)
+    if (!Number.isFinite(quantityOnHand) || quantityOnHand <= 0) return false
+
+    // Repack draws from bulk stockpile inventory, not already-packed units.
+    return !isPackedStockpileItem(item)
   })
 
   const parsedStockpileReleaseLogs: StockpileReleaseLog[] = stockpileReleaseLogs.flatMap((log) => {
@@ -5236,7 +5656,7 @@ function DashboardPage() {
 
   const reportInventoryCount =
     inventoryItems.filter((item) => {
-      if (isArchivedRow(item) || getInventoryStatus(item) === 'Archived') {
+      if (isArchivedRow(item) || getInventoryStatus(item) === 'ARCHIVED') {
         return false
       }
 
@@ -5244,13 +5664,13 @@ function DashboardPage() {
     }).length
 
   const reportWmrCount = wmrReports.filter((report) => {
-    if (isArchivedRow(report) || (report.status ?? '').trim() === 'Archived') {
+    if (isArchivedRow(report) || equalsDbText(report.status, 'ARCHIVED')) {
       return false
     }
 
     if (report.item_id != null) {
       const mappedItem = inventoryItems.find((item) => item.item_id === report.item_id) ?? null
-      if (mappedItem && (isArchivedRow(mappedItem) || getInventoryStatus(mappedItem) === 'Archived')) {
+      if (mappedItem && (isArchivedRow(mappedItem) || getInventoryStatus(mappedItem) === 'ARCHIVED')) {
         return false
       }
     }
@@ -5297,7 +5717,10 @@ function DashboardPage() {
 
   const newItemQuantityValue = parseNumericInput(newQuantity)
   const newItemUnitCostValue = parseNumericInput(newUnitCost)
-  const newItemTotalCost = calculateTotalCost(newItemQuantityValue, newItemUnitCostValue)
+  const newItemTotalCost =
+    newInventoryKind === 'par'
+      ? newItemUnitCostValue
+      : calculateTotalCost(newItemQuantityValue, newItemUnitCostValue)
 
   const editItemQuantityValue = parseNumericInput(editQuantity)
   const editItemUnitCostValue = parseNumericInput(editUnitCost)
@@ -5310,10 +5733,10 @@ function DashboardPage() {
     today.setHours(0, 0, 0, 0)
     if (editItemExpirationValue) {
       editItemExpirationValue.setHours(0, 0, 0, 0)
-      if (editItemExpirationValue < today) return 'Expired'
+      if (editItemExpirationValue < today) return 'EXPIRED'
     }
 
-    return editItemQuantityValue != null && editItemQuantityValue <= 10 ? 'Low' : 'Full Stock'
+    return editItemQuantityValue != null && editItemQuantityValue <= 10 ? 'LOW' : 'FULL STOCK'
   })()
 
   const parQuantityValue = parseNumericInput(parQuantityIssued)
@@ -5855,24 +6278,30 @@ function DashboardPage() {
             setInventoryMode={setInventoryMode}
             searchQuery={searchQuery}
             setSearchQuery={setSearchQuery}
-            typeFilter={typeFilter}
-            setTypeFilter={setTypeFilter}
+            inventoryKindFilter={inventoryKindFilter}
+            setInventoryKindFilter={setInventoryKindFilter}
+            categoryFilter={categoryFilter}
+            setCategoryFilter={setCategoryFilter}
             departmentFilter={departmentFilter}
             setDepartmentFilter={setDepartmentFilter}
             sourceFilter={sourceFilter}
             setSourceFilter={setSourceFilter}
             statusFilter={statusFilter}
             setStatusFilter={setStatusFilter}
-            typeOptions={typeOptions}
             departments={departments.map((dept) => ({ id: dept.id, name: dept.name, code: dept.code }))}
+            staffOptions={inventoryStaffPickerOptions}
             sourceOptions={acquisitionModeOptions}
             statusOptions={statusOptions}
             inventoryLoading={inventoryLoading}
             filteredInventoryItems={filteredInventoryItems}
+            inventoryItems={inventoryItems}
             getItemStatus={getInventoryStatus}
             getItemPhotoUrls={getItemPhotoUrls}
             formatInventoryDate={formatInventoryDate}
+            officeSuppliesAssignee={officeSuppliesAssignee}
+            officeSuppliesLocationLabel={officeSuppliesLocationLabel}
             openEditItem={openEditItem}
+            openViewItem={setViewInventoryItem}
             setViewImageItem={setViewImageItem}
             setViewImageIndex={setViewImageIndex}
             handleQrButtonClick={handleQrButtonClick}
@@ -5880,17 +6309,28 @@ function DashboardPage() {
             editDeleting={editDeleting}
             openArchiveConfirmation={openArchiveConfirmation}
             formatCurrency={formatCurrency}
-            calculateTotalCost={calculateTotalCost}
+            newInventoryKind={newInventoryKind}
+            setNewInventoryKind={handleInventoryKindChange}
             newItemName={newItemName}
             setNewItemName={setNewItemName}
             newItemType={newItemType}
             setNewItemType={setNewItemType}
+            newItemCategory={newItemCategory}
+            setNewItemCategory={setNewItemCategory}
+            newItemDescription={newItemDescription}
+            setNewItemDescription={setNewItemDescription}
             newCondition={newCondition}
             setNewCondition={setNewCondition}
             newDonorIdentification={newDonorIdentification}
             setNewDonorIdentification={setNewDonorIdentification}
             newItemDepartmentId={newItemDepartmentId}
             setNewItemDepartmentId={setNewItemDepartmentId}
+            newAssignedTo={newAssignedTo}
+            setNewAssignedTo={setNewAssignedTo}
+            newRemarks={newRemarks}
+            setNewRemarks={setNewRemarks}
+            newEstimatedUsefulLife={newEstimatedUsefulLife}
+            setNewEstimatedUsefulLife={setNewEstimatedUsefulLife}
             newQuantity={newQuantity}
             setNewQuantity={setNewQuantity}
             newUnitOfMeasure={newUnitOfMeasure}
@@ -5901,6 +6341,8 @@ function DashboardPage() {
             setNewDateAcquired={setNewDateAcquired}
             newExpirationDate={newExpirationDate}
             setNewExpirationDate={setNewExpirationDate}
+            newDateLastRestocked={newDateLastRestocked}
+            setNewDateLastRestocked={setNewDateLastRestocked}
             newSource={newSource}
             setNewSource={setNewSource}
             newPhotoFiles={newPhotoFiles}
@@ -5912,6 +6354,7 @@ function DashboardPage() {
             acquisitionModeOptions={acquisitionModeOptions}
             newItemTotalCost={newItemTotalCost}
             onExportCsv={handleExportInventoryCsv}
+            existingPropertyNumbers={inventoryItems}
           />
         )}
 
@@ -5993,7 +6436,39 @@ function DashboardPage() {
                               <label>User ID</label>
                               <input className="inventory-input" value={settingsStaffId || '—'} readOnly style={{ background: '#f8fafc' }} />
                             </div>
+                            <div className="inventory-field" style={{ width: 200 }}>
+                              <label htmlFor="settings-par-no">PAR No.</label>
+                              <input
+                                id="settings-par-no"
+                                className="inventory-input"
+                                value={settingsParNoInput}
+                                placeholder="e.g. PAR-PB001"
+                                onChange={(e) => setSettingsParNoInput(e.target.value)}
+                              />
+                            </div>
                           </div>
+                          {currentUserRole.trim().toLowerCase() === 'super admin' && (
+                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                              <div className="inventory-field" style={{ width: 200 }}>
+                                <label htmlFor="settings-department">
+                                  Department <span className="inventory-required">*</span>
+                                </label>
+                                <select
+                                  id="settings-department"
+                                  className="inventory-input"
+                                  value={settingsDepartmentId}
+                                  onChange={(e) => setSettingsDepartmentId(e.target.value)}
+                                >
+                                  <option value="">Select department</option>
+                                  {visibleDepartments.map((dept) => (
+                                    <option key={dept.id} value={String(dept.id)}>
+                                      {dept.name}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          )}
                         </div>
                         <div className="inventory-add-actions">
                           <button
@@ -6135,7 +6610,7 @@ function DashboardPage() {
                             <tbody>
                               {archivedInventoryItems.map((item) => (
                                 <tr key={`archived-${item.item_id}`}>
-                                  <td>{formatItemId(item.item_id, item.item_type)}</td>
+                                  <td>{formatInventoryItemId(item)}</td>
                                   <td>{item.item_name}</td>
                                   <td>{item.item_type}</td>
                                   <td>{item.quantity ?? '—'}</td>
@@ -6299,6 +6774,7 @@ function DashboardPage() {
                             <thead>
                               <tr>
                                 <th scope="col">Staff ID</th>
+                                <th scope="col">PAR No.</th>
                                 <th scope="col">Name</th>
                                 <th scope="col">Email</th>
                                 <th scope="col">Department</th>
@@ -6310,6 +6786,7 @@ function DashboardPage() {
                               {archivedStaff.map((staff) => (
                                 <tr key={`archived-staff-${staff.id}`}>
                                   <td>{staff.staff_id}</td>
+                                  <td>{resolveStaffParNumber(staff)}</td>
                                   <td>{staff.full_name}</td>
                                   <td>{staff.email}</td>
                                   <td>{departments.find((dept) => dept.id === staff.department_id)?.name ?? 'Unassigned'}</td>
@@ -6533,6 +7010,30 @@ function DashboardPage() {
                           </select>
                         </div>
                       </div>
+                      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
+                        <div className="inventory-field" style={{ width: 180 }}>
+                          <label>Staff ID</label>
+                          <input
+                            className="inventory-input inventory-input-readonly"
+                            value={staffFormStaffId || '—'}
+                            readOnly
+                            style={{ background: '#f8fafc' }}
+                          />
+                        </div>
+                        <div className="inventory-field" style={{ width: 220 }}>
+                          <label htmlFor="staff-form-par-no">PAR No.</label>
+                          <input
+                            id="staff-form-par-no"
+                            className="inventory-input"
+                            value={staffFormParNo}
+                            placeholder="e.g. PAR-PB001"
+                            onChange={(e) => {
+                              staffFormParNoTouchedRef.current = true
+                              setStaffFormParNo(e.target.value)
+                            }}
+                          />
+                        </div>
+                      </div>
                     </div>
 
                     {/* Section: Contact Information */}
@@ -6632,6 +7133,7 @@ function DashboardPage() {
                     <thead>
                       <tr>
                         <th scope="col">Staff ID</th>
+                        <th scope="col">PAR No.</th>
                         <th scope="col">Name</th>
                         <th scope="col">Email</th>
                         <th scope="col">Department</th>
@@ -6644,7 +7146,7 @@ function DashboardPage() {
                     <tbody>
                       {filteredDepartmentStaff.length === 0 ? (
                         <tr>
-                          <td colSpan={8}>No staff records found for this department.</td>
+                          <td colSpan={9}>No staff records found for this department.</td>
                         </tr>
                       ) : (
                         paginatedDepartmentStaff.map((user) => {
@@ -6654,6 +7156,7 @@ function DashboardPage() {
                           return (
                             <tr key={`staff-row-${user.id}`}>
                               <td>{user.staff_id}</td>
+                              <td>{resolveStaffParNumber(user)}</td>
                               <td>{user.full_name}</td>
                               <td>{user.email}</td>
                               <td>{departmentName}</td>
@@ -7012,6 +7515,7 @@ function DashboardPage() {
               setStockpileReleaseReasonInput={setStockpileReleaseReasonInput}
               stockpileReleaseReasonInput={stockpileReleaseReasonInput}
               availableReleaseItems={availableReleaseStockpileItems}
+              availableRepackItems={availableRepackStockpileItems}
               addStockpileReleaseItem={addStockpileReleaseItem}
               updateStockpileReleaseItem={updateStockpileReleaseItem}
               removeStockpileReleaseItem={removeStockpileReleaseItem}
@@ -7260,41 +7764,22 @@ function DashboardPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {activeParRecords.length === 0 ? (
+                  {activeParViewRows.length === 0 ? (
                     <tr>
                       <td colSpan={6}>No PAR items found.</td>
                     </tr>
                   ) : (
                     <>
-                      {activeParRecords
-                        .slice()
-                        .sort((a, b) => b.par_id - a.par_id)
-                        .map((record) => {
-                          const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
-
-                          return (
-                            <tr key={record.par_id}>
-                              <td>{record.quantity_issued}</td>
-                              <td>{record.unit_snapshot ?? item?.unit_of_measure ?? 'N/A'}</td>
-                              <td>{record.description_snapshot ?? item?.item_name ?? '—'}</td>
-                              <td>
-                                {record.property_no_snapshot ??
-                                  item?.property_no ??
-                                  (record.item_id != null ? formatItemId(record.item_id, item?.item_type) : '—')}
-                              </td>
-                              <td className="inventory-date-column">
-                                {formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired)}
-                              </td>
-                              <td>
-                                {record.cost_snapshot != null
-                                  ? formatCurrency(record.cost_snapshot)
-                                  : item?.unit_cost != null
-                                    ? formatCurrency(item.unit_cost)
-                                    : 'N/A'}
-                              </td>
-                            </tr>
-                          )
-                        })}
+                      {activeParViewRows.map((row) => (
+                        <tr key={row.key}>
+                          <td>{row.quantity}</td>
+                          <td>{row.unit}</td>
+                          <td>{row.description}</td>
+                          <td>{row.propertyNo}</td>
+                          <td className="inventory-date-column">{formatInventoryDate(row.dateAcquired)}</td>
+                          <td>{row.cost != null ? formatCurrency(row.cost) : 'N/A'}</td>
+                        </tr>
+                      ))}
                       <tr>
                         <td colSpan={5} style={{ textAlign: 'right' }}>
                           <strong>Total Cost</strong>
@@ -7999,9 +8484,9 @@ function DashboardPage() {
                   onChange={(e) => setEditCondition(e.target.value)}
                 >
                   <option value="">Select condition</option>
-                  <option value="Good">Good</option>
-                  <option value="Fully Functional">Fully Functional</option>
-                  <option value="Defective">Defective</option>
+                  <option value="GOOD">GOOD</option>
+                  <option value="FULLY FUNCTIONAL">FULLY FUNCTIONAL</option>
+                  <option value="DEFECTIVE">DEFECTIVE</option>
                 </select>
               </div>
             </div>
@@ -8103,7 +8588,7 @@ function DashboardPage() {
                       <tbody>
                         {dashboardDrilldownPaginatedStockpiles.map((item) => (
                           <tr key={`drilldown-stockpile-${item.stockpile_id}`}>
-                            <td>{`STOCK-${item.stockpile_id.toString().padStart(3, '0')}`}</td>
+                            <td>{formatStockpileRowId(item)}</td>
                             <td>{item.item_name ?? '—'}</td>
                             <td>{item.category ?? '—'}</td>
                             <td>{item.quantity_on_hand ?? 0}</td>
@@ -8361,6 +8846,153 @@ function DashboardPage() {
         </div>
       )}
 
+      {/* [MODAL] Inventory item details */}
+      {viewInventoryItem && (
+        <div
+          className="wmr-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inventory-detail-modal-title"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setViewInventoryItem(null)
+          }}
+        >
+          <div className="wmr-modal inventory-detail-modal">
+            <h2 id="inventory-detail-modal-title" className="wmr-modal-title">
+              Item Details
+            </h2>
+            {(() => {
+              const item = viewInventoryItem
+              const kind = resolveInventoryKind(item)
+              const itemId = formatInventoryItemId(item)
+              const locationName = getInventoryLocationDisplay(
+                item,
+                departments.map((dept) => ({ id: dept.id, name: dept.name, code: dept.code })),
+              )
+              const photoUrls = getItemPhotoUrls(item)
+              const status = getInventoryStatus(item)
+              const detailRows: Array<{ label: string; value: string }> = []
+
+              const pushDetail = (label: string, value: string | number | null | undefined) => {
+                const text = value == null ? '' : String(value).trim()
+                detailRows.push({ label, value: text || '—' })
+              }
+
+              if (kind === 'par') {
+                const resolvedParNo =
+                  item.par_no?.trim() ||
+                  (item.assigned_to_name
+                    ? inventoryStaffPickerOptions.find(
+                        (staff) => staff.full_name.trim() === item.assigned_to_name?.trim(),
+                      )?.par_no
+                    : '') ||
+                  null
+                pushDetail('PAR No.', resolvedParNo)
+                pushDetail('Property ID', item.property_no)
+                pushDetail('Item Description', item.item_description?.trim() || item.item_name)
+                pushDetail('Date Acquired', formatInventoryDate(item.date_acquired))
+                pushDetail('Cost', item.unit_cost != null ? formatCurrency(item.unit_cost) : null)
+                pushDetail(
+                  'Est. Useful Life',
+                  item.estimated_useful_life_years != null
+                    ? `${item.estimated_useful_life_years} year${item.estimated_useful_life_years === 1 ? '' : 's'}`
+                    : null,
+                )
+                pushDetail('Location', locationName)
+                pushDetail('Assigned To', item.assigned_to_name)
+                pushDetail('Item Type', item.item_type)
+                pushDetail('Condition', item.condition)
+                pushDetail('Quantity', String(getInventoryQuantityDisplay(item)))
+                pushDetail('Unit', getInventoryUnitDisplay(item))
+                if (item.acquisition_mode?.trim()) {
+                  pushDetail('Source', item.acquisition_mode)
+                }
+                if (item.donor_identification?.trim()) {
+                  pushDetail('Donor Identification', item.donor_identification)
+                }
+              } else if (kind === 'office_supplies') {
+                pushDetail('Item ID', itemId)
+                pushDetail('Record Type', getInventoryKindLabel(item))
+                pushDetail('Item Name', item.item_name)
+                pushDetail('Category', item.item_category)
+                pushDetail('Location', locationName)
+                pushDetail('Quantity', String(getInventoryQuantityDisplay(item)))
+                pushDetail('Unit', getInventoryUnitDisplay(item))
+                pushDetail('Date Last Restocked', formatInventoryDate(item.date_last_restocked ?? item.date_acquired))
+                pushDetail('Assigned To', item.assigned_to_name)
+                if (item.remarks?.trim()) {
+                  pushDetail('Remarks', item.remarks)
+                }
+              } else {
+                pushDetail('Item ID', itemId)
+                pushDetail('Record Type', getInventoryKindLabel(item))
+                pushDetail('Item Name', item.item_name)
+                pushDetail('Category', item.item_category)
+                pushDetail('Location', locationName)
+                pushDetail('Quantity', String(getInventoryQuantityDisplay(item)))
+                pushDetail('Unit', getInventoryUnitDisplay(item))
+                pushDetail('Date Acquired', formatInventoryDate(item.date_acquired))
+                pushDetail('Expiration Date', formatInventoryDate(item.expiration_date))
+                if (status) {
+                  pushDetail('Status', status)
+                }
+              }
+
+              return (
+                <>
+                  <div className="inventory-detail-grid">
+                    {detailRows.map((row, index) => (
+                      <p key={`${row.label}-${index}`} className="wmr-modal-text">
+                        <strong>{row.label}:</strong> {row.value}
+                      </p>
+                    ))}
+                  </div>
+                  {photoUrls.length > 0 && (
+                    <div className="inventory-detail-photos">
+                      <p className="wmr-modal-text"><strong>Photos</strong></p>
+                      <div className="inventory-gallery-thumbs">
+                        {photoUrls.map((url, index) => (
+                          <button
+                            key={url}
+                            type="button"
+                            className="inventory-gallery-thumb"
+                            onClick={() => {
+                              setViewImageItem(item)
+                              setViewImageIndex(index)
+                            }}
+                          >
+                            <img src={url} alt={`${item.item_name} ${index + 1}`} />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+            <div className="wmr-modal-actions">
+              <button
+                type="button"
+                className="wmr-modal-button-save"
+                onClick={() => {
+                  openEditItem(viewInventoryItem)
+                  setViewInventoryItem(null)
+                }}
+              >
+                Edit Item
+              </button>
+              <button
+                type="button"
+                className="wmr-modal-button-secondary"
+                onClick={() => setViewInventoryItem(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* [MODAL] Inventory photo viewer */}
       {viewImageItem && (
         <div
@@ -8541,7 +9173,7 @@ function DashboardPage() {
                   onClick={() => {
                     const canvas = document.querySelector<HTMLCanvasElement>('#inventory-qr-canvas-wrapper canvas')
                     if (!canvas) return
-                    const paddedId = formatItemId(viewQrItem.item_id, viewQrItem.item_type)
+                    const paddedId = formatInventoryItemId(viewQrItem)
                     const link = document.createElement('a')
                     link.href = canvas.toDataURL('image/png')
                     link.download = `${paddedId}-QR.png`

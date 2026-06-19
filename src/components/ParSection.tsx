@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { resolveStaffParNumber } from '../utils/itemUtils'
 
 type InventoryRow = Tables<'inventory'>
 type UserRow = Tables<'users'>
@@ -21,6 +22,7 @@ type ParSummary = {
   staffId: string
   latestIssueDate: string | null
   totalQuantity: number
+  itemCount: number
   records: { par_id: number; contact_snapshot: string | null }[]
   receiver: UserRow | null
 }
@@ -664,9 +666,7 @@ function ParSection({
                     </tr>
                   ) : (
                     paginatedParSummaries.map((summary) => {
-                      const parId = summary.receiver?.staff_id
-                        ? `PAR-${summary.receiver.staff_id}`
-                        : `PAR-${summary.staffId.slice(0, 8)}`
+                      const parId = resolveStaffParNumber(summary.receiver) || `PAR-${summary.staffId.slice(0, 8)}`
 
                       return (
                         <tr key={summary.staffId}>
@@ -677,7 +677,7 @@ function ParSection({
                               : summary.staffId}
                           </td>
                           <td>{summary.latestIssueDate ?? '—'}</td>
-                          <td>{summary.records.length}</td>
+                          <td>{summary.itemCount ?? summary.records.length}</td>
                           <td>{summary.totalQuantity}</td>
                           <td>{summary.receiver?.contact_info ?? summary.records[0]?.contact_snapshot ?? '—'}</td>
                           <td className="inventory-row-actions inventory-row-actions-left">
