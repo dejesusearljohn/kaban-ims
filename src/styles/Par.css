@@ -33,6 +33,11 @@
   margin-top: 2px;
 }
 
+.par-table-toolbar .inventory-filters {
+  flex: 1;
+  min-width: 0;
+}
+
 .par-modal-backdrop {
   position: fixed;
   inset: 0;
@@ -78,6 +83,20 @@
 
 .par-view-table {
   min-width: 980px;
+  table-layout: fixed;
+  width: 100%;
+}
+
+.par-view-table thead th:first-child,
+.par-view-table tbody td:first-child {
+  width: 112px;
+  max-width: 132px;
+}
+
+.par-view-table thead th:nth-child(2),
+.par-view-table tbody td:nth-child(2) {
+  width: 24%;
+  min-width: 140px;
 }
 
 .par-view-table thead th,

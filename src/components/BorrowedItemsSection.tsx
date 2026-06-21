@@ -2,20 +2,11 @@ import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 import { supabase } from '../supabaseClient'
+import { getStatusBadgeClass } from '../utils/statusBadge'
+import { getBorrowedItemStatus, isBorrowedItemReturned } from '../utils/itemUtils'
+import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime'
 
 type InventoryRow = Tables<'inventory'>
-type AccountabilityRow = Tables<'accountability_reports'>
-
-const DEFAULT_BORROW_DAYS = 14
-
-const getDefaultReturnDateFromIssue = (issueDate: string): string => {
-  const date = new Date(`${issueDate}T12:00:00`)
-  date.setDate(date.getDate() + DEFAULT_BORROW_DAYS)
-  return date.toISOString().slice(0, 10)
-}
-
-const buildBorrowedDedupeKey = (itemId: number | null, quantity: number, dateKey: string, borrowerName: string) =>
-  `${itemId ?? 'none'}-${quantity}-${dateKey}-${borrowerName.trim().toLowerCase()}`
 
 type BorrowedItem = {
   borrowed_id: number
@@ -35,7 +26,17 @@ type BorrowedItem = {
   status: string | null
 }
 
-function BorrowedItemsSection() {
+type BorrowedItemsSectionProps = {
+  focusItemId?: number | null
+  focusBorrowedId?: number | null
+  onFocusHandled?: () => void
+}
+
+function BorrowedItemsSection({
+  focusItemId = null,
+  focusBorrowedId = null,
+  onFocusHandled,
+}: BorrowedItemsSectionProps = {}) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [borrowedItems, setBorrowedItems] = useState<BorrowedItem[]>([])
@@ -73,18 +74,32 @@ function BorrowedItemsSection() {
 
   useEffect(() => {
     void fetchBorrowedItems()
-
-    const channel = supabase
-      .channel('borrowed-items-live')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowed_items' }, () => {
-        void fetchBorrowedItems()
-      })
-      .subscribe()
-
-    return () => {
-      void supabase.removeChannel(channel)
-    }
   }, [])
+
+  useSupabaseRealtime(() => {
+    void fetchBorrowedItems()
+  })
+
+  useEffect(() => {
+    if (focusItemId == null && focusBorrowedId == null) return
+    if (loading || borrowedItems.length === 0) return
+
+    const match =
+      (focusBorrowedId != null
+        ? borrowedItems.find((item) => item.borrowed_id === focusBorrowedId)
+        : null) ??
+      borrowedItems.find(
+        (item) => item.item_id === focusItemId && !isBorrowedItemReturned(item),
+      ) ??
+      borrowedItems.find((item) => item.item_id === focusItemId)
+
+    if (!match) return
+
+    setMode('list')
+    setSelectedItem(match)
+    setShowDetailModal(true)
+    onFocusHandled?.()
+  }, [borrowedItems, focusBorrowedId, focusItemId, loading, onFocusHandled])
 
   const getDefaultDateTimeLocal = () => {
     const now = new Date()
@@ -92,24 +107,17 @@ function BorrowedItemsSection() {
     return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16)
   }
 
-  const openAddMode = () => {
-    setAddDateBorrowed(getDefaultDateTimeLocal())
-    setMode('add')
+  const getDefaultReturnDateTimeLocal = () => {
+    const date = new Date()
+    date.setDate(date.getDate() + 14)
+    const offsetMs = date.getTimezoneOffset() * 60_000
+    return new Date(date.getTime() - offsetMs).toISOString().slice(0, 16)
   }
 
-  const getBorrowedItemStatus = (item: BorrowedItem): 'Returned' | 'Overdue' | 'Borrowed' => {
-    if ((item.status ?? '').trim().toLowerCase() === 'returned') return 'Returned'
-
-    const returnDate = new Date(item.return_date)
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-    returnDate.setHours(0, 0, 0, 0)
-
-    if (!Number.isNaN(returnDate.getTime()) && returnDate < now) {
-      return 'Overdue'
-    }
-
-    return 'Borrowed'
+  const openAddMode = () => {
+    setAddDateBorrowed(getDefaultDateTimeLocal())
+    setAddReturnDate(getDefaultReturnDateTimeLocal())
+    setMode('add')
   }
 
   const filteredItems = useMemo(() => {
@@ -343,7 +351,7 @@ function BorrowedItemsSection() {
         borrower_name: addBorrowerName.trim(),
         contact_number: addContactNumber.trim() || null,
         date_borrowed: new Date(addDateBorrowed).toISOString(),
-        return_date: addReturnDate,
+        return_date: new Date(addReturnDate).toISOString(),
         quantity: quantityValue,
         amount: inventoryAmount,
         location: addLocation.trim() || null,
@@ -399,24 +407,16 @@ function BorrowedItemsSection() {
       setLoading(true)
       setError(null)
 
-      const [borrowedResult, inventoryResult, scannerResult] = await Promise.all([
+      const [borrowedResult, inventoryResult] = await Promise.all([
         supabase.from('borrowed_items').select('*').order('date_borrowed', { ascending: false }),
         supabase.from('inventory').select('*').is('archived_at', null).order('item_name', { ascending: true }),
-        supabase
-          .from('accountability_reports')
-          .select('*')
-          .eq('reference_type', 'scanner_requisition')
-          .eq('is_archived', false)
-          .order('created_at', { ascending: false }),
       ])
 
       if (borrowedResult.error) throw borrowedResult.error
       if (inventoryResult.error) throw inventoryResult.error
-      if (scannerResult.error) throw scannerResult.error
 
       const borrowedData = borrowedResult.data
       const inventoryData = inventoryResult.data
-      const scannerLogs = scannerResult.data
 
       const inventoryMap = new Map(inventoryData?.map((item) => [item.item_id, item]) || [])
 
@@ -441,53 +441,9 @@ function BorrowedItemsSection() {
         }
       })
 
-      const borrowedKeys = new Set(
-        (borrowedData || []).map((item) =>
-          buildBorrowedDedupeKey(
-            item.item_id,
-            item.quantity,
-            item.date_borrowed?.slice(0, 10) ?? '',
-            item.borrower_name,
-          ),
-        ),
-      )
-
-      const scannerLegacyItems: BorrowedItem[] = (scannerLogs || [])
-        .filter((log: AccountabilityRow) => {
-          const key = buildBorrowedDedupeKey(
-            log.item_id,
-            log.quantity_logged,
-            log.issue_date,
-            log.contact_snapshot || 'Staff',
-          )
-          return !borrowedKeys.has(key)
-        })
-        .map((log: AccountabilityRow) => {
-          const inventoryItem = inventoryMap.get(log.item_id)
-          return {
-            borrowed_id: -log.accountability_id,
-            item_id: log.item_id,
-            item_name: inventoryItem?.item_name || log.description_snapshot || 'Unknown',
-            property_no: inventoryItem?.property_no || log.property_no_snapshot || null,
-            quantity: log.quantity_logged,
-            amount: inventoryItem?.unit_cost != null ? Number(inventoryItem.unit_cost) : null,
-            borrower_name: log.contact_snapshot?.trim() || 'Staff',
-            contact_number: null,
-            date_borrowed: log.created_at || `${log.issue_date}T00:00:00.000Z`,
-            return_date: getDefaultReturnDateFromIssue(log.issue_date),
-            date_returned: null,
-            location: null,
-            remarks: log.remarks || 'Borrowed via QR scanner',
-            return_remarks: null,
-            status: 'borrowed',
-          }
-        })
-
-      const mergedItems = [...transformedItems, ...scannerLegacyItems].sort(
+      setBorrowedItems(transformedItems.sort(
         (a, b) => new Date(b.date_borrowed).getTime() - new Date(a.date_borrowed).getTime(),
-      )
-
-      setBorrowedItems(mergedItems)
+      ))
       setInventoryItems(inventoryData || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch borrowed items')
@@ -573,26 +529,25 @@ function BorrowedItemsSection() {
               <table className="inventory-table inventory-list-table">
             <thead>
               <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Item Name</th>
-                <th scope="col">Qty</th>
+                <th scope="col" className="inventory-rowno-column">No.</th>
+                <th scope="col" className="inventory-name-column">Item Name</th>
+                <th scope="col" className="inventory-qty-column">Qty</th>
                 <th scope="col">Amount</th>
                 <th scope="col">Borrower</th>
                 <th scope="col">Contact No.</th>
                 <th scope="col">Date Borrowed</th>
                 <th scope="col">Return Date</th>
-                <th scope="col">Status</th>
-                <th scope="col">Action</th>
+                <th scope="col" className="inventory-status-column">Status</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={10}>Loading borrowed items…</td>
+                  <td colSpan={9}>Loading borrowed items…</td>
                 </tr>
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={10}>No borrowed items found.</td>
+                  <td colSpan={9}>No borrowed items found.</td>
                 </tr>
               ) : (
                 paginatedItems.map((item, index) => (
@@ -601,41 +556,21 @@ function BorrowedItemsSection() {
                     onClick={() => handleRowClick(item)}
                     style={{ cursor: 'pointer' }}
                   >
-                    <td>{(page - 1) * pageSize + index + 1}</td>
-                    <td>{item.item_name}</td>
-                    <td>{item.quantity}</td>
+                    <td className="inventory-rowno-column">{(page - 1) * pageSize + index + 1}</td>
+                    <td className="inventory-name-column">{item.item_name}</td>
+                    <td className="inventory-qty-column">{item.quantity}</td>
                     <td>{formatCurrency(item.amount)}</td>
                     <td>{item.borrower_name}</td>
                     <td>{item.contact_number || '—'}</td>
                     <td>{formatDateWithTime(item.date_borrowed)}</td>
-                    <td>{formatDate(item.return_date)}</td>
+                    <td>{formatDateWithTime(item.return_date)}</td>
                     <td>
                       {(() => {
                         const status = getBorrowedItemStatus(item)
-                        const className =
-                          status === 'Returned'
-                            ? 'badge badge-status-serviceable'
-                            : status === 'Overdue'
-                              ? 'badge badge-status-expired'
-                              : 'badge badge-status-low'
-                        return <span className={className}>{status}</span>
+                        return (
+                          <span className={`badge ${getStatusBadgeClass(status)}`}>{status}</span>
+                        )
                       })()}
-                    </td>
-                    <td className="inventory-row-actions inventory-row-actions-left">
-                      <button
-                        type="button"
-                        className="borrowed-return-button"
-                        title={item.borrowed_id < 0 ? 'Legacy scanner record' : 'Mark as returned'}
-                        aria-label="Mark as returned"
-                        disabled={
-                          item.borrowed_id < 0 ||
-                          getBorrowedItemStatus(item) === 'Returned' ||
-                          returningId === item.borrowed_id
-                        }
-                        onClick={(event) => openReturnRemarksModal(item, event)}
-                      >
-                        {returningId === item.borrowed_id ? '...' : 'Returned'}
-                      </button>
                     </td>
                   </tr>
                 ))
@@ -734,7 +669,7 @@ function BorrowedItemsSection() {
                 </label>
                 <input
                   id="add-return-date"
-                  type="date"
+                  type="datetime-local"
                   className="inventory-input"
                   value={addReturnDate}
                   onChange={(e) => setAddReturnDate(e.target.value)}
@@ -1009,9 +944,13 @@ function BorrowedItemsSection() {
                 <p className="wmr-modal-text"><strong>Quantity:</strong> {selectedItem.quantity}</p>
                 <p className="wmr-modal-text"><strong>Amount:</strong> {formatCurrency(selectedItem.amount)}</p>
                 <p className="wmr-modal-text"><strong>Date Borrowed:</strong> {formatDateWithTime(selectedItem.date_borrowed)}</p>
-                <p className="wmr-modal-text"><strong>Return Date:</strong> {formatDate(selectedItem.return_date)}</p>
+                <p className="wmr-modal-text"><strong>Return Date:</strong> {formatDateWithTime(selectedItem.return_date)}</p>
                 <p className="wmr-modal-text"><strong>Date Returned:</strong> {selectedItem.date_returned ? formatDateWithTime(selectedItem.date_returned) : '—'}</p>
-                <p className="wmr-modal-text"><strong>Status:</strong> {getBorrowedItemStatus(selectedItem)}</p>
+                <p className="wmr-modal-text"><strong>Status:</strong>{' '}
+                  <span className={`badge ${getStatusBadgeClass(getBorrowedItemStatus(selectedItem))}`}>
+                    {getBorrowedItemStatus(selectedItem)}
+                  </span>
+                </p>
                 <p className="wmr-modal-text inventory-field-full"><strong>Remarks:</strong> {selectedItem.remarks || '—'}</p>
                 <p className="wmr-modal-text inventory-field-full"><strong>Return Remarks:</strong> {selectedItem.return_remarks || '—'}</p>
               </div>
@@ -1022,7 +961,7 @@ function BorrowedItemsSection() {
                 className="wmr-modal-button-save"
                 disabled={
                   selectedItem.borrowed_id < 0 ||
-                  getBorrowedItemStatus(selectedItem) === 'Returned' ||
+                  isBorrowedItemReturned(selectedItem) ||
                   returningId === selectedItem.borrowed_id
                 }
                 onClick={() => openReturnRemarksModal(selectedItem)}

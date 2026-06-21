@@ -1,71 +1,65 @@
 .wmr-layout {
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
-.wmr-toolbar {
-  margin-top: 4px;
+.wmr-toolbar,
+.shift-turnover-toolbar {
+  margin-top: 2px;
 }
 
-.wmr-search-wrapper {
-  width: 280px;
-}
-
-.badge-status-pending {
-  background: #fef3c7;
-  color: #92400e;
-}
-
-.badge-status-disposal {
-  background: #fee2e2;
-  color: #b91c1c;
-}
-
-.badge-status-disposed {
-  background: #e5e7eb;
-  color: #374151;
-}
-
-.badge-status-repair {
-  background: #e0f2fe;
-  color: #0369a1;
-}
-
-.badge-status-repaired {
-  background: #dcfce7;
-  color: #15803d;
+.wmr-toolbar .inventory-filters,
+.shift-turnover-toolbar .inventory-filters {
+  flex: 1;
+  min-width: 0;
 }
 
 .wmr-remarks-button {
-  border: none;
-  background: transparent;
-  color: #059669;
+  border: 1px solid var(--kaban-border-strong);
+  border-radius: var(--kaban-radius-sm);
+  background: var(--kaban-surface);
+  color: var(--kaban-green-dark);
   font-size: 12px;
+  font-weight: 600;
   cursor: pointer;
-  padding: 3px 10px;
-  border-radius: 8px;
+  padding: 4px 10px;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 
 .wmr-remarks-button:hover {
-  background: transparent;
-  text-decoration: underline;
+  background: var(--kaban-green-soft);
+  border-color: var(--kaban-green);
+  color: var(--kaban-green-dark);
+  text-decoration: none;
+}
+
+.wmr-remarks-button:focus-visible {
+  outline: none;
+  box-shadow: var(--kaban-focus-ring);
+}
+
+.shift-turnover-staff-meta {
+  color: var(--kaban-text-muted);
+  font-size: 12px;
+  margin-top: 2px;
 }
 
 .wmr-modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(15, 23, 42, 0.35);
+  background: var(--kaban-backdrop);
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 40;
+  z-index: var(--kaban-z-modal);
 }
 
 .wmr-modal {
-  background: #ffffff;
-  border-radius: 16px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.18);
+  background: var(--kaban-surface);
+  border: 1px solid var(--kaban-border);
+  border-radius: var(--kaban-radius-lg);
+  box-shadow: var(--kaban-shadow-modal);
   padding: 20px 24px 18px;
   width: 100%;
   max-width: 420px;
@@ -75,13 +69,13 @@
   margin: 0 0 8px;
   font-size: 20px;
   font-weight: 600;
-  color: #0f172a;
+  color: var(--kaban-text);
 }
 
 .wmr-modal-text {
   margin: 0 0 18px;
   font-size: 13px;
-  color: #4b5563;
+  color: var(--kaban-text-secondary);
 }
 
 .wmr-modal-actions {
@@ -92,19 +86,20 @@
 }
 
 .wmr-modal-button-secondary {
-  border-radius: 8px;
-  border: 1px solid #e5e7eb;
-  background: #f9fafb;
-  color: #374151;
+  border-radius: var(--kaban-radius-sm);
+  border: 1px solid var(--kaban-border-strong);
+  background: var(--kaban-table-stripe);
+  color: var(--kaban-text-secondary);
   padding: 6px 14px;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
 }
 
 .wmr-modal-button-save {
-  border-radius: 8px;
-  border: none;
-  background: #059669;
+  border-radius: var(--kaban-radius-sm);
+  border: 1px solid var(--kaban-green-dark);
+  background: var(--kaban-green);
   color: #ffffff;
   padding: 6px 14px;
   font-size: 13px;
@@ -210,12 +205,12 @@
 
 .vehicle-edit-modal-footer {
   flex-shrink: 0;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--kaban-border);
   padding: 12px 18px;
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  background: #ffffff;
+  background: var(--kaban-surface);
 }
 
 .shift-turnover-preview-backdrop {
@@ -279,14 +274,14 @@
   position: sticky;
   top: 0;
   z-index: 3;
-  background: #ffffff;
-  box-shadow: inset 0 -1px 0 #e5e7eb;
+  background: var(--kaban-table-head-bg);
+  box-shadow: inset 0 -1px 0 var(--kaban-border);
 }
 
 .shift-turnover-preview-modal .wmr-modal-actions {
   margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--kaban-border);
   flex-shrink: 0;
 }
 
@@ -308,5 +303,10 @@
 
   .shift-turnover-preview-table-wrap .inventory-table {
     min-width: 640px;
+  }
+
+  .wmr-toolbar .inventory-filter-selects,
+  .shift-turnover-toolbar .inventory-filter-selects {
+    flex-wrap: wrap;
   }
 }

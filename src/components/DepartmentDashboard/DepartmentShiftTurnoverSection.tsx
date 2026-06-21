@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabaseClient'
+import { useSupabaseRealtime } from '../../hooks/useSupabaseRealtime'
 
 interface Props {
   userId: string
@@ -151,6 +152,11 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
   const [incoming, setIncoming] = useState<TurnoverRequest[]>([])
   const [loadingIncoming, setLoadingIncoming] = useState(true)
   const [actionError, setActionError] = useState('')
+  const [realtimeTick, setRealtimeTick] = useState(0)
+
+  useSupabaseRealtime(() => {
+    setRealtimeTick((tick) => tick + 1)
+  })
 
   useEffect(() => {
     if (!departmentId) {
@@ -211,7 +217,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
     return () => {
       mounted = false
     }
-  }, [departmentId, userId])
+  }, [departmentId, userId, realtimeTick])
 
   const loadIncoming = async () => {
     setLoadingIncoming(true)
@@ -248,7 +254,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
       void loadIncoming()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, userId])
+  }, [activeTab, userId, realtimeTick])
 
   const loadCheckItems = async (turnover: TurnoverRequest) => {
     if (!turnover.daily_check_id) return

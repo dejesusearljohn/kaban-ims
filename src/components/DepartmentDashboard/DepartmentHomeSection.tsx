@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabaseClient'
+import { getStatusBadgeClass } from '../../utils/statusBadge'
+import { useSupabaseRealtime } from '../../hooks/useSupabaseRealtime'
 
 interface Props {
   userId: string
@@ -23,7 +25,7 @@ interface NotificationItem {
   body: string
   dateLabel: string
   badgeLabel: string
-  badgeTone: 'green' | 'red' | 'yellow' | 'orange' | 'gray'
+  badgeClass: string
   sortDate: number
 }
 
@@ -41,6 +43,11 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
   const [loading, setLoading] = useState(true)
   const [fullName, setFullName] = useState('')
   const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [realtimeTick, setRealtimeTick] = useState(0)
+
+  useSupabaseRealtime(() => {
+    setRealtimeTick((tick) => tick + 1)
+  })
 
   const greeting = () => {
     const h = new Date().getHours()
@@ -123,7 +130,7 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
               body: 'Your waste material report was submitted and is pending admin action.',
               dateLabel,
               badgeLabel: 'Pending',
-              badgeTone: 'yellow',
+              badgeClass: getStatusBadgeClass('pending'),
               sortDate,
             }
           }
@@ -136,12 +143,7 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
             body: report.admin_remarks?.trim() || `Status updated to ${report.status ?? 'reviewed'}.`,
             dateLabel,
             badgeLabel: report.status?.trim() || 'Updated',
-            badgeTone:
-              normalizedStatus === 'repaired' ? 'green'
-              : normalizedStatus === 'for repair' ? 'yellow'
-              : normalizedStatus === 'for disposal' ? 'orange'
-              : normalizedStatus === 'disposed' ? 'gray'
-              : 'red',
+            badgeClass: getStatusBadgeClass(report.status),
             sortDate,
           }
         })
@@ -205,12 +207,13 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
                 : normalizedStatus === 'disapproved'
                   ? 'Rejected'
                   : 'Needs Review',
-            badgeTone:
+            badgeClass: getStatusBadgeClass(
               normalizedStatus === 'approved'
-                ? 'green'
+                ? 'approved'
                 : normalizedStatus === 'disapproved'
-                  ? 'red'
-                  : 'yellow',
+                  ? 'rejected'
+                  : 'pending',
+            ),
             sortDate: entry.created_at ? new Date(entry.created_at).getTime() : 0,
           }
         })
@@ -247,12 +250,13 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
                 : normalizedStatus === 'disapproved'
                   ? 'Rejected'
                   : 'Pending',
-            badgeTone:
+            badgeClass: getStatusBadgeClass(
               normalizedStatus === 'approved'
-                ? 'green'
+                ? 'approved'
                 : normalizedStatus === 'disapproved'
-                  ? 'red'
-                  : 'yellow',
+                  ? 'rejected'
+                  : 'pending',
+            ),
             sortDate: entry.created_at ? new Date(entry.created_at).getTime() : 0,
           }
         })
@@ -278,7 +282,7 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
 
     load()
     return () => { mounted = false }
-  }, [userId, departmentId])
+  }, [userId, departmentId, realtimeTick])
 
   return (
     <div className="dept-section">
@@ -372,7 +376,7 @@ export default function DepartmentHomeSection({ userId, departmentName, departme
                       <p className="dept-list-item-meta">{notification.body}</p>
                       <p className="dept-list-item-meta" style={{ marginTop: 4 }}>{notification.dateLabel}</p>
                     </div>
-                    <span className={`dept-list-item-badge ${notification.badgeTone}`}>{notification.badgeLabel}</span>
+                    <span className={`badge ${notification.badgeClass}`}>{notification.badgeLabel}</span>
                   </li>
                 )
               })}

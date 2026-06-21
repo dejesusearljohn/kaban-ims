@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime'
 
 type AccountabilityReportRow = Tables<'accountability_reports'>
 type UserRow = Tables<'users'>
@@ -35,55 +36,56 @@ function AccountabilityReportsSection() {
   const [departments, setDepartments] = useState<DepartmentRow[]>([])
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
-  const totalAccountabilityCases = accountabilityReports.filter((record) => record.is_archived !== true).length
+  const totalAccountabilityCases = accountabilityReports.filter(
+    (record) => record.is_archived !== true && record.reference_type !== 'scanner_requisition',
+  ).length
+
+  const loadReports = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      const [accRes, usersRes, invRes, deptRes] = await Promise.all([
+        supabase
+          .from('accountability_reports')
+          .select('*')
+          .eq('is_archived', false)
+          .order('issue_date', { ascending: false })
+          .order('accountability_id', { ascending: false }),
+        supabase.from('users').select('*').order('full_name', { ascending: true }),
+        supabase.from('inventory').select('*').order('item_name', { ascending: true }),
+        supabase.from('departments').select('*').eq('is_archived', false).order('dept_name', { ascending: true }),
+      ])
+
+      if (accRes.error) throw accRes.error
+      if (usersRes.error) throw usersRes.error
+      if (invRes.error) throw invRes.error
+      if (deptRes.error) throw deptRes.error
+
+      setAccountabilityReports((accRes.data ?? []) as AccountabilityReportRow[])
+      setUsers((usersRes.data ?? []) as UserRow[])
+      setInventoryItems((invRes.data ?? []) as InventoryRow[])
+      setDepartments((deptRes.data ?? []) as DepartmentRow[])
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Failed to load accountability reports.'
+      setError(message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    let mounted = true
+    void loadReports()
+  }, [loadReports])
 
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-
-      try {
-        const [accRes, usersRes, invRes, deptRes] = await Promise.all([
-          supabase
-            .from('accountability_reports')
-            .select('*')
-            .eq('is_archived', false)
-            .order('issue_date', { ascending: false })
-            .order('accountability_id', { ascending: false }),
-          supabase.from('users').select('*').order('full_name', { ascending: true }),
-          supabase.from('inventory').select('*').order('item_name', { ascending: true }),
-          supabase.from('departments').select('*').eq('is_archived', false).order('dept_name', { ascending: true }),
-        ])
-
-        if (accRes.error) throw accRes.error
-        if (usersRes.error) throw usersRes.error
-        if (invRes.error) throw invRes.error
-        if (deptRes.error) throw deptRes.error
-
-        if (!mounted) return
-
-        setAccountabilityReports((accRes.data ?? []) as AccountabilityReportRow[])
-        setUsers((usersRes.data ?? []) as UserRow[])
-        setInventoryItems((invRes.data ?? []) as InventoryRow[])
-        setDepartments((deptRes.data ?? []) as DepartmentRow[])
-      } catch (loadError) {
-        if (!mounted) return
-        const message = loadError instanceof Error ? loadError.message : 'Failed to load accountability reports.'
-        setError(message)
-      } finally {
-        if (mounted) setLoading(false)
-      }
-    }
-
-    void load()
-    return () => { mounted = false }
-  }, [])
+  useSupabaseRealtime(() => {
+    void loadReports()
+  })
 
   const accountabilityRows = useMemo<AccountabilityRow[]>(() => {
     return accountabilityReports
       .filter((record) => record.is_archived !== true)
+      .filter((record) => record.reference_type !== 'scanner_requisition')
       .map((record) => {
         const receiver = record.issued_to_id
           ? users.find((user) => user.id === record.issued_to_id) ?? null
@@ -195,12 +197,12 @@ function AccountabilityReportsSection() {
 
       <section className="inventory-table-section" aria-label="Accountability reports table">
         <div className="inventory-table-card">
-          <table className="inventory-table">
+          <table className="inventory-table inventory-list-table">
             <thead>
               <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Item</th>
-                <th scope="col">Quantity</th>
+                <th scope="col" className="inventory-rowno-column">No.</th>
+                <th scope="col" className="inventory-name-column">Item</th>
+                <th scope="col" className="inventory-qty-column">Quantity</th>
                 <th scope="col">Property No.</th>
                 <th scope="col">Issued To</th>
                 <th scope="col">Department</th>
@@ -219,9 +221,9 @@ function AccountabilityReportsSection() {
               ) : (
                 visibleRows.map((row) => (
                   <tr key={row.key}>
-                    <td>{row.no}</td>
-                    <td>{row.itemName}</td>
-                    <td>{row.quantity} {row.unit}</td>
+                    <td className="inventory-rowno-column">{row.no}</td>
+                    <td className="inventory-name-column">{row.itemName}</td>
+                    <td className="inventory-qty-column">{row.quantity} {row.unit}</td>
                     <td>{row.propertyNo}</td>
                     <td>
                       <strong>{row.staffName}</strong>

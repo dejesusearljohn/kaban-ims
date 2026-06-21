@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../../supabaseClient'
+import { getStatusBadgeClass } from '../../utils/statusBadge'
+import { useSupabaseRealtime } from '../../hooks/useSupabaseRealtime'
+import { getBorrowedItemStatus, isActiveBorrowedItem } from '../../utils/itemUtils'
 
 interface Props {
   departmentId: number | null
@@ -19,21 +22,16 @@ interface InventoryItem {
   property_no: string | null
 }
 
-interface IssuedUser {
-  full_name: string | null
-  staff_id: string | null
-  department_id: number | null
-}
-
 interface InventoryLog {
-  accountability_id: number
+  borrowed_id: number
+  item_id: number | null
   issue_date: string | null
   quantity_logged: number
   description_snapshot: string | null
   unit_snapshot: string | null
   property_no_snapshot: string | null
-  issued_to_id: string | null
-  issued_user: IssuedUser | null
+  borrower_name: string
+  borrowed_status: string | null
 }
 
 type ViewMode = 'inventory' | 'logs'
@@ -42,10 +40,16 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
   const [view, setView] = useState<ViewMode>('inventory')
   const [inventoryItems, setInventoryItems] = useState<InventoryItem[]>([])
   const [logs, setLogs] = useState<InventoryLog[]>([])
+  const [activeBorrowedItemIds, setActiveBorrowedItemIds] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [inventorySearch, setInventorySearch] = useState('')
   const [logSearch, setLogSearch] = useState('')
+  const [realtimeTick, setRealtimeTick] = useState(0)
+
+  useSupabaseRealtime(() => {
+    setRealtimeTick((tick) => tick + 1)
+  })
 
   useEffect(() => {
     if (!departmentId) {
@@ -58,7 +62,7 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
       setLoading(true)
       setError('')
       try {
-        const [inventoryRes, logsRes] = await Promise.all([
+        const [inventoryRes, borrowedRes] = await Promise.all([
           supabase
             .from('inventory')
             .select('item_id, item_name, item_type, quantity, unit_of_measure, condition, status, property_no')
@@ -66,24 +70,60 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
             .or('status.neq.archived,status.is.null')
             .order('item_name'),
           supabase
-            .from('accountability_reports')
-            .select('accountability_id, issue_date, quantity_logged, description_snapshot, unit_snapshot, property_no_snapshot, issued_to_id, issued_user:users!accountability_reports_issued_to_id_fkey(full_name, staff_id, department_id)')
-            .eq('is_archived', false)
-            .order('issue_date', { ascending: false })
-            .order('accountability_id', { ascending: false }),
+            .from('borrowed_items')
+            .select('borrowed_id, item_id, borrower_name, quantity, date_borrowed, status, date_returned, return_remarks, inventory:inventory!borrowed_items_item_id_fkey(item_name, property_no, unit_of_measure, department_id)')
+            .order('date_borrowed', { ascending: false }),
         ])
 
         if (inventoryRes.error) throw inventoryRes.error
-        if (logsRes.error) throw logsRes.error
+        if (borrowedRes.error) throw borrowedRes.error
 
         if (!mounted) return
 
         const inventoryData = (inventoryRes.data ?? []) as InventoryItem[]
-        const rawLogs = (logsRes.data ?? []) as unknown as InventoryLog[]
-        const departmentLogs = rawLogs.filter((log) => log.issued_user?.department_id === departmentId)
+        const borrowedRows = (borrowedRes.data ?? []) as Array<{
+          borrowed_id: number
+          item_id: number | null
+          borrower_name: string
+          quantity: number
+          date_borrowed: string
+          status: string | null
+          date_returned: string | null
+          return_remarks: string | null
+          inventory: {
+            item_name: string | null
+            property_no: string | null
+            unit_of_measure: string | null
+            department_id: number | null
+          } | null
+        }>
+
+        const departmentBorrowedRows = borrowedRows.filter(
+          (row) => row.inventory?.department_id === departmentId,
+        )
+
+        const borrowedItemIds = new Set<number>()
+        for (const row of departmentBorrowedRows) {
+          if (row.item_id != null && isActiveBorrowedItem(row)) {
+            borrowedItemIds.add(row.item_id)
+          }
+        }
+
+        const departmentLogs: InventoryLog[] = departmentBorrowedRows.map((row) => ({
+          borrowed_id: row.borrowed_id,
+          item_id: row.item_id,
+          issue_date: row.date_borrowed?.slice(0, 10) ?? null,
+          quantity_logged: row.quantity,
+          description_snapshot: row.inventory?.item_name ?? null,
+          unit_snapshot: row.inventory?.unit_of_measure ?? null,
+          property_no_snapshot: row.inventory?.property_no ?? null,
+          borrower_name: row.borrower_name,
+          borrowed_status: getBorrowedItemStatus(row),
+        }))
 
         setInventoryItems(inventoryData)
         setLogs(departmentLogs)
+        setActiveBorrowedItemIds(borrowedItemIds)
       } catch {
         if (mounted) setError('Failed to load inventory log data.')
       } finally {
@@ -93,7 +133,7 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
 
     void load()
     return () => { mounted = false }
-  }, [departmentId, userId])
+  }, [departmentId, userId, realtimeTick])
 
   const filteredInventory = useMemo(() => {
     const q = inventorySearch.trim().toLowerCase()
@@ -110,22 +150,14 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
     if (!q) return logs
     return logs.filter((log) =>
       (log.description_snapshot ?? '').toLowerCase().includes(q) ||
-      (log.issued_user?.full_name ?? '').toLowerCase().includes(q) ||
-      (log.issued_user?.staff_id ?? '').toLowerCase().includes(q) ||
+      log.borrower_name.toLowerCase().includes(q) ||
       (log.property_no_snapshot ?? '').toLowerCase().includes(q),
     )
   }, [logs, logSearch])
 
   const statusBadge = (status: string | null) => {
-    if (!status) return <span className="dept-list-item-badge green">Serviceable</span>
-    if (status === 'Serviceable') return <span className="dept-list-item-badge green">Serviceable</span>
-    if (status === 'Unserviceable') return <span className="dept-list-item-badge red">Unserviceable</span>
-    if (status === 'For Repair') return <span className="dept-list-item-badge yellow">For Repair</span>
-    if (status === 'For Disposal') return <span className="dept-list-item-badge orange">For Disposal</span>
-    if (status === 'Disposed') return <span className="dept-list-item-badge gray">Disposed</span>
-    if (status === 'active') return <span className="dept-list-item-badge green">Active</span>
-    if (status === 'expired') return <span className="dept-list-item-badge red">Expired</span>
-    return <span className="dept-list-item-badge gray">{status}</span>
+    const label = status?.trim() || 'Serviceable'
+    return <span className={`badge ${getStatusBadgeClass(status || 'serviceable')}`}>{label}</span>
   }
 
   return (
@@ -214,7 +246,7 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
                           {item.property_no ? ` · ${item.property_no}` : ''}
                         </p>
                       </div>
-                      {statusBadge(item.status)}
+                      {statusBadge(activeBorrowedItemIds.has(item.item_id) ? 'Borrowed' : item.status)}
                     </li>
                   ))}
                 </ul>
@@ -249,7 +281,7 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
               ) : (
                 <ul className="dept-list" style={{ marginTop: 10 }}>
                   {filteredLogs.map((log) => (
-                    <li key={log.accountability_id} className="dept-list-item">
+                    <li key={log.borrowed_id} className="dept-list-item">
                       <div className="dept-list-item-icon">
                         <svg viewBox="0 0 24 24" fill="none" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                           <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
@@ -264,12 +296,13 @@ export default function DepartmentRequestsSection({ departmentId, departmentName
                           {log.property_no_snapshot ? ` · ${log.property_no_snapshot}` : ''}
                         </p>
                         <p className="dept-list-item-meta" style={{ marginTop: 2 }}>
-                          By: {log.issued_user?.full_name ?? 'Unknown Staff'}
-                          {log.issued_user?.staff_id ? ` (${log.issued_user.staff_id})` : ''}
+                          By: {log.borrower_name}
                           {log.issue_date ? ` · ${new Date(log.issue_date).toLocaleDateString('en-PH')}` : ''}
                         </p>
                       </div>
-                      <span className="dept-list-item-badge green">Logged</span>
+                      <span className={`badge ${getStatusBadgeClass(log.borrowed_status ?? 'Borrowed')}`}>
+                        {log.borrowed_status ?? 'Borrowed'}
+                      </span>
                     </li>
                   ))}
                 </ul>

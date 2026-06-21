@@ -625,6 +625,130 @@ export const getCategoryOptionsForInventoryKind = (kind: InventoryKind): readonl
   return PAR_CATEGORY_OPTIONS
 }
 
+export type ReportInventoryTypeOption = {
+  value: string
+  label: string
+}
+
+export type ReportInventoryTypeOptionGroup = {
+  label: string
+  options: ReportInventoryTypeOption[]
+}
+
+export const buildReportInventoryTypeOptionGroups = (
+  additionalTypes: string[] = [],
+): ReportInventoryTypeOptionGroup[] => {
+  const knownTypeKeys = new Set<string>([
+    'stockpile',
+    'office supplies',
+    ...PAR_CATEGORY_OPTIONS.map((type) => type.toLowerCase()),
+  ])
+
+  const otherTypes = Array.from(
+    new Map(
+      additionalTypes
+        .map((type) => type.trim())
+        .filter((type) => type.length > 0 && !knownTypeKeys.has(type.toLowerCase()))
+        .map((type) => [type.toLowerCase(), type] as const),
+    ).values(),
+  ).sort((a, b) => a.localeCompare(b))
+
+  return [
+    {
+      label: 'Item Types',
+      options: [
+        { value: 'kind:stockpile', label: 'Stockpile' },
+        { value: 'kind:office_supplies', label: 'Office Supplies' },
+        { value: 'kind:par', label: 'Property (PAR)' },
+      ],
+    },
+    {
+      label: 'Property Types',
+      options: PAR_CATEGORY_OPTIONS.map((type) => ({
+        value: `par-type:${type}`,
+        label: type,
+      })),
+    },
+    {
+      label: 'Stockpile Categories',
+      options: STOCKPILE_CATEGORY_OPTIONS.map((category) => ({
+        value: `category:stockpile:${category}`,
+        label: category,
+      })),
+    },
+    {
+      label: 'Office Supply Categories',
+      options: OFFICE_SUPPLY_CATEGORY_OPTIONS.map((category) => ({
+        value: `category:office_supplies:${category}`,
+        label: category,
+      })),
+    },
+    ...(otherTypes.length > 0
+      ? [
+          {
+            label: 'Other Types',
+            options: otherTypes.map((type) => ({
+              value: `par-type:${type}`,
+              label: type,
+            })),
+          },
+        ]
+      : []),
+  ]
+}
+
+export const getReportInventoryTypeFilterLabel = (
+  filterValue: string,
+  optionGroups: ReportInventoryTypeOptionGroup[],
+): string => {
+  if (!filterValue || filterValue === 'all') return 'All Item Types'
+
+  for (const group of optionGroups) {
+    const match = group.options.find((option) => option.value === filterValue)
+    if (match) return match.label
+  }
+
+  return filterValue
+}
+
+export const matchesReportInventoryTypeFilter = (
+  item: {
+    inventory_kind?: string | null
+    item_type?: string | null
+    item_category?: string | null
+  },
+  filterValue: string,
+): boolean => {
+  if (!filterValue || filterValue === 'all') return true
+
+  if (filterValue === 'kind:stockpile') return resolveInventoryKind(item) === 'stockpile'
+  if (filterValue === 'kind:office_supplies') return resolveInventoryKind(item) === 'office_supplies'
+  if (filterValue === 'kind:par') return resolveInventoryKind(item) === 'par'
+
+  if (filterValue.startsWith('par-type:')) {
+    const typeValue = filterValue.slice('par-type:'.length)
+    return (item.item_type ?? '').trim().toLowerCase() === typeValue.trim().toLowerCase()
+  }
+
+  if (filterValue.startsWith('category:stockpile:')) {
+    const category = filterValue.slice('category:stockpile:'.length)
+    return (
+      resolveInventoryKind(item) === 'stockpile' &&
+      getInventoryItemCategoryValue(item).toLowerCase() === category.trim().toLowerCase()
+    )
+  }
+
+  if (filterValue.startsWith('category:office_supplies:')) {
+    const category = filterValue.slice('category:office_supplies:'.length)
+    return (
+      resolveInventoryKind(item) === 'office_supplies' &&
+      getInventoryItemCategoryValue(item).toLowerCase() === category.trim().toLowerCase()
+    )
+  }
+
+  return (item.item_type ?? '').trim().toLowerCase() === filterValue.trim().toLowerCase()
+}
+
 export const resolveInventoryKind = (item: {
   inventory_kind?: string | null
   item_type?: string | null
@@ -639,6 +763,11 @@ export const resolveInventoryKind = (item: {
   if (isParInventoryItem(item)) return 'par'
   return null
 }
+
+export const isStockpileInventoryItem = (item: {
+  inventory_kind?: string | null
+  item_type?: string | null
+}): boolean => resolveInventoryKind(item) === 'stockpile'
 
 export const getInventoryItemCategoryValue = (item: {
   inventory_kind?: string | null
@@ -734,6 +863,8 @@ export const normalizeDbText = (value: string | null | undefined): string | null
   return trimmed ? trimmed.toUpperCase() : null
 }
 
+const REPACK_CONTENTS_PREFIX = '__REPACK__:'
+
 const INVENTORY_TEXT_FIELDS = [
   'item_name',
   'item_type',
@@ -757,6 +888,11 @@ export const normalizeInventoryRecord = <T extends Record<string, unknown>>(reco
     if (!(field in normalized)) continue
     const value = normalized[field]
     if (typeof value === 'string' || value == null) {
+      if (field === 'item_description' && value?.trim().toUpperCase().startsWith(REPACK_CONTENTS_PREFIX)) {
+        ;(normalized as Record<string, unknown>)[field] = value.trim()
+        continue
+      }
+
       ;(normalized as Record<string, unknown>)[field] = normalizeDbText(value as string | null | undefined)
     }
   }
@@ -813,17 +949,31 @@ export type RepackContentEntry = {
   unit: string
 }
 
-const REPACK_CONTENTS_PREFIX = '__REPACK__:'
-
 export const serializeRepackContents = (entries: RepackContentEntry[]): string =>
   `${REPACK_CONTENTS_PREFIX}${JSON.stringify(entries)}`
 
 export const parseRepackContents = (description: string | null | undefined): RepackContentEntry[] | null => {
-  if (!description?.startsWith(REPACK_CONTENTS_PREFIX)) return null
+  const trimmed = description?.trim()
+  if (!trimmed?.toUpperCase().startsWith(REPACK_CONTENTS_PREFIX)) return null
 
   try {
-    const parsed = JSON.parse(description.slice(REPACK_CONTENTS_PREFIX.length)) as RepackContentEntry[]
-    return Array.isArray(parsed) ? parsed : null
+    const parsed = JSON.parse(trimmed.slice(REPACK_CONTENTS_PREFIX.length)) as Array<Record<string, unknown>>
+    if (!Array.isArray(parsed)) return null
+
+    return parsed
+      .map((entry) => {
+        const name = typeof entry.name === 'string' ? entry.name : typeof entry.NAME === 'string' ? entry.NAME : ''
+        const unit = typeof entry.unit === 'string' ? entry.unit : typeof entry.UNIT === 'string' ? entry.UNIT : ''
+        const rawQuantity = entry.quantity ?? entry.QUANTITY
+        const quantity = typeof rawQuantity === 'number' ? rawQuantity : Number(rawQuantity)
+
+        return {
+          name: name.trim() || 'Unknown item',
+          quantity: Number.isFinite(quantity) ? quantity : 0,
+          unit: unit.trim(),
+        }
+      })
+      .filter((entry) => entry.quantity > 0)
   } catch {
     return null
   }
@@ -836,3 +986,51 @@ export const formatRepackContentsDisplay = (entries: RepackContentEntry[]): stri
       return `${entry.quantity}${unitSuffix} ${entry.name}`.trim()
     })
     .join(', ')
+
+export type BorrowedItemDisplayStatus = 'Returned' | 'Overdue' | 'Borrowed'
+
+export type BorrowedItemStatusInput = {
+  status?: string | null
+  return_date?: string | null
+  date_returned?: string | null
+  return_remarks?: string | null
+}
+
+export const isBorrowedItemReturned = (item: BorrowedItemStatusInput): boolean => {
+  const normalizedStatus = (item.status ?? '').trim().toLowerCase()
+  if (normalizedStatus === 'returned') return true
+  if ((item.date_returned ?? '').trim()) return true
+  return Boolean((item.return_remarks ?? '').trim())
+}
+
+export const isActiveBorrowedItem = (item: BorrowedItemStatusInput): boolean => !isBorrowedItemReturned(item)
+
+const parseBorrowedReturnDate = (value: string | null | undefined): Date | null => {
+  if (!value?.trim()) return null
+  const trimmed = value.trim()
+  const parsed = trimmed.includes('T')
+    ? new Date(trimmed)
+    : new Date(`${trimmed.slice(0, 10)}T23:59:59`)
+  return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+export const getBorrowedItemStatus = (item: BorrowedItemStatusInput): BorrowedItemDisplayStatus => {
+  if (isBorrowedItemReturned(item)) return 'Returned'
+
+  const returnDateValue = item.return_date?.trim()
+  if (!returnDateValue) return 'Borrowed'
+
+  const returnDate = parseBorrowedReturnDate(returnDateValue)
+  if (!returnDate) return 'Borrowed'
+
+  if (returnDateValue.includes('T')) {
+    return returnDate < new Date() ? 'Overdue' : 'Borrowed'
+  }
+
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  returnDate.setHours(0, 0, 0, 0)
+
+  if (returnDate < today) return 'Overdue'
+  return 'Borrowed'
+}

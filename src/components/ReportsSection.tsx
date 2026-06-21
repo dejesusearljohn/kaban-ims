@@ -1,6 +1,22 @@
+export const PAR_REPORT_SELECT_ALL = '__par_select_all__'
+
 export type ReportOption = {
   staffId: string
   label: string
+  departmentId: number | null
+}
+
+export type ReportDepartmentOption = {
+  departmentId: string
+  label: string
+}
+
+export type ReportInventoryTypeOptionGroup = {
+  label: string
+  options: Array<{
+    value: string
+    label: string
+  }>
 }
 
 export type ReportPeriod = 'weekly' | 'monthly' | 'yearly'
@@ -14,10 +30,16 @@ export type ReportsSectionProps = {
   reportEndDate: string
   setReportEndDate: (value: string) => void
   disablePrintActions?: boolean
+  parDepartmentOptions: ReportDepartmentOption[]
+  selectedParDepartmentId: string
+  setSelectedParDepartmentId: (value: string) => void
   parOptions: ReportOption[]
   selectedParStaffId: string
   setSelectedParStaffId: (value: string) => void
   onPrintPar: () => void
+  inventoryTypeOptionGroups: ReportInventoryTypeOptionGroup[]
+  selectedInventoryTypeFilter: string
+  setSelectedInventoryTypeFilter: (value: string) => void
   onPrintInventoryReport: () => void
   onPrintWmrSummary: () => void
   onPrintRepairLogs: () => void
@@ -38,10 +60,16 @@ function ReportsSection({
   reportEndDate,
   setReportEndDate,
   disablePrintActions = false,
+  parDepartmentOptions,
+  selectedParDepartmentId,
+  setSelectedParDepartmentId,
   parOptions,
   selectedParStaffId,
   setSelectedParStaffId,
   onPrintPar,
+  inventoryTypeOptionGroups,
+  selectedInventoryTypeFilter,
+  setSelectedInventoryTypeFilter,
   onPrintInventoryReport,
   onPrintWmrSummary,
   onPrintRepairLogs,
@@ -111,7 +139,27 @@ function ReportsSection({
         <article className="reports-card" aria-label="PAR report print card">
           <h3 className="reports-card-title">Property Acknowledgment Receipt (PAR)</h3>
           <p className="reports-card-meta">{parReportCount} PAR report{parReportCount === 1 ? '' : 's'} available</p>
+          <p className="reports-card-description">
+            Prints the full Property Acknowledgment Receipt shown in Manage PAR. Filter by department, or choose Select All to print every PAR in that department.
+          </p>
           <div className="reports-card-controls">
+            <label htmlFor="reports-par-department-select" className="reports-label">
+              Department
+            </label>
+            <select
+              id="reports-par-department-select"
+              className="inventory-input"
+              value={selectedParDepartmentId}
+              onChange={(e) => setSelectedParDepartmentId(e.target.value)}
+            >
+              <option value="">All Departments</option>
+              {parDepartmentOptions.map((option) => (
+                <option key={option.departmentId} value={option.departmentId}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
             <label htmlFor="reports-par-select" className="reports-label">
               Select PAR Recipient
             </label>
@@ -124,11 +172,16 @@ function ReportsSection({
               {parOptions.length === 0 ? (
                 <option value="">No PAR reports available</option>
               ) : (
-                parOptions.map((option) => (
-                  <option key={option.staffId} value={option.staffId}>
-                    {option.label}
-                  </option>
-                ))
+                <>
+                  {selectedParDepartmentId ? (
+                    <option value={PAR_REPORT_SELECT_ALL}>Select All</option>
+                  ) : null}
+                  {parOptions.map((option) => (
+                    <option key={option.staffId} value={option.staffId}>
+                      {option.label}
+                    </option>
+                  ))}
+                </>
               )}
             </select>
           </div>
@@ -136,7 +189,13 @@ function ReportsSection({
             type="button"
             className="wmr-modal-button-save reports-print-button"
             onClick={onPrintPar}
-            disabled={!selectedParStaffId || disablePrintActions}
+            disabled={
+              disablePrintActions ||
+              !selectedParStaffId ||
+              (selectedParStaffId === PAR_REPORT_SELECT_ALL
+                ? !selectedParDepartmentId || parOptions.length === 0
+                : !parOptions.some((option) => option.staffId === selectedParStaffId))
+            }
           >
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
               <path d="M7 9V4h10v5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
@@ -151,13 +210,35 @@ function ReportsSection({
           <h3 className="reports-card-title">Inventory Report</h3>
           <p className="reports-card-meta">{inventoryReportCount} inventory entr{inventoryReportCount === 1 ? 'y' : 'ies'} available</p>
           <p className="reports-card-description">
-            Generates a printable inventory report with inventory items only.
+            Generates a printable inventory report. Filter by item type or category before printing.
           </p>
+          <div className="reports-card-controls">
+            <label htmlFor="reports-inventory-type-select" className="reports-label">
+              Item Type / Category
+            </label>
+            <select
+              id="reports-inventory-type-select"
+              className="inventory-input"
+              value={selectedInventoryTypeFilter}
+              onChange={(e) => setSelectedInventoryTypeFilter(e.target.value)}
+            >
+              <option value="all">All Item Types</option>
+              {inventoryTypeOptionGroups.map((group) => (
+                <optgroup key={group.label} label={group.label}>
+                  {group.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          </div>
           <button
             type="button"
             className="wmr-modal-button-save reports-print-button"
             onClick={onPrintInventoryReport}
-            disabled={disablePrintActions}
+            disabled={disablePrintActions || inventoryReportCount === 0}
           >
             <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
               <path d="M7 9V4h10v5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />

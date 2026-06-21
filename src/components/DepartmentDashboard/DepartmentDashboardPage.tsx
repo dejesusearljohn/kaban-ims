@@ -13,6 +13,7 @@ import {
 } from './departmentDashboardConfig'
 import '../../styles/Sidebar.css'
 import '../../styles/DashboardPage.css'
+import '../../styles/shared.css'
 import './DepartmentDashboard.css'
 import './dept-mobile.css'
 

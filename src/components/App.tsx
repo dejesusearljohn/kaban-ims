@@ -4,6 +4,7 @@ import DashboardPage from './DashboardPage'
 import { DepartmentDashboardPage } from './DepartmentDashboard'
 import { supabase } from '../supabaseClient'
 import '../styles/App.css'
+import '../styles/shared.css'
 
 // Auto-logout after 5 minutes of inactivity for session security
 const INACTIVITY_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes

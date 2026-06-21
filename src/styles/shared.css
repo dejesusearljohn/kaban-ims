@@ -1,0 +1,515 @@
+/*
+ * KABAN unified UI layer — loaded after section stylesheets.
+ * Normalizes spacing, color, shape, and interaction patterns app-wide.
+ */
+
+/* ---- Layout rhythm ---- */
+.dashboard-page {
+  background: var(--kaban-bg);
+  color: var(--kaban-text);
+}
+
+.dashboard-main {
+  gap: var(--kaban-space-lg);
+  padding: var(--kaban-space-lg) 28px 32px;
+}
+
+.inventory-layout,
+.wmr-layout,
+.par-layout,
+.reports-layout {
+  gap: var(--kaban-space-md);
+}
+
+/* ---- Section headers ---- */
+.dashboard-header {
+  background: linear-gradient(
+    135deg,
+    rgba(5, 150, 105, 0.1) 0%,
+    rgba(91, 142, 201, 0.08) 52%,
+    rgba(212, 162, 74, 0.07) 100%
+  );
+  border: 1px solid rgba(5, 150, 105, 0.14);
+  border-radius: var(--kaban-radius-lg);
+  padding: 18px 22px;
+  box-shadow: var(--kaban-shadow-card);
+}
+
+.dashboard-header h2 {
+  margin: 0;
+  font-size: var(--kaban-text-xl);
+  font-weight: 600;
+  color: var(--kaban-text);
+  letter-spacing: -0.02em;
+}
+
+.dashboard-header p {
+  margin: 4px 0 0;
+  font-size: var(--kaban-text-sm);
+  color: var(--kaban-text-muted);
+  line-height: 1.45;
+}
+
+.inventory-add-title {
+  font-size: var(--kaban-text-lg);
+  font-weight: 600;
+  color: var(--kaban-text);
+}
+
+.reports-card-title,
+.wmr-modal-title {
+  color: var(--kaban-text);
+}
+
+.reports-card-meta,
+.reports-card-description,
+.inventory-help-text {
+  color: var(--kaban-text-muted);
+}
+
+.reports-card-description {
+  color: var(--kaban-text-secondary);
+}
+
+/* ---- Cards & panels ---- */
+.inventory-table-card,
+.inventory-add-card,
+.reports-card,
+.reports-period,
+.metric-group-card,
+.panel,
+.action-card,
+.dept-card,
+.csv-menu-panel {
+  background: var(--kaban-surface);
+  border: 1px solid var(--kaban-border);
+  border-radius: var(--kaban-radius-lg);
+  box-shadow: var(--kaban-shadow-card);
+}
+
+.wmr-modal,
+.par-modal,
+.par-item-picker-modal,
+.logout-modal {
+  background: var(--kaban-surface);
+  border: 1px solid var(--kaban-border);
+  border-radius: var(--kaban-radius-lg);
+  box-shadow: var(--kaban-shadow-modal);
+}
+
+/* ---- Toolbar / segmented tabs ---- */
+.inventory-toolbar {
+  background: var(--kaban-toolbar-bg);
+  border-color: var(--kaban-border-strong);
+  border-radius: var(--kaban-radius-md);
+  padding: 4px;
+}
+
+.inventory-primary-button::before {
+  background: var(--kaban-green);
+}
+
+.inventory-primary-button {
+  border-radius: var(--kaban-radius-sm);
+}
+
+.inventory-secondary-button {
+  border-radius: var(--kaban-radius-sm);
+}
+
+/* ---- Form controls ---- */
+.inventory-input,
+.inventory-search-input,
+.inventory-filter-select,
+.field-group input,
+.field-group select,
+.reports-period-select,
+.reports-date-group input,
+.signin-card input {
+  border: 1px solid var(--kaban-border-strong);
+  border-radius: var(--kaban-radius-md);
+  color: var(--kaban-text);
+  background: var(--kaban-surface);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.inventory-input:focus,
+.inventory-search-input:focus,
+.inventory-filter-select:focus,
+.field-group input:focus,
+.field-group select:focus,
+.reports-period-select:focus,
+.reports-date-group input:focus {
+  outline: none;
+  border-color: var(--kaban-green);
+  box-shadow: var(--kaban-focus-ring);
+}
+
+.inventory-field label,
+.reports-label,
+.reports-period > div label,
+.reports-date-group label,
+.field-group label {
+  font-size: var(--kaban-text-xs);
+  font-weight: 500;
+  color: var(--kaban-text-muted);
+}
+
+/* ---- Primary actions ---- */
+.csv-action-button,
+.inventory-add-submit,
+.wmr-modal-button-save,
+.reports-print-button,
+.primary-button {
+  background: var(--kaban-green);
+  border: 1px solid var(--kaban-green-dark);
+  color: #ffffff;
+  border-radius: var(--kaban-radius-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+}
+
+.csv-action-button:hover,
+.inventory-add-submit:hover:not(:disabled),
+.wmr-modal-button-save:hover:not(:disabled),
+.reports-print-button:hover:not(:disabled),
+.primary-button:hover:not(:disabled) {
+  background: var(--kaban-green-dark);
+  border-color: var(--kaban-green-dark);
+}
+
+.csv-action-button:focus-visible,
+.inventory-add-submit:focus-visible,
+.wmr-modal-button-save:focus-visible,
+.reports-print-button:focus-visible,
+.primary-button:focus-visible,
+.inventory-add-cancel:focus-visible,
+.wmr-modal-button-secondary:focus-visible {
+  outline: none;
+  box-shadow: var(--kaban-focus-ring);
+}
+
+.inventory-add-submit:disabled,
+.wmr-modal-button-save:disabled,
+.reports-print-button:disabled,
+.primary-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ---- Secondary actions ---- */
+.inventory-add-cancel,
+.wmr-modal-button-secondary {
+  border: 1px solid var(--kaban-border-strong);
+  background: var(--kaban-surface);
+  color: var(--kaban-text-secondary);
+  border-radius: var(--kaban-radius-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.inventory-add-cancel:hover:not(:disabled),
+.wmr-modal-button-secondary:hover:not(:disabled) {
+  background: var(--kaban-table-stripe);
+}
+
+/* ---- Table row actions ---- */
+.inventory-table-action-button {
+  min-height: 30px;
+  min-width: 88px;
+  padding: 6px 12px;
+  border: 1px solid var(--kaban-green-dark);
+  border-radius: var(--kaban-radius-sm);
+  background: var(--kaban-green);
+  color: #ffffff;
+  font-size: var(--kaban-text-sm);
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  transition: background-color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.inventory-table-action-button:hover:not(:disabled) {
+  background: var(--kaban-green-dark);
+  border-color: var(--kaban-green-dark);
+}
+
+.inventory-table-action-button:focus-visible {
+  outline: none;
+  box-shadow: var(--kaban-focus-ring);
+}
+
+.inventory-table-action-button:disabled {
+  border-color: var(--kaban-border-strong);
+  background: var(--kaban-table-stripe);
+  color: var(--kaban-text-muted);
+  opacity: 1;
+  cursor: not-allowed;
+}
+
+.release-log-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.release-log-attachment-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 10px;
+  border: 1px solid var(--kaban-border-strong);
+  border-radius: var(--kaban-radius-sm);
+  background: var(--kaban-surface);
+  color: var(--kaban-green-dark);
+  font-size: var(--kaban-text-xs);
+  font-weight: 600;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.release-log-attachment-link:hover {
+  background: var(--kaban-green-soft);
+  border-color: var(--kaban-green);
+  color: var(--kaban-green-dark);
+}
+
+.release-log-attachment-link:focus-visible {
+  outline: none;
+  box-shadow: var(--kaban-focus-ring);
+}
+
+/* ---- Tables ---- */
+.inventory-table thead th,
+.dashboard-drilldown-table thead th {
+  background: var(--kaban-table-head-bg);
+  color: var(--kaban-text-secondary);
+  font-size: var(--kaban-text-sm);
+}
+
+.inventory-table tbody td,
+.dashboard-drilldown-table tbody td {
+  color: var(--kaban-text);
+  border-top-color: var(--kaban-border);
+}
+
+.inventory-table tbody tr:nth-child(even),
+.dashboard-drilldown-table tbody tr:nth-child(even) {
+  background: var(--kaban-table-stripe);
+}
+
+/* ---- Modals & overlays ---- */
+.wmr-modal-backdrop,
+.par-modal-backdrop,
+.inventory-delete-backdrop,
+.par-item-picker-backdrop,
+.dashboard-drilldown-backdrop,
+.logout-modal-backdrop {
+  z-index: var(--kaban-z-modal);
+  background: var(--kaban-backdrop);
+}
+
+.inventory-pagination {
+  z-index: var(--kaban-z-pagination);
+  border-color: var(--kaban-border);
+  border-radius: var(--kaban-radius-lg);
+  box-shadow: var(--kaban-shadow-float);
+}
+
+.inventory-pagination-button:hover:not(:disabled) {
+  border-color: var(--kaban-green);
+  color: var(--kaban-green-dark);
+}
+
+.inventory-pagination-circle-active,
+.dashboard-drilldown-pagination-button-active {
+  background: var(--kaban-green);
+  border-color: var(--kaban-green);
+  color: #ffffff;
+}
+
+/* ---- Feedback messages ---- */
+.dashboard-error {
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--kaban-radius-md);
+  background: var(--kaban-danger-bg);
+  border: 1px solid var(--kaban-danger-border);
+  color: var(--kaban-danger);
+  font-size: var(--kaban-text-sm);
+}
+
+/* ---- Sidebar ---- */
+.sidebar {
+  background: var(--kaban-sidebar-bg);
+  border-right-color: var(--kaban-border-sidebar);
+}
+
+.sidebar-header,
+.sidebar-user,
+.sidebar-nav {
+  border-color: var(--kaban-border-sidebar);
+}
+
+.sidebar-logo {
+  background: var(--kaban-green);
+}
+
+.sidebar-title h1 {
+  color: var(--kaban-green-dark);
+}
+
+.sidebar-link:hover {
+  background: var(--kaban-green-soft);
+}
+
+.sidebar-link-active {
+  color: var(--kaban-green-dark);
+  background: var(--kaban-green-soft);
+  border-right-color: var(--kaban-green);
+}
+
+.sidebar-link-active:hover {
+  background: var(--kaban-green-soft);
+}
+
+/* ---- Badges (shared semantic status colors) ---- */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Green — good / complete / serviceable */
+.badge-status-serviceable,
+.badge-status-valid,
+.badge-status-full-stock,
+.badge-status-repaired,
+.badge-status-disposed,
+.badge-status-returned {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+/* Amber — pending / active / low */
+.badge-status-pending,
+.badge-status-low,
+.badge-status-borrowed {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+/* Red — problems / action needed */
+.badge-status-unserviceable,
+.badge-status-expired,
+.badge-status-disposal,
+.badge-status-overdue,
+.badge-status-rejected {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+/* Blue — repair / informational in progress */
+.badge-status-repair,
+.badge-status-info {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+/* Neutral — archived / unknown */
+.badge-status-neutral {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+/* Department list badges — alias to same semantic palette */
+.dept-list-item-badge,
+.dept-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.dept-list-item-badge.green,
+.dept-badge-resolved,
+.dept-badge-active {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.dept-list-item-badge.yellow,
+.dept-badge-pending {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.dept-list-item-badge.red,
+.dept-badge-rejected {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.dept-list-item-badge.orange {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.dept-list-item-badge.gray {
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.logout-modal-button-secondary {
+  border-radius: var(--kaban-radius-md);
+  border: 1px solid var(--kaban-border-strong);
+  background: var(--kaban-table-stripe);
+  color: var(--kaban-text-secondary);
+  padding: 6px 14px;
+  font-size: var(--kaban-text-sm);
+  cursor: pointer;
+}
+
+.logout-modal-button-primary {
+  border-radius: var(--kaban-radius-md);
+  border: none;
+  background: var(--kaban-danger);
+  color: #ffffff;
+  padding: 6px 14px;
+  font-size: var(--kaban-text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---- Sign-in page alignment ---- */
+.signin-page {
+  background: var(--kaban-bg);
+}
+
+.signin-left-panel {
+  background: linear-gradient(160deg, var(--kaban-green) 0%, var(--kaban-green-dark) 100%);
+}
+
+@media (max-width: 960px) {
+  .dashboard-main {
+    padding: 16px 14px 24px;
+    gap: var(--kaban-space-md);
+  }
+}

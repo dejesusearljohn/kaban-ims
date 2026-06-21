@@ -104,7 +104,11 @@
 .reports-card-controls {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--kaban-space-sm);
+}
+
+.reports-grid {
+  gap: var(--kaban-space-md);
 }
 
 .reports-label {

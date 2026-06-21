@@ -1,8 +1,10 @@
-import { formatRepackContentsDisplay, formatStockpileRowId, isPackedStockpileItem, parseRepackContents, type StockpileListKind } from '../utils/itemUtils'
+import { formatStockpileRowId, isPackedStockpileItem, parseRepackContents, serializeRepackContents, type StockpileListKind } from '../utils/itemUtils'
 import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFilesSelection } from '../utils/photoUtils'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { supabase } from '../supabaseClient'
+import { getStatusBadgeClass } from '../utils/statusBadge'
 
 type StockpileRow = Tables<'stockpile'> & {
   status?: string | null
@@ -23,6 +25,12 @@ type StockpileReleaseLog = {
 type StockpileReleaseDraftItem = {
   stockpileId: string
   quantity: string
+}
+
+type PackedContentDraftRow = {
+  name: string
+  quantity: string
+  unit: string
 }
 
 type StockpileSectionProps = {
@@ -122,6 +130,11 @@ function StockpileSection({
   const [stockpileListKind, setStockpileListKind] = useState<StockpileListKind>('individual')
   const [selectedPackedItem, setSelectedPackedItem] = useState<StockpileRow | null>(null)
   const [releasePhotoFileError, setReleasePhotoFileError] = useState<string | null>(null)
+  const [packedContentDraftRows, setPackedContentDraftRows] = useState<PackedContentDraftRow[]>([
+    { name: '', quantity: '', unit: '' },
+  ])
+  const [savingPackedContents, setSavingPackedContents] = useState(false)
+  const [packedContentsError, setPackedContentsError] = useState<string | null>(null)
 
   const individualStockpileItems = useMemo(
     () => filteredStockpileItems.filter((item) => !isPackedStockpileItem(item)),
@@ -227,6 +240,72 @@ function StockpileSection({
 
       return [...prev, stockpileId]
     })
+  }
+
+  const updatePackedContentDraftRow = (index: number, field: keyof PackedContentDraftRow, value: string) => {
+    setPackedContentDraftRows((prev) =>
+      prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)),
+    )
+  }
+
+  const addPackedContentDraftRow = () => {
+    setPackedContentDraftRows((prev) => [...prev, { name: '', quantity: '', unit: '' }])
+  }
+
+  const removePackedContentDraftRow = (index: number) => {
+    setPackedContentDraftRows((prev) => {
+      const next = prev.filter((_, rowIndex) => rowIndex !== index)
+      return next.length > 0 ? next : [{ name: '', quantity: '', unit: '' }]
+    })
+  }
+
+  const handleSavePackedContents = async () => {
+    if (!selectedPackedItem) return
+
+    const contents = packedContentDraftRows
+      .map((row, index) => ({
+        index,
+        name: row.name.trim(),
+        quantity: Number(row.quantity),
+        unit: row.unit.trim(),
+      }))
+      .filter((row) => row.name || row.quantity || row.unit)
+
+    if (contents.length === 0) {
+      setPackedContentsError('Add at least one item in this pack.')
+      return
+    }
+
+    const invalid = contents.find((row) => !row.name || !Number.isFinite(row.quantity) || row.quantity <= 0)
+    if (invalid) {
+      setPackedContentsError(`Line ${invalid.index + 1}: item name and positive quantity are required.`)
+      return
+    }
+
+    const serializedContents = serializeRepackContents(
+      contents.map((row) => ({
+        name: row.name,
+        quantity: row.quantity,
+        unit: row.unit,
+      })),
+    )
+
+    setSavingPackedContents(true)
+    setPackedContentsError(null)
+
+    const { error } = await supabase
+      .from('inventory')
+      .update({ item_description: serializedContents })
+      .eq('item_id', selectedPackedItem.stockpile_id)
+
+    if (error) {
+      setPackedContentsError(error.message)
+      setSavingPackedContents(false)
+      return
+    }
+
+    setSelectedPackedItem((prev) => (prev ? { ...prev, item_description: serializedContents } : prev))
+    setSavingPackedContents(false)
   }
 
   const pickerCatalogItems = useMemo(
@@ -379,6 +458,21 @@ function StockpileSection({
   }, [releaseItemPickerRowIndex])
 
   useEffect(() => {
+    const contents = parseRepackContents(selectedPackedItem?.item_description)
+    setPackedContentsError(null)
+    setSavingPackedContents(false)
+    setPackedContentDraftRows(
+      contents && contents.length > 0
+        ? contents.map((entry) => ({
+            name: entry.name,
+            quantity: String(entry.quantity),
+            unit: entry.unit,
+          }))
+        : [{ name: '', quantity: '', unit: '' }],
+    )
+  }, [selectedPackedItem])
+
+  useEffect(() => {
     if (releaseItemPickerRowIndex == null) return
     if (releaseItemPickerRowIndex >= activePickerItems.length) {
       closeReleaseItemPicker()
@@ -477,41 +571,41 @@ function StockpileSection({
 
       {stockpileMode === 'list' && (
         <>
-          <div className="stockpile-list-toolbar" aria-label="Stockpile list filters">
-            <div className="inventory-kind-switch" role="tablist" aria-label="Stockpile item type">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={stockpileListKind === 'individual'}
-                className={`inventory-kind-switch-btn ${stockpileListKind === 'individual' ? 'inventory-kind-switch-btn-active' : ''}`}
-                onClick={() => setStockpileListKind('individual')}
-              >
-                Individual
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={stockpileListKind === 'packed'}
-                className={`inventory-kind-switch-btn ${stockpileListKind === 'packed' ? 'inventory-kind-switch-btn-active' : ''}`}
-                onClick={() => setStockpileListKind('packed')}
-              >
-                Packed
-              </button>
-            </div>
-            <p className="inventory-help-text stockpile-list-kind-help">
-              {stockpileListKind === 'individual'
-                ? 'Bulk stockpile items added from Inventory (rice, canned goods, etc.).'
-                : 'Relief packs created from the Repack tab, ready for Stockpile Release.'}
-            </p>
-          </div>
-
-          <section className="inventory-table-section" aria-label="Stockpile table">
+          <section className="inventory-table-section inventory-table-section-compact inventory-list-section" aria-label="Stockpile table">
             <div className="inventory-table-card">
-              <table className="inventory-table">
+              <div className="inventory-table-title stockpile-list-toolbar" aria-label="Stockpile list filters">
+                <div className="inventory-kind-switch" role="tablist" aria-label="Stockpile item type">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={stockpileListKind === 'individual'}
+                    className={`inventory-kind-switch-btn ${stockpileListKind === 'individual' ? 'inventory-kind-switch-btn-active' : ''}`}
+                    onClick={() => setStockpileListKind('individual')}
+                  >
+                    Individual
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={stockpileListKind === 'packed'}
+                    className={`inventory-kind-switch-btn ${stockpileListKind === 'packed' ? 'inventory-kind-switch-btn-active' : ''}`}
+                    onClick={() => setStockpileListKind('packed')}
+                  >
+                    Packed
+                  </button>
+                </div>
+                <p className="inventory-help-text stockpile-list-kind-help">
+                  {stockpileListKind === 'individual'
+                    ? 'Bulk stockpile items added from Inventory (rice, canned goods, etc.).'
+                    : 'Relief packs created from the Repack tab, ready for Stockpile Release.'}
+                </p>
+              </div>
+
+              <table className="inventory-table inventory-list-table stockpile-list-table">
                 <thead>
                   <tr>
-                    <th scope="col">ID</th>
-                    <th scope="col">Item Name</th>
+                    <th scope="col" className="inventory-id-column">ID</th>
+                    <th scope="col" className="inventory-name-column">Item Name</th>
                     <th scope="col">Category</th>
                     <th scope="col">Quantity</th>
                     <th scope="col">Unit</th>
@@ -537,8 +631,7 @@ function StockpileSection({
                       const paddedId = formatStockpileRowId(item)
                       const isExpired =
                         item.expiration_date && new Date(item.expiration_date) < new Date()
-                      const repackContents = parseRepackContents(item.item_description)
-                      const isClickablePacked = stockpileListKind === 'packed' && repackContents != null
+                      const isClickablePacked = stockpileListKind === 'packed'
 
                       return (
                         <tr
@@ -547,14 +640,14 @@ function StockpileSection({
                           style={isClickablePacked ? { cursor: 'pointer' } : undefined}
                           title={isClickablePacked ? 'Click to view pack contents' : undefined}
                         >
-                          <td>{paddedId}</td>
-                          <td>{item.item_name ?? '—'}</td>
+                          <td className="inventory-id-column">{paddedId}</td>
+                          <td className="inventory-name-column">{item.item_name ?? '—'}</td>
                           <td>{item.category ?? '—'}</td>
                           <td>{item.quantity_on_hand ?? '—'}</td>
                           <td>{item.unit_of_measure ?? '—'}</td>
                           <td>{formatDisplayDate(item.packed_date)}</td>
                           <td>
-                            <span className={isExpired ? 'badge badge-status-expired' : 'badge badge-status-valid'}>
+                            <span className={`badge ${getStatusBadgeClass(isExpired ? 'expired' : 'valid')}`}>
                               {formatDisplayDate(item.expiration_date)}
                             </span>
                           </td>
@@ -1014,11 +1107,11 @@ function StockpileSection({
                 <span>Print</span>
               </button>
             </div>
-            <table className="inventory-table">
+            <table className="inventory-table inventory-list-table">
               <thead>
                 <tr>
-                  <th scope="col">Date</th>
-                  <th scope="col">Item</th>
+                  <th scope="col" className="inventory-date-column">Date</th>
+                  <th scope="col" className="inventory-name-column">Item</th>
                   <th scope="col">Qty</th>
                   <th scope="col">Unit</th>
                   <th scope="col">Issued To</th>
@@ -1038,25 +1131,25 @@ function StockpileSection({
                 ) : (
                   paginatedStockpileReleaseLogs.map((entry) => (
                     <tr key={entry.log.log_id}>
-                      <td>{formatDisplayDate(entry.log.operation_date)}</td>
-                      <td>{entry.itemName || '—'}</td>
+                      <td className="inventory-date-column">{formatDisplayDate(entry.log.operation_date)}</td>
+                      <td className="inventory-name-column">{entry.itemName || '—'}</td>
                       <td>{entry.quantity}</td>
                       <td>{entry.unit || '—'}</td>
                       <td>{entry.log.recipient_info ?? '—'}</td>
                       <td>{entry.log.calamity_name ?? '—'}</td>
                       <td>
                         {entry.attachmentUrls.length > 0 ? (
-                          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                          <div className="release-log-attachments">
                             {entry.attachmentUrls.map((url, idx) => (
                               <a
                                 key={`${entry.log.log_id}-attachment-${idx}`}
                                 href={url}
                                 target="_blank"
                                 rel="noopener noreferrer"
-                                className="stockpile-row-remove-link"
-                                style={{ textDecoration: 'none' }}
+                                className="release-log-attachment-link"
+                                title={`${entry.itemName || 'Release item'} — Photo ${idx + 1} | ${formatDisplayDate(entry.log.operation_date)} | Issued To: ${entry.log.recipient_info ?? '—'} | Reason: ${entry.log.calamity_name ?? '—'}`}
                               >
-                                Attachment {idx + 1}
+                                Photo {idx + 1}
                               </a>
                             ))}
                           </div>
@@ -1128,11 +1221,11 @@ function StockpileSection({
                   Expired Stockpiles
                 </h3>
               </div>
-              <table className="inventory-table">
+              <table className="inventory-table inventory-list-table stockpile-list-table">
                 <thead>
                   <tr>
-                    <th scope="col">ID</th>
-                    <th scope="col">Item Name</th>
+                    <th scope="col" className="inventory-id-column">ID</th>
+                    <th scope="col" className="inventory-name-column">Item Name</th>
                     <th scope="col">Category</th>
                     <th scope="col">Quantity</th>
                     <th scope="col">Unit</th>
@@ -1158,14 +1251,14 @@ function StockpileSection({
 
                       return (
                         <tr key={item.stockpile_id}>
-                          <td>{paddedId}</td>
-                          <td>{item.item_name ?? '—'}</td>
+                          <td className="inventory-id-column">{paddedId}</td>
+                          <td className="inventory-name-column">{item.item_name ?? '—'}</td>
                           <td>{item.category ?? '—'}</td>
                           <td>{item.quantity_on_hand ?? '—'}</td>
                           <td>{item.unit_of_measure ?? '—'}</td>
                           <td>{formatDisplayDate(item.packed_date)}</td>
                           <td>
-                            <span className={isExpired ? 'badge badge-status-expired' : 'badge badge-status-valid'}>
+                            <span className={`badge ${getStatusBadgeClass(isExpired ? 'expired' : 'valid')}`}>
                               {formatDisplayDate(item.expiration_date)}
                             </span>
                           </td>
@@ -1431,13 +1524,123 @@ function StockpileSection({
               <p className="wmr-modal-text">
                 <strong>Pack ID:</strong> {formatStockpileRowId(selectedPackedItem)}
               </p>
-              <p className="wmr-modal-text">
-                <strong>Contents:</strong>{' '}
-                {(() => {
-                  const contents = parseRepackContents(selectedPackedItem.item_description)
-                  return contents ? formatRepackContentsDisplay(contents) : 'No contents recorded for this pack.'
-                })()}
-              </p>
+              {(() => {
+                const contents = parseRepackContents(selectedPackedItem.item_description)
+
+                if (!contents || contents.length === 0) {
+                  return (
+                    <div className="stockpile-pack-contents-editor">
+                      <p className="wmr-modal-text">
+                        No contents are recorded yet. Add what each pack contains.
+                      </p>
+                      {packedContentsError && <p className="dashboard-error">{packedContentsError}</p>}
+                      <div className="dashboard-drilldown-table-wrap">
+                        <table className="dashboard-drilldown-table">
+                          <thead>
+                            <tr>
+                              <th scope="col">Item Name</th>
+                              <th scope="col">Quantity per 1 Pack</th>
+                              <th scope="col">Unit</th>
+                              <th scope="col">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {packedContentDraftRows.map((row, index) => (
+                              <tr key={`packed-content-draft-${index}`}>
+                                <td>
+                                  <input
+                                    type="text"
+                                    className="inventory-input"
+                                    value={row.name}
+                                    onChange={(event) => updatePackedContentDraftRow(index, 'name', event.target.value)}
+                                    placeholder="e.g. Rice"
+                                    disabled={savingPackedContents}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    className="inventory-input"
+                                    value={row.quantity}
+                                    onChange={(event) => updatePackedContentDraftRow(index, 'quantity', event.target.value)}
+                                    placeholder="1"
+                                    disabled={savingPackedContents}
+                                  />
+                                </td>
+                                <td>
+                                  <input
+                                    type="text"
+                                    className="inventory-input"
+                                    value={row.unit}
+                                    onChange={(event) => updatePackedContentDraftRow(index, 'unit', event.target.value)}
+                                    placeholder="pcs"
+                                    disabled={savingPackedContents}
+                                  />
+                                </td>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="stockpile-row-remove-link"
+                                    onClick={() => removePackedContentDraftRow(index)}
+                                    disabled={savingPackedContents || packedContentDraftRows.length === 1}
+                                  >
+                                    Remove
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="stockpile-pack-contents-actions">
+                        <button
+                          type="button"
+                          className="inventory-add-cancel"
+                          onClick={addPackedContentDraftRow}
+                          disabled={savingPackedContents}
+                        >
+                          Add Row
+                        </button>
+                        <button
+                          type="button"
+                          className="inventory-add-submit"
+                          onClick={handleSavePackedContents}
+                          disabled={savingPackedContents}
+                        >
+                          {savingPackedContents ? 'Saving...' : 'Save Contents'}
+                        </button>
+                      </div>
+                    </div>
+                  )
+                }
+
+                return (
+                  <div className="dashboard-drilldown-table-wrap">
+                    <table className="dashboard-drilldown-table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Item Name</th>
+                          <th scope="col">Quantity per 1 Pack</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {contents.map((entry, index) => {
+                          const unit = entry.unit?.trim()
+                          const quantity = unit ? `${entry.quantity} ${unit}` : entry.quantity
+
+                          return (
+                            <tr key={`${entry.name}-${index}`}>
+                              <td>{entry.name}</td>
+                              <td>{quantity}</td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              })()}
             </div>
             <div style={{ borderTop: '1px solid #e5e7eb', padding: '12px 18px', display: 'flex', justifyContent: 'flex-end' }}>
               <button

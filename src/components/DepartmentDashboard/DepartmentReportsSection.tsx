@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../../supabaseClient'
+import { getStatusBadgeClass } from '../../utils/statusBadge'
+import { useSupabaseRealtime } from '../../hooks/useSupabaseRealtime'
 
 interface Props {
   userId: string
@@ -34,11 +36,7 @@ interface DepartmentOption {
   dept_name: string
 }
 
-const statusClass = (s: string | null) => {
-  if (s === 'resolved') return 'dept-badge dept-badge-resolved'
-  if (s === 'rejected') return 'dept-badge dept-badge-rejected'
-  return 'dept-badge dept-badge-pending'
-}
+const statusClass = (s: string | null) => `badge ${getStatusBadgeClass(s)}`
 
 export default function DepartmentReportsSection({ userId, departmentId, initialReportId = null, onInitialReportHandled, isReadOnly = false }: Props) {
   const [reports, setReports] = useState<WmrReport[]>([])
@@ -58,6 +56,11 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
     location: '',
     reason_damage: '',
     date_reported: new Date().toISOString().slice(0, 10),
+  })
+  const [realtimeTick, setRealtimeTick] = useState(0)
+
+  useSupabaseRealtime(() => {
+    setRealtimeTick((tick) => tick + 1)
   })
 
   const loadReports = async () => {
@@ -133,7 +136,7 @@ export default function DepartmentReportsSection({ userId, departmentId, initial
     init()
     return () => { mounted = false }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId, departmentId])
+  }, [userId, departmentId, realtimeTick])
 
   useEffect(() => {
     if (!initialReportId || reports.length === 0) return

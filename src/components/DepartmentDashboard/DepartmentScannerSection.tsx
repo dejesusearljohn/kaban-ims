@@ -41,7 +41,7 @@ const DEFAULT_BORROW_DAYS = 14
 const getDefaultReturnDate = (): string => {
   const date = new Date()
   date.setDate(date.getDate() + DEFAULT_BORROW_DAYS)
-  return date.toISOString().slice(0, 10)
+  return date.toISOString()
 }
 
 export default function DepartmentScannerSection({
@@ -442,7 +442,6 @@ export default function DepartmentScannerSection({
       if (updateErr) throw updateErr
 
       const borrowTimestamp = new Date().toISOString()
-      const issueDate = borrowTimestamp.slice(0, 10)
 
       const rollbackInventory = async () => {
         let rollbackQuery = supabase
@@ -451,32 +450,6 @@ export default function DepartmentScannerSection({
           .eq('item_id', result.item_id)
         if (departmentId) rollbackQuery = rollbackQuery.eq('department_id', departmentId)
         await rollbackQuery
-      }
-
-      const { data: logRow, error: logErr } = await supabase
-        .from('accountability_reports')
-        .insert({
-          issued_to_id: userId,
-          item_id: result.item_id,
-          department_id: departmentId,
-          quantity_logged: requestedQty,
-          issue_date: issueDate,
-          source: 'inventory_log',
-          reference_type: 'scanner_requisition',
-          contact_snapshot: staffName || null,
-          description_snapshot: result.item_name,
-          unit_snapshot: result.unit_of_measure,
-          property_no_snapshot: result.property_no,
-          remarks: null,
-          is_archived: false,
-          uid: crypto.randomUUID(),
-        })
-        .select('accountability_id')
-        .single()
-
-      if (logErr || !logRow) {
-        await rollbackInventory()
-        throw logErr ?? new Error('accountability-log-failed')
       }
 
       const { error: borrowedErr } = await supabase.from('borrowed_items').insert({
@@ -490,10 +463,10 @@ export default function DepartmentScannerSection({
         location: departmentName.trim() || null,
         remarks: 'Borrowed via QR scanner',
         status: 'borrowed',
+        uid: crypto.randomUUID(),
       })
 
       if (borrowedErr) {
-        await supabase.from('accountability_reports').delete().eq('accountability_id', logRow.accountability_id)
         await rollbackInventory()
         throw borrowedErr
       }

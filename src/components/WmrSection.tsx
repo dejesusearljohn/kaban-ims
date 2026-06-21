@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { getStatusBadgeClass } from '../utils/statusBadge'
 
 type InventoryRow = Tables<'inventory'>
 type WmrReportRow = Tables<'wmr_reports'>
@@ -80,15 +81,7 @@ function WmrSection({
   const wmrPageSize = useResponsivePageSize(8)
   const [wmrPage, setWmrPage] = useState(1)
 
-  const getWmrStatusBadgeClass = (status: string | null) => {
-    const normalized = status?.toLowerCase().trim() || ''
-    if (normalized === 'pending') return 'badge-status-pending'
-    if (normalized === 'for disposal') return 'badge-status-disposal'
-    if (normalized === 'disposed') return 'badge-status-disposed'
-    if (normalized === 'for repair') return 'badge-status-repair'
-    if (normalized === 'repaired') return 'badge-status-repaired'
-    return ''
-  }
+  const getWmrStatusBadgeClass = (status: string | null) => getStatusBadgeClass(status)
 
   const combinedWmrRows = useMemo(
     () =>
@@ -241,7 +234,7 @@ function WmrSection({
 
       <section className="section-toolbar-row wmr-toolbar" aria-label="Waste materials filters">
         <div className="inventory-filters">
-          <div className="wmr-search-wrapper">
+          <div className="inventory-search-wrapper">
             <input
               type="search"
               className="inventory-search-input"
@@ -304,17 +297,18 @@ function WmrSection({
         </div>
       </section>
 
-      <section className="inventory-table-section" aria-label="Waste materials table">
+      {wmrError && <p className="dashboard-error">{wmrError}</p>}
+
+      <section className="inventory-table-section inventory-table-section-compact" aria-label="Waste materials table">
         <div className="inventory-table-card">
-          {wmrError && <p className="dashboard-error">{wmrError}</p>}
-          <table className="inventory-table">
+          <table className="inventory-table inventory-list-table">
             <thead>
               <tr>
-                <th scope="col">Report ID</th>
-                <th scope="col">Item Name</th>
+                <th scope="col" className="inventory-id-column">Report ID</th>
+                <th scope="col" className="inventory-name-column">Item Name</th>
                 <th scope="col">Type</th>
                 <th scope="col">Reason</th>
-                <th scope="col">Status</th>
+                <th scope="col" className="inventory-status-column">Status</th>
                 <th scope="col">Location</th>
                 <th scope="col">Date Reported</th>
                 <th scope="col">Reported By</th>
@@ -335,8 +329,8 @@ function WmrSection({
                 <>
                   {paginatedWmrRows.map((row) => (
                     <tr key={row.key}>
-                      <td>{row.reportId}</td>
-                      <td>{row.itemName || '—'}</td>
+                      <td className="inventory-id-column">{row.reportId}</td>
+                      <td className="inventory-name-column">{row.itemName || '—'}</td>
                       <td>{row.type}</td>
                       <td>{row.reason || '—'}</td>
                       <td>
@@ -363,7 +357,7 @@ function WmrSection({
                             }
                           }}
                         >
-                          {row.hasRemarks ? 'View remarks' : 'Add remarks'}
+                          {row.hasRemarks ? 'View' : 'Add remarks'}
                         </button>
                       </td>
                       <td className="inventory-row-actions">

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFileSelection } from '../utils/photoUtils'
+import { getStatusBadgeClass } from '../utils/statusBadge'
 
 type VehicleRow = Tables<'vehicles'> & {
   vehicle_name?: string | null
@@ -235,11 +236,11 @@ function VehiclesSection({
           <section className="inventory-table-section" aria-label="Vehicles table">
             <div className="inventory-table-card">
               <h3 className="par-form-title inventory-table-title">Vehicle Registry</h3>
-              <table className="inventory-table">
+              <table className="inventory-table inventory-list-table">
                 <thead>
                   <tr>
-                    <th scope="col">ID</th>
-                    <th scope="col">Vehicle Name</th>
+                    <th scope="col" className="inventory-id-column">ID</th>
+                    <th scope="col" className="inventory-name-column">Vehicle Name</th>
                     <th scope="col">Make / Model</th>
                     <th scope="col">Color</th>
                     <th scope="col">Year</th>
@@ -263,8 +264,8 @@ function VehiclesSection({
                   ) : (
                     paginatedVehicles.map((vehicle) => (
                       <tr key={vehicle.id}>
-                        <td>{`VEH-${vehicle.id.toString().padStart(3, '0')}`}</td>
-                        <td>{vehicle.vehicle_name || '—'}</td>
+                        <td className="inventory-id-column">{`VEH-${vehicle.id.toString().padStart(3, '0')}`}</td>
+                        <td className="inventory-name-column">{vehicle.vehicle_name || '—'}</td>
                         <td>{vehicle.make_model || '—'}</td>
                         <td>{vehicle.color || '—'}</td>
                         <td>{vehicle.year_model ?? '—'}</td>
@@ -280,7 +281,7 @@ function VehiclesSection({
                           )}
                         </td>
                         <td>
-                          <span className={`badge ${vehicle.is_serviceable ? 'badge-status-repaired' : 'badge-status-disposal'}`}>
+                          <span className={`badge ${getStatusBadgeClass(vehicle.is_serviceable ? 'serviceable' : 'unserviceable')}`}>
                             {vehicle.is_serviceable ? 'Serviceable' : 'Needs Repair'}
                           </span>
                         </td>

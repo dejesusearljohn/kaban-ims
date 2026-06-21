@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
+import { QRCodeCanvas } from 'qrcode.react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 import { formatInventoryItemId, generateParPropertyNumber, getCategoryOptionsForInventoryKind, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryTypeColumnDisplay, getInventoryUnitDisplay, getMaxKindItemNo, inferCategoryFromItemName, INVENTORY_KIND_FILTER_OPTIONS, OFFICE_SUPPLY_CATEGORY_OPTIONS, PAR_CATEGORY_OPTIONS, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, previewAutoItemId, STOCKPILE_CATEGORY_OPTIONS, type InventoryKind, type InventoryKindFilter } from '../utils/itemUtils'
 import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFilesSelection } from '../utils/photoUtils'
+import { getStatusBadgeClass } from '../utils/statusBadge'
 
 type InventoryRow = Tables<'inventory'>
 
@@ -104,6 +106,8 @@ type InventorySectionProps = {
   acquisitionModeOptions: string[]
   newItemTotalCost: number | null
   onExportCsv: () => void
+  onPrintQrPdf: (itemIds: number[]) => Promise<boolean>
+  qrPdfGenerating: boolean
   existingPropertyNumbers: Array<{ property_no?: string | null }>
   officeSuppliesAssignee: string
   officeSuppliesLocationLabel: string
@@ -211,6 +215,8 @@ function InventorySection({
   acquisitionModeOptions,
   newItemTotalCost,
   onExportCsv,
+  onPrintQrPdf,
+  qrPdfGenerating,
   existingPropertyNumbers,
   officeSuppliesAssignee,
   officeSuppliesLocationLabel,
@@ -265,6 +271,68 @@ function InventorySection({
 
   const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventoryItems.length / inventoryPageSize))
   const [photoFileError, setPhotoFileError] = useState<string | null>(null)
+  const [showQrPrintModal, setShowQrPrintModal] = useState(false)
+  const [modalSelectedItemIds, setModalSelectedItemIds] = useState<Set<number>>(new Set())
+  const [modalSearchQuery, setModalSearchQuery] = useState('')
+
+  const openQrPrintModal = () => {
+    setModalSelectedItemIds(new Set())
+    setModalSearchQuery('')
+    setShowQrPrintModal(true)
+  }
+
+  const closeQrPrintModal = () => {
+    if (qrPdfGenerating) return
+    setShowQrPrintModal(false)
+  }
+
+  const getInventoryQrValue = (item: InventoryRow) => item.qr_code ?? item.uid ?? formatInventoryItemId(item)
+
+  const modalItems = useMemo(() => {
+    const query = modalSearchQuery.trim().toLowerCase()
+    if (!query) return filteredInventoryItems
+
+    return filteredInventoryItems.filter((item) => {
+      const paddedId = formatInventoryItemId(item)
+      return (
+        item.item_name.toLowerCase().includes(query) ||
+        paddedId.toLowerCase().includes(query) ||
+        (item.property_no ?? '').toLowerCase().includes(query)
+      )
+    })
+  }, [filteredInventoryItems, modalSearchQuery])
+
+  const toggleModalItemSelection = (itemId: number) => {
+    setModalSelectedItemIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
+  }
+
+  const selectAllModalItems = () => {
+    setModalSelectedItemIds(new Set(modalItems.map((item) => item.item_id)))
+  }
+
+  const clearModalSelection = () => {
+    setModalSelectedItemIds(new Set())
+  }
+
+  const handleSaveQrPdf = async () => {
+    if (modalSelectedItemIds.size === 0) return
+
+    const saved = await onPrintQrPdf(Array.from(modalSelectedItemIds))
+    if (saved) {
+      setShowQrPrintModal(false)
+      setModalSelectedItemIds(new Set())
+    }
+  }
+
+  const paginatedInventoryItems = useMemo(() => {
+    const start = (inventoryPage - 1) * inventoryPageSize
+    return filteredInventoryItems.slice(start, start + inventoryPageSize)
+  }, [filteredInventoryItems, inventoryPage, inventoryPageSize])
 
   useEffect(() => {
     setInventoryPage(1)
@@ -275,12 +343,6 @@ function InventorySection({
       setInventoryPage(inventoryTotalPages)
     }
   }, [inventoryPage, inventoryTotalPages])
-
-
-  const paginatedInventoryItems = useMemo(() => {
-    const start = (inventoryPage - 1) * inventoryPageSize
-    return filteredInventoryItems.slice(start, start + inventoryPageSize)
-  }, [filteredInventoryItems, inventoryPage, inventoryPageSize])
 
   const visibleInventoryPageNumbers = useMemo(() => {
     const maxVisiblePages = 5
@@ -371,22 +433,21 @@ function InventorySection({
                   </option>
                 ))}
               </select>
-              <select
-                className={`inventory-filter-select inventory-filter-select-category${showCategoryFilter ? '' : ' inventory-filter-select-reserved'}`}
-                aria-label="Filter by category"
-                aria-hidden={!showCategoryFilter}
-                tabIndex={showCategoryFilter ? 0 : -1}
-                disabled={!showCategoryFilter}
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-              >
-                <option value="all">All Categories</option>
-                {categoryFilterOptions.map((category) => (
-                  <option key={category} value={category}>
-                    {category}
-                  </option>
-                ))}
-              </select>
+              {showCategoryFilter ? (
+                <select
+                  className="inventory-filter-select inventory-filter-select-category"
+                  aria-label="Filter by category"
+                  value={categoryFilter}
+                  onChange={(e) => setCategoryFilter(e.target.value)}
+                >
+                  <option value="all">All Categories</option>
+                  {categoryFilterOptions.map((category) => (
+                    <option key={category} value={category}>
+                      {category}
+                    </option>
+                  ))}
+                </select>
+              ) : null}
               <select
                 className="inventory-filter-select"
                 value={departmentFilter}
@@ -424,6 +485,24 @@ function InventorySection({
                 ))}
               </select>
             </div>
+            <button
+              type="button"
+              className="csv-action-button inventory-print-qr-button"
+              onClick={openQrPrintModal}
+              disabled={filteredInventoryItems.length === 0}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M7 9V4h10v5M7 14h10v6H7v-6M5 20h14a2 2 0 002-2v-5H3v5a2 2 0 002 2z"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              <span>Print QR</span>
+            </button>
           </section>
 
           <section className="inventory-table-section inventory-table-section-compact inventory-list-section" aria-label="Inventory table">
@@ -432,7 +511,7 @@ function InventorySection({
                 <thead>
                   <tr>
                     <th scope="col" className="inventory-id-column">ID</th>
-                    <th scope="col">Name</th>
+                    <th scope="col" className="inventory-name-column">Name</th>
                     <th scope="col">Type</th>
                     <th scope="col">Location</th>
                     <th scope="col">Qty</th>
@@ -468,7 +547,7 @@ function InventorySection({
                             onClick={() => openViewItem(item)}
                           >
                             <td className="inventory-id-column">{paddedId}</td>
-                            <td>{item.item_name}</td>
+                            <td className="inventory-name-column">{item.item_name}</td>
                             <td>{getInventoryTypeColumnDisplay(item)}</td>
                             <td>{locationCode}</td>
                             <td>{displayQty}</td>
@@ -476,23 +555,7 @@ function InventorySection({
                             <td className="inventory-date-column">{formatInventoryDate(item.date_acquired)}</td>
                             <td>
                               {status ? (
-                                <span
-                                  className={`badge ${
-                                    status === 'SERVICEABLE'
-                                      ? 'badge-status-serviceable'
-                                      : status === 'UNSERVICEABLE'
-                                        ? 'badge-status-unserviceable'
-                                        : status === 'LOW'
-                                          ? 'badge-status-low'
-                                          : status === 'FULL STOCK'
-                                            ? 'badge-status-full-stock'
-                                        : status === 'VALID'
-                                          ? 'badge-status-valid'
-                                          : status === 'EXPIRED'
-                                            ? 'badge-status-expired'
-                                        : ''
-                                  }`}
-                                >
+                                <span className={`badge ${getStatusBadgeClass(status)}`}>
                                   {status}
                                 </span>
                               ) : (
@@ -1227,6 +1290,101 @@ function InventorySection({
             </div>
           </div>
         </section>
+      )}
+
+      {showQrPrintModal && (
+        <div
+          className="wmr-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="inventory-qr-print-modal-title"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) closeQrPrintModal()
+          }}
+        >
+          <div className="wmr-modal inventory-qr-print-modal">
+            <h2 id="inventory-qr-print-modal-title" className="wmr-modal-title">
+              Print QR Codes
+            </h2>
+            <p className="wmr-modal-text">
+              Select the QR codes to include in the PDF. Item names appear below each code.
+            </p>
+
+            <div className="inventory-qr-print-toolbar">
+              <input
+                type="search"
+                className="inventory-search-input inventory-qr-print-search"
+                placeholder="Search items in this list…"
+                value={modalSearchQuery}
+                onChange={(event) => setModalSearchQuery(event.target.value)}
+              />
+              <div className="inventory-qr-print-toolbar-actions">
+                <button type="button" className="inventory-selection-link" onClick={selectAllModalItems}>
+                  Select all
+                </button>
+                <button type="button" className="inventory-selection-link" onClick={clearModalSelection}>
+                  Clear
+                </button>
+                <span className="inventory-qr-print-count">{modalSelectedItemIds.size} selected</span>
+              </div>
+            </div>
+
+            <div className="inventory-qr-print-grid" role="list">
+              {modalItems.length === 0 ? (
+                <p className="inventory-qr-print-empty">No items match your search.</p>
+              ) : (
+                modalItems.map((item) => {
+                  const paddedId = formatInventoryItemId(item)
+                  const isSelected = modalSelectedItemIds.has(item.item_id)
+                  const qrValue = getInventoryQrValue(item)
+
+                  return (
+                    <button
+                      key={item.item_id}
+                      type="button"
+                      role="listitem"
+                      className={`inventory-qr-print-card${isSelected ? ' inventory-qr-print-card-selected' : ''}`}
+                      onClick={() => toggleModalItemSelection(item.item_id)}
+                      aria-pressed={isSelected}
+                    >
+                      <span className="inventory-qr-print-card-check" aria-hidden="true">
+                        {isSelected ? '✓' : ''}
+                      </span>
+                      <QRCodeCanvas
+                        value={qrValue}
+                        size={112}
+                        bgColor="#ffffff"
+                        fgColor="#111827"
+                        includeMargin
+                      />
+                      <span className="inventory-qr-print-card-name">{item.item_name}</span>
+                      <span className="inventory-qr-print-card-id">{paddedId}</span>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="wmr-modal-actions">
+              <button
+                type="button"
+                className="wmr-modal-button-save"
+                onClick={() => void handleSaveQrPdf()}
+                disabled={qrPdfGenerating || modalSelectedItemIds.size === 0}
+              >
+                {qrPdfGenerating ? 'Saving PDF…' : 'Save PDF'}
+              </button>
+              <button
+                type="button"
+                className="wmr-modal-button-secondary"
+                onClick={closeQrPrintModal}
+                disabled={qrPdfGenerating}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

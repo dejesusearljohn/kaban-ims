@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '../supabaseClient'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { getStatusBadgeClass } from '../utils/statusBadge'
+import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime'
 
 type ShiftTurnoverRow = Tables<'shift_turnovers'>
 type UserRow = Pick<Tables<'users'>, 'id' | 'full_name' | 'staff_id' | 'department_id'>
@@ -77,17 +79,8 @@ const formatDateTimeLabel = (value: string | null) => {
   })
 }
 
-const getStatusPillStyle = (state: TurnoverStatus) => {
-  if (state === 'approved') {
-    return { backgroundColor: '#dcfce7', color: '#166534' }
-  }
-
-  if (state === 'disapproved') {
-    return { backgroundColor: '#fee2e2', color: '#991b1b' }
-  }
-
-  return { backgroundColor: '#fef3c7', color: '#92400e' }
-}
+const formatTurnoverStatusLabel = (status: TurnoverStatus) =>
+  status.charAt(0).toUpperCase() + status.slice(1)
 
 function ShiftTurnoverRecordsSection() {
   const pageSize = useResponsivePageSize(10)
@@ -108,62 +101,57 @@ function ShiftTurnoverRecordsSection() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let mounted = true
+  const loadRecords = useCallback(async () => {
+    setLoading(true)
+    setError(null)
 
-    const load = async () => {
-      setLoading(true)
-      setError(null)
+    try {
+      const [turnoversRes, usersRes, departmentsRes, checksRes] = await Promise.all([
+        supabase
+          .from('shift_turnovers')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .order('turnover_id', { ascending: false }),
+        supabase
+          .from('users')
+          .select('id, full_name, staff_id, department_id')
+          .eq('is_archived', false)
+          .order('full_name', { ascending: true }),
+        supabase
+          .from('departments')
+          .select('id, dept_name')
+          .eq('is_archived', false)
+          .order('dept_name', { ascending: true }),
+        supabase
+          .from('daily_checks')
+          .select('check_id, check_date')
+          .order('check_id', { ascending: false }),
+      ])
 
-      try {
-        const [turnoversRes, usersRes, departmentsRes, checksRes] = await Promise.all([
-          supabase
-            .from('shift_turnovers')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .order('turnover_id', { ascending: false }),
-          supabase
-            .from('users')
-            .select('id, full_name, staff_id, department_id')
-            .eq('is_archived', false)
-            .order('full_name', { ascending: true }),
-          supabase
-            .from('departments')
-            .select('id, dept_name')
-            .eq('is_archived', false)
-            .order('dept_name', { ascending: true }),
-          supabase
-            .from('daily_checks')
-            .select('check_id, check_date')
-            .order('check_id', { ascending: false }),
-        ])
+      if (turnoversRes.error) throw turnoversRes.error
+      if (usersRes.error) throw usersRes.error
+      if (departmentsRes.error) throw departmentsRes.error
+      if (checksRes.error) throw checksRes.error
 
-        if (turnoversRes.error) throw turnoversRes.error
-        if (usersRes.error) throw usersRes.error
-        if (departmentsRes.error) throw departmentsRes.error
-        if (checksRes.error) throw checksRes.error
-
-        if (!mounted) return
-
-        setShiftTurnovers(turnoversRes.data ?? [])
-        setUsers((usersRes.data ?? []) as UserRow[])
-        setDepartments((departmentsRes.data ?? []) as DepartmentRow[])
-        setDailyChecks((checksRes.data ?? []) as DailyCheckRow[])
-      } catch (loadError) {
-        if (!mounted) return
-        const message = loadError instanceof Error ? loadError.message : 'Failed to load shift turnover records.'
-        setError(message)
-      } finally {
-        if (mounted) setLoading(false)
-      }
-    }
-
-    void load()
-
-    return () => {
-      mounted = false
+      setShiftTurnovers(turnoversRes.data ?? [])
+      setUsers((usersRes.data ?? []) as UserRow[])
+      setDepartments((departmentsRes.data ?? []) as DepartmentRow[])
+      setDailyChecks((checksRes.data ?? []) as DailyCheckRow[])
+    } catch (loadError) {
+      const message = loadError instanceof Error ? loadError.message : 'Failed to load shift turnover records.'
+      setError(message)
+    } finally {
+      setLoading(false)
     }
   }, [])
+
+  useEffect(() => {
+    void loadRecords()
+  }, [loadRecords])
+
+  useSupabaseRealtime(() => {
+    void loadRecords()
+  })
 
   const normalizedSearch = searchQuery.trim().toLowerCase()
 
@@ -235,6 +223,23 @@ function ShiftTurnoverRecordsSection() {
     return rows.slice(startIndex, startIndex + pageSize)
   }, [rows, page, pageSize])
 
+  const visiblePageNumbers = useMemo(() => {
+    const maxVisiblePages = 5
+    if (totalPages <= maxVisiblePages) {
+      return Array.from({ length: totalPages }, (_, index) => index + 1)
+    }
+
+    const halfWindow = Math.floor(maxVisiblePages / 2)
+    let start = Math.max(1, page - halfWindow)
+    let end = Math.min(totalPages, start + maxVisiblePages - 1)
+
+    if (end - start + 1 < maxVisiblePages) {
+      start = Math.max(1, end - maxVisiblePages + 1)
+    }
+
+    return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+  }, [page, totalPages])
+
   useEffect(() => {
     if (!activeRecord) return
 
@@ -303,7 +308,7 @@ function ShiftTurnoverRecordsSection() {
 
       {error && <p className="dashboard-error">{error}</p>}
 
-      <section className="wmr-toolbar" aria-label="Shift turnover records tools">
+      <section className="section-toolbar-row shift-turnover-toolbar" aria-label="Shift turnover records filters">
         <div className="inventory-filters">
           <div className="inventory-search-wrapper">
             <input
@@ -343,14 +348,14 @@ function ShiftTurnoverRecordsSection() {
         </div>
       </section>
 
-      <section className="inventory-table-section" aria-label="Shift turnover records table">
+      <section className="inventory-table-section inventory-table-section-compact" aria-label="Shift turnover records table">
         <div className="inventory-table-card">
-          <table className="inventory-table">
+          <table className="inventory-table inventory-list-table">
             <thead>
               <tr>
-                <th scope="col">No.</th>
-                <th scope="col">Outgoing Staff</th>
-                <th scope="col">Incoming Staff</th>
+                <th scope="col" className="inventory-id-column">No.</th>
+                <th scope="col" className="inventory-name-column">Outgoing Staff</th>
+                <th scope="col" className="inventory-name-column">Incoming Staff</th>
                 <th scope="col">Department</th>
                 <th scope="col">Check Date</th>
                 <th scope="col">Turnover Status</th>
@@ -371,30 +376,20 @@ function ShiftTurnoverRecordsSection() {
                 visibleRows.map((row) => {
                   return (
                     <tr key={row.turnoverId}>
-                      <td>{row.turnoverId}</td>
+                      <td className="inventory-id-column">{row.turnoverId}</td>
                       <td>
                         <strong>{row.outgoingName}</strong>
-                        <div style={{ color: '#6b7280', fontSize: 12 }}>{row.outgoingStaffId}</div>
+                        <div className="shift-turnover-staff-meta">{row.outgoingStaffId}</div>
                       </td>
                       <td>
                         <strong>{row.incomingName}</strong>
-                        <div style={{ color: '#6b7280', fontSize: 12 }}>{row.incomingStaffId}</div>
+                        <div className="shift-turnover-staff-meta">{row.incomingStaffId}</div>
                       </td>
                       <td>{row.departmentName}</td>
                       <td>{formatDateLabel(row.checkDate)}</td>
                       <td>
-                        <span
-                          style={{
-                            ...getStatusPillStyle(row.status),
-                            borderRadius: 999,
-                            display: 'inline-block',
-                            fontSize: 12,
-                            fontWeight: 600,
-                            padding: '4px 10px',
-                            textTransform: 'capitalize',
-                          }}
-                        >
-                          {row.status}
+                        <span className={`badge ${getStatusBadgeClass(row.status)}`}>
+                          {formatTurnoverStatusLabel(row.status)}
                         </span>
                       </td>
                       <td>{formatDateTimeLabel(row.createdAt)}</td>
@@ -429,34 +424,67 @@ function ShiftTurnoverRecordsSection() {
               )}
             </tbody>
           </table>
-
-          {!loading && rows.length > 0 && totalPages > 1 && (
-            <div className="inventory-pagination">
-              <div className="inventory-pagination-controls">
-                <button
-                  type="button"
-                  className="inventory-page-button"
-                  disabled={page === 1}
-                  onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-                >
-                  Prev
-                </button>
-                <span className="inventory-pagination-text">
-                  Page {page} of {totalPages}
-                </span>
-                <button
-                  type="button"
-                  className="inventory-page-button"
-                  disabled={page === totalPages}
-                  onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-                >
-                  Next
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </section>
+
+      {!loading && rows.length > 0 && totalPages > 1 && (
+        <div className="inventory-pagination" aria-label="Shift turnover pagination">
+          <div className="inventory-pagination-controls">
+            <button
+              type="button"
+              className="inventory-pagination-button inventory-pagination-circle"
+              onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+              disabled={page === 1}
+              aria-label="Previous page"
+            >
+              <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                <path
+                  d="M15 6l-6 6 6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+
+            {visiblePageNumbers.map((pageNumber) => (
+              <button
+                key={pageNumber}
+                type="button"
+                className={`inventory-pagination-button inventory-pagination-circle ${
+                  pageNumber === page ? 'inventory-pagination-circle-active' : ''
+                }`}
+                onClick={() => setPage(pageNumber)}
+                aria-label={`Page ${pageNumber}`}
+                aria-current={pageNumber === page ? 'page' : undefined}
+              >
+                {pageNumber}
+              </button>
+            ))}
+
+            <button
+              type="button"
+              className="inventory-pagination-button inventory-pagination-circle"
+              onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+              disabled={page === totalPages}
+              aria-label="Next page"
+            >
+              <svg viewBox="0 0 24 24" width="8" height="8" aria-hidden="true" focusable="false">
+                <path
+                  d="M9 6l6 6-6 6"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          </div>
+        </div>
+      )}
 
       {activeRecord && (
         <div className="wmr-modal-backdrop shift-turnover-preview-backdrop" role="dialog" aria-modal="true" aria-labelledby="shift-turnover-items-modal-title">
@@ -490,7 +518,7 @@ function ShiftTurnoverRecordsSection() {
 
             <div className="inventory-table-card shift-turnover-preview-table-wrap">
               <div className="shift-turnover-preview-table-scroll">
-                <table className="inventory-table">
+                <table className="inventory-table inventory-list-table">
                   <thead>
                     <tr>
                       <th scope="col">Item</th>
@@ -515,7 +543,11 @@ function ShiftTurnoverRecordsSection() {
                         <tr key={item.key}>
                           <td>{item.itemName} ({item.unit})</td>
                           <td>{item.propertyNo}</td>
-                          <td style={{ textTransform: 'capitalize' }}>{item.condition}</td>
+                          <td>
+                            <span className={`badge ${getStatusBadgeClass(item.condition)}`}>
+                              {item.condition}
+                            </span>
+                          </td>
                           <td>{item.quantityChecked ?? '—'}</td>
                           <td>{item.remarks}</td>
                           <td>{item.scannedAt}</td>

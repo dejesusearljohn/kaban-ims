@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { QRCodeCanvas } from 'qrcode.react'
 import {
   Bar,
@@ -20,11 +20,11 @@ import InventorySection from './InventorySection'
 import StockpileSection from './StockpileSection'
 import WmrSection from './WmrSection'
 import VehiclesSection from './VehiclesSection'
-import ParSection, { type ParDraftItem } from './ParSection'
+import ParSection from './ParSection'
 
 import ShiftTurnoverRecordsSection from './ShiftTurnoverRecordsSection'
 import BorrowedItemsSection from './BorrowedItemsSection'
-import ReportsSection, { type ReportPeriod } from './ReportsSection'
+import ReportsSection, { PAR_REPORT_SELECT_ALL, type ReportPeriod } from './ReportsSection'
 import type { SidebarSection } from './Sidebar'
 import '../styles/DashboardPage.css'
 import '../styles/Inventory.css'
@@ -32,9 +32,13 @@ import '../styles/Wmr.css'
 import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
+import '../styles/shared.css'
 import { downloadExcel, downloadVehicleLedgerExcel } from '../utils/excel'
-import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, isPackedStockpileItem, isParInventoryItem, equalsDbText, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, serializeRepackContents, type InventoryKind, type InventoryKindFilter, type RepackContentEntry, type StockpileListKind } from '../utils/itemUtils'
+import { downloadInventoryQrPdf } from '../utils/inventoryQrPdf'
+import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getBorrowedItemStatus, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, getReportInventoryTypeFilterLabel, isActiveBorrowedItem, isPackedStockpileItem, isParInventoryItem, isStockpileInventoryItem, buildReportInventoryTypeOptionGroups, equalsDbText, matchesReportInventoryTypeFilter, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, serializeRepackContents, type InventoryKind, type InventoryKindFilter, type RepackContentEntry, type ReportInventoryTypeOptionGroup, type StockpileListKind } from '../utils/itemUtils'
+import { getStatusBadgeClass } from '../utils/statusBadge'
 import { getPhotoFileSizeLimitError, isPhotoFileWithinSizeLimit, validatePhotoFilesSelection } from '../utils/photoUtils'
+import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime'
 
 type SummaryMetrics = {
   totalItems: number
@@ -174,6 +178,7 @@ const DEFAULT_UNITS_OF_MEASURE = [
   'Box',
   'Pair',
   'Pack',
+  'Ream',
   'Sack',
   'Roll',
   'Bottle',
@@ -393,6 +398,10 @@ function DashboardPage() {
 
   // [STATE] Inventory section
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
+  const stockpileItems = useMemo(
+    () => inventoryItems.filter(isStockpileInventoryItem).map(mapInventoryItemToStockpileRow),
+    [inventoryItems],
+  )
   const [inventoryLoading, setInventoryLoading] = useState(false)
   const [inventoryError, setInventoryError] = useState<string | null>(null)
   const [newInventoryKind, setNewInventoryKind] = useState<InventoryKind>('par')
@@ -471,9 +480,11 @@ function DashboardPage() {
   const [archiveModalConfig, setArchiveModalConfig] = useState<ArchiveModalConfig | null>(null)
   const [viewImageItem, setViewImageItem] = useState<InventoryRow | null>(null)
   const [viewInventoryItem, setViewInventoryItem] = useState<InventoryRow | null>(null)
+  const [borrowedItemsFocus, setBorrowedItemsFocus] = useState<{ itemId?: number; borrowedId?: number } | null>(null)
   const [viewImageIndex, setViewImageIndex] = useState(0)
   const [viewQrItem, setViewQrItem] = useState<InventoryRow | null>(null)
   const [qrGeneratingId, setQrGeneratingId] = useState<number | null>(null)
+  const [qrPdfGenerating, setQrPdfGenerating] = useState(false)
   const [inventoryPhotos, setInventoryPhotos] = useState<InventoryPhotoRow[]>([])
 
   // [STATE] WMR section
@@ -496,18 +507,10 @@ function DashboardPage() {
   const [parSaving, setParSaving] = useState(false)
   const [parError, setParError] = useState<string | null>(null)
   const [parSearchQuery, setParSearchQuery] = useState('')
-  const [parMode, setParMode] = useState<'manage' | 'add'>('manage')
-  const [parItemId, setParItemId] = useState('')
-  const [parIssuedToId, setParIssuedToId] = useState('')
-  const [parQuantityIssued, setParQuantityIssued] = useState('1')
-  const [parIssueDate, setParIssueDate] = useState(() => new Date().toISOString().slice(0, 10))
-  const [parUnitInput, setParUnitInput] = useState('')
-  const [parDescriptionInput, setParDescriptionInput] = useState('')
-  const [parPropertyNoInput, setParPropertyNoInput] = useState('')
-  const [parDateAcquiredInput, setParDateAcquiredInput] = useState('')
-  const [parCostInput, setParCostInput] = useState('')
   const [activeParStaffId, setActiveParStaffId] = useState<string | null>(null)
   const [selectedParReportStaffId, setSelectedParReportStaffId] = useState('')
+  const [selectedParReportDepartmentId, setSelectedParReportDepartmentId] = useState('')
+  const [selectedInventoryReportTypeFilter, setSelectedInventoryReportTypeFilter] = useState('all')
   const [selectedReportPeriod, setSelectedReportPeriod] = useState<ReportPeriod>('monthly')
   const [reportStartDate, setReportStartDate] = useState(() => {
     const now = new Date()
@@ -559,8 +562,6 @@ function DashboardPage() {
   const [newRepairDescription, setNewRepairDescription] = useState('')
 
   // [STATE] Stockpile section
-  const [stockpileItems, setStockpileItems] = useState<StockpileRow[]>([])
-  const [stockpileLoading, setStockpileLoading] = useState(false)
   const [stockpileError, setStockpileError] = useState<string | null>(null)
   const [stockpileMode, setStockpileMode] = useState<'list' | 'logs' | 'expired' | 'release' | 'repack'>('list')
   const [stockpileReleaseLogs, setStockpileReleaseLogs] = useState<DistributionLogRow[]>([])
@@ -1090,29 +1091,6 @@ function DashboardPage() {
   }, [realtimeTick])
 
   useEffect(() => {
-    const fetchStockpiles = async () => {
-      setStockpileLoading(true)
-      setStockpileError(null)
-
-      const { data, error: stockpileFetchError } = await supabase
-        .from('inventory')
-        .select('*')
-        .or('inventory_kind.eq.stockpile,item_type.ilike.stockpile')
-        .order('item_id', { ascending: false })
-
-      if (stockpileFetchError) {
-        setStockpileError(stockpileFetchError.message)
-      } else {
-        setStockpileItems((data ?? []).map(mapInventoryItemToStockpileRow))
-      }
-
-      setStockpileLoading(false)
-    }
-
-    void fetchStockpiles()
-  }, [realtimeTick])
-
-  useEffect(() => {
     const fetchStockpileReleaseLogs = async () => {
       setStockpileReleaseLoading(true)
 
@@ -1133,66 +1111,9 @@ function DashboardPage() {
     void fetchStockpileReleaseLogs()
   }, [realtimeTick])
 
-  useEffect(() => {
-    if (!parItemId) {
-      setParUnitInput('')
-      setParDescriptionInput('')
-      setParPropertyNoInput('')
-      setParDateAcquiredInput('')
-      setParCostInput('')
-      return
-    }
-
-    const selectedItem = inventoryItems.find((item) => item.item_id === Number(parItemId))
-
-    if (!selectedItem) return
-
-    setParUnitInput(selectedItem.unit_of_measure ?? '')
-    setParDescriptionInput(selectedItem.item_name ?? '')
-    setParPropertyNoInput(
-      selectedItem.property_no ?? formatInventoryItemId(selectedItem),
-    )
-    setParDateAcquiredInput(selectedItem.date_acquired ?? '')
-    setParCostInput(selectedItem.unit_cost != null ? String(selectedItem.unit_cost) : '')
-  }, [parItemId, inventoryItems])
-
-  // [EFFECTS] Realtime background refresh
-  useEffect(() => {
-    const channel = supabase
-      .channel('realtime-dashboard')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'wmr_reports' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicles' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vehicle_repairs' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'par_records' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'users' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'distribution_logs' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'inventory_photos' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowed_items' }, () =>
-        setRealtimeTick((t) => t + 1),
-      )
-      .subscribe()
-
-    return () => {
-      void supabase.removeChannel(channel)
-    }
-  }, [])
+  useSupabaseRealtime(() => {
+    setRealtimeTick((tick) => tick + 1)
+  })
 
   // [HELPERS] Formatting and utility functions
   const formatValue = (value: number) => (loading ? '—' : value.toString())
@@ -1263,20 +1184,6 @@ function DashboardPage() {
 
     return `${year}/${month}/${day}`
   }
-  const getBorrowedItemStatus = (item: BorrowedItemRow): 'Returned' | 'Overdue' | 'Borrowed' => {
-    if ((item.status ?? '').trim().toLowerCase() === 'returned') return 'Returned'
-
-    const returnDate = parseDateLikeValue(item.return_date)
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-
-    if (returnDate) {
-      returnDate.setHours(0, 0, 0, 0)
-      if (returnDate < now) return 'Overdue'
-    }
-
-    return 'Borrowed'
-  }
   const parseNumericInput = (value: string) => {
     const parsed = value.trim() ? Number(value) : null
     return parsed != null && Number.isFinite(parsed) ? parsed : null
@@ -1323,6 +1230,32 @@ function DashboardPage() {
     if (quantityValue == null || Number.isNaN(Number(quantityValue))) return null
 
     return Number(quantityValue) <= 10 ? 'LOW' : 'FULL STOCK'
+  }
+  const activeBorrowsByItemId = useMemo(() => {
+    const map = new Map<number, BorrowedItemRow[]>()
+
+    for (const row of borrowedDashboardItems) {
+      if (!isActiveBorrowedItem(row) || row.item_id == null) continue
+      const list = map.get(row.item_id) ?? []
+      list.push(row)
+      map.set(row.item_id, list)
+    }
+
+    return map
+  }, [borrowedDashboardItems])
+  const getInventoryDisplayStatus = (item: InventoryRow) => {
+    if (activeBorrowsByItemId.has(item.item_id)) return 'Borrowed'
+    return getInventoryStatus(item)
+  }
+  const handleInventoryRowClick = (item: InventoryRow) => {
+    const activeBorrows = activeBorrowsByItemId.get(item.item_id)
+    if (activeBorrows && activeBorrows.length > 0) {
+      setBorrowedItemsFocus({ itemId: item.item_id, borrowedId: activeBorrows[0].borrowed_id })
+      setActiveSection('borrowed-items')
+      return
+    }
+
+    setViewInventoryItem(item)
   }
   const isArchivedRow = (row: unknown) => {
     if (!row || typeof row !== 'object') return false
@@ -1515,7 +1448,6 @@ function DashboardPage() {
         .map((type) => [type.toLowerCase(), type] as const),
     ).values(),
   ).sort((a, b) => a.localeCompare(b))
-  const loanableParItems = inventoryItems.filter(isLoanableParItem)
   const unitOfMeasureOptions = Array.from(
     new Map(
       [
@@ -2329,62 +2261,14 @@ function DashboardPage() {
       )
     })
 
-  const reportPeriodParSummaries = Array.from(groupedParByStaff.entries())
-    .map(([staffId, records]) => {
-      const recordsWithinPeriod = records.filter((record) =>
-        isDateWithinReportRange(record.issue_date, reportStartDate, reportEndDate),
-      )
+  const buildParViewRowsForStaff = (staffId: string) => {
+    const receiver = findStaffUserById(staffId)
+    const parNo = resolveStaffParNumber(receiver) || `PAR-${staffId.slice(0, 8)}`
+    const records = groupedParByStaff.get(staffId) ?? []
+    const inventoryRowsForPar = parNo
+      ? parAssignedInventoryItems.filter((item) => item.par_no?.trim() === parNo)
+      : []
 
-      const receiver = findStaffUserById(staffId) ?? null
-
-      return {
-        staffId,
-        receiver,
-        recordsWithinPeriod,
-      }
-    })
-    .filter((summary) => summary.recordsWithinPeriod.length > 0)
-
-  const reportParOptions = reportPeriodParSummaries
-    .slice()
-    .sort((a, b) => {
-      const aName = a.receiver?.full_name ?? a.staffId
-      const bName = b.receiver?.full_name ?? b.staffId
-      return aName.localeCompare(bName)
-    })
-    .map((summary) => {
-      const label = summary.receiver
-        ? `${summary.receiver.full_name} (${summary.receiver.staff_id})`
-        : summary.staffId
-
-      return {
-        staffId: summary.staffId,
-        label,
-      }
-    })
-
-  useEffect(() => {
-    if (reportParOptions.length === 0) {
-      setSelectedParReportStaffId('')
-      return
-    }
-
-    setSelectedParReportStaffId((prev) => {
-      if (prev && reportParOptions.some((option) => option.staffId === prev)) {
-        return prev
-      }
-
-      return reportParOptions[0].staffId
-    })
-  }, [reportParOptions])
-
-  const activeParRecords = activeParStaffId ? groupedParByStaff.get(activeParStaffId) ?? [] : []
-  const activeParReceiver = activeParStaffId ? findStaffUserById(activeParStaffId) : null
-  const activeParNo = resolveStaffParNumber(activeParReceiver) || (activeParStaffId ? `PAR-${activeParStaffId.slice(0, 8)}` : 'PAR-')
-  const activeParInventoryItems = activeParNo
-    ? parAssignedInventoryItems.filter((item) => item.par_no?.trim() === activeParNo)
-    : []
-  const activeParViewRows = (() => {
     const rows: Array<{
       key: string
       quantity: string | number
@@ -2396,7 +2280,7 @@ function DashboardPage() {
     }> = []
     const seenItemIds = new Set<number>()
 
-    activeParInventoryItems.forEach((item) => {
+    inventoryRowsForPar.forEach((item) => {
       seenItemIds.add(item.item_id)
       rows.push({
         key: `inventory-${item.item_id}`,
@@ -2409,8 +2293,9 @@ function DashboardPage() {
       })
     })
 
-    activeParRecords.forEach((record) => {
+    records.forEach((record) => {
       if (record.item_id != null && seenItemIds.has(record.item_id)) return
+
       const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
       rows.push({
         key: `record-${record.par_id}`,
@@ -2427,34 +2312,100 @@ function DashboardPage() {
     })
 
     return rows
-  })()
-  const activeParDepartment =
-    activeParReceiver?.department_id != null
-      ? departments.find((dept) => dept.id === activeParReceiver.department_id)?.name ?? '—'
-      : '—'
-  const activeParCostTotals = [
-    ...activeParInventoryItems.map((item) => calculateTotalCost(item.quantity ?? null, item.unit_cost)),
-    ...activeParRecords
-      .filter((record) => record.item_id == null || !activeParInventoryItems.some((item) => item.item_id === record.item_id))
-      .map((record) => {
-        const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
-
-        if (record.cost_snapshot != null) {
-          return calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot)
-        }
-
-        if (item?.unit_cost != null) {
-          return calculateTotalCost(record.quantity_issued ?? null, item.unit_cost)
-        }
-
-        return null
-      }),
-  ]
-  const activeParHasCost = activeParCostTotals.some((value) => value != null)
-  let activeParTotalCost = 0
-  for (const value of activeParCostTotals) {
-    activeParTotalCost += value ?? 0
   }
+
+  const resolveParStaffDepartmentId = (staffId: string): number | null => {
+    const receiver = findStaffUserById(staffId)
+    if (receiver?.department_id != null) {
+      return receiver.department_id
+    }
+
+    const parNo = resolveStaffParNumber(receiver)
+    const assignedInventory = parNo
+      ? parAssignedInventoryItems.filter((item) => item.par_no?.trim() === parNo)
+      : []
+
+    for (const item of assignedInventory) {
+      if (item.department_id != null) {
+        return item.department_id
+      }
+    }
+
+    const records = groupedParByStaff.get(staffId) ?? []
+    for (const record of records) {
+      if (record.item_id == null) continue
+
+      const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
+      if (item?.department_id != null) {
+        return item.department_id
+      }
+    }
+
+    return null
+  }
+
+  const reportParOptions = Array.from(allParStaffIds)
+    .map((staffId) => {
+      const receiver = findStaffUserById(staffId)
+      const label = receiver ? `${receiver.full_name} (${receiver.staff_id})` : staffId
+
+      return {
+        staffId,
+        label,
+        departmentId: resolveParStaffDepartmentId(staffId),
+      }
+    })
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  const reportParDepartmentOptions = visibleDepartments
+    .map((department) => ({
+      departmentId: String(department.id),
+      label: department.name,
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+
+  const filteredReportParOptions = selectedParReportDepartmentId
+    ? reportParOptions.filter(
+        (option) => String(option.departmentId) === selectedParReportDepartmentId,
+      )
+    : reportParOptions
+
+  useEffect(() => {
+    if (filteredReportParOptions.length === 0) {
+      setSelectedParReportStaffId('')
+      return
+    }
+
+    setSelectedParReportStaffId((prev) => {
+      if (
+        selectedParReportDepartmentId &&
+        prev === PAR_REPORT_SELECT_ALL
+      ) {
+        return prev
+      }
+
+      if (prev && filteredReportParOptions.some((option) => option.staffId === prev)) {
+        return prev
+      }
+
+      return selectedParReportDepartmentId
+        ? PAR_REPORT_SELECT_ALL
+        : filteredReportParOptions[0].staffId
+    })
+  }, [filteredReportParOptions, selectedParReportDepartmentId])
+
+  const activeParReceiver = activeParStaffId ? findStaffUserById(activeParStaffId) : null
+  const activeParNo = resolveStaffParNumber(activeParReceiver) || (activeParStaffId ? `PAR-${activeParStaffId.slice(0, 8)}` : 'PAR-')
+  const activeParViewRows = activeParStaffId ? buildParViewRowsForStaff(activeParStaffId) : []
+  const activeParDepartment =
+    activeParStaffId != null
+      ? departments.find((dept) => dept.id === resolveParStaffDepartmentId(activeParStaffId))?.name ?? '—'
+      : '—'
+  const activeParHasCost = activeParViewRows.some((row) => row.cost != null)
+  const activeParTotalCost = activeParViewRows.reduce(
+    (sum, row) => sum + (calculateTotalCost(row.quantity, row.cost) ?? 0),
+    0,
+  )
   const activeVehicle =
     activeVehicleLogsId != null ? vehicles.find((vehicle) => vehicle.id === activeVehicleLogsId) ?? null : null
   const activeVehicleRepairs =
@@ -2502,9 +2453,37 @@ function DashboardPage() {
     }
 
     frame.onload = () => {
-      frameWindow.focus()
-      frameWindow.print()
-      cleanup()
+      const images = Array.from(frameDoc.images)
+      const printWhenReady = () => {
+        frameWindow.focus()
+        frameWindow.print()
+        cleanup()
+      }
+
+      if (images.length === 0) {
+        printWhenReady()
+        return
+      }
+
+      let pendingImages = images.filter((image) => !image.complete).length
+      if (pendingImages === 0) {
+        printWhenReady()
+        return
+      }
+
+      const onImageReady = () => {
+        pendingImages -= 1
+        if (pendingImages <= 0) {
+          printWhenReady()
+        }
+      }
+
+      images.forEach((image) => {
+        if (!image.complete) {
+          image.addEventListener('load', onImageReady, { once: true })
+          image.addEventListener('error', onImageReady, { once: true })
+        }
+      })
     }
 
     frameDoc.open()
@@ -2577,6 +2556,11 @@ function DashboardPage() {
     .sign-line { margin-top: 48px; width: 280px; }
     .sign-name { display: block; width: 100%; box-sizing: border-box; border-bottom: 1px solid #111827; padding: 0 8px 2px; font-size: 12px; white-space: nowrap; text-align: center; }
     .sign-role { margin-top: 4px; font-size: 12px; color: #374151; width: 280px; text-align: left; }
+    .print-attachments { margin-top: 28px; }
+    .print-attachments h2 { margin: 0 0 12px; font-size: 16px; color: #111827; }
+    .print-attachment { margin-bottom: 20px; page-break-inside: avoid; }
+    .print-attachment-label { margin: 0 0 8px; font-size: 12px; line-height: 1.45; color: #374151; }
+    .print-attachment img { display: block; max-width: 100%; max-height: 420px; object-fit: contain; border: 1px solid #d1d5db; }
     @media print {
       body { margin: 10mm; }
       .report-header-logo { width: 54px; height: 54px; }
@@ -2584,96 +2568,42 @@ function DashboardPage() {
     }
   `
 
-  const handlePrintParForStaff = (staffId: string, startDate?: string, endDate?: string) => {
-    if (!staffId) return
-
-    const rangeStart = startDate ?? reportStartDate
-    const rangeEnd = endDate ?? reportEndDate
-
-    const records = (groupedParByStaff.get(staffId) ?? []).filter((record) => {
-      return isDateWithinReportRange(record.issue_date, rangeStart, rangeEnd)
-    })
-    const receiver = parUsers.find((user) => user.id === staffId) ?? null
+  const buildParPrintSection = (staffId: string, pageBreakAfter = false) => {
+    const receiver = findStaffUserById(staffId)
     const issuedByName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
     const parNo = resolveStaffParNumber(receiver) || `PAR-${staffId.slice(0, 8)}`
     const departmentName =
-      receiver?.department_id != null
-        ? departments.find((dept) => dept.id === receiver.department_id)?.name ?? '—'
-        : '—'
+      departments.find((dept) => dept.id === resolveParStaffDepartmentId(staffId))?.name ?? '—'
 
-    const rows = records
-      .slice()
-      .sort((a, b) => a.par_id - b.par_id)
-      .map((record) => {
-        const item = inventoryItems.find((entry) => entry.item_id === record.item_id)
-        const lineTotalAmount =
-          record.cost_snapshot != null
-            ? calculateTotalCost(record.quantity_issued ?? null, record.cost_snapshot)
-            : item?.unit_cost != null
-              ? calculateTotalCost(record.quantity_issued ?? null, item.unit_cost)
-              : null
-
-        return {
-          quantity: String(record.quantity_issued ?? 0),
-          unit: record.unit_snapshot ?? item?.unit_of_measure ?? 'N/A',
-          description: record.description_snapshot ?? item?.item_name ?? '—',
-          propertyNo:
-            record.property_no_snapshot ??
-            item?.property_no ??
-            (record.item_id != null && item ? formatInventoryItemId(item) : '—'),
-          issuedDate: formatInventoryDate(record.issue_date),
-          dateAcquired: formatInventoryDate(record.date_acquired_snapshot ?? item?.date_acquired),
-          cost:
-            record.cost_snapshot != null
-              ? formatCurrency(record.cost_snapshot)
-              : item?.unit_cost != null
-                ? formatCurrency(item.unit_cost)
-                : 'N/A',
-          lineTotalAmount,
-        }
-      })
-
-    const totalCostAmount = rows.reduce((sum, row) => sum + (row.lineTotalAmount ?? 0), 0)
-    const totalCostDisplay = rows.some((row) => row.lineTotalAmount != null) ? formatCurrency(totalCostAmount) : 'N/A'
+    const rows = buildParViewRowsForStaff(staffId)
+    const hasCost = rows.some((row) => row.cost != null)
+    const totalCostAmount = rows.reduce(
+      (sum, row) => sum + (calculateTotalCost(row.quantity, row.cost) ?? 0),
+      0,
+    )
+    const totalCostDisplay = hasCost ? formatCurrency(totalCostAmount) : 'N/A'
 
     const rowsMarkup = rows
       .map(
         (row) =>
           `<tr>
-            <td>${escapeHtml(row.quantity)}</td>
+            <td>${escapeHtml(String(row.quantity))}</td>
             <td>${escapeHtml(row.unit)}</td>
             <td>${escapeHtml(row.description)}</td>
             <td>${escapeHtml(row.propertyNo)}</td>
-            <td>${escapeHtml(row.issuedDate)}</td>
-            <td>${escapeHtml(row.dateAcquired)}</td>
-            <td>${escapeHtml(row.cost)}</td>
+            <td>${escapeHtml(formatInventoryDate(row.dateAcquired))}</td>
+            <td>${escapeHtml(row.cost != null ? formatCurrency(row.cost) : 'N/A')}</td>
           </tr>`,
       )
       .join('')
-    const totalRowMarkup = rows.some((row) => row.lineTotalAmount != null)
+    const totalRowMarkup = hasCost
       ? `<tr>
-            <td colspan="6" style="text-align:right;"><strong>Total Cost</strong></td>
+            <td colspan="5" style="text-align:right;"><strong>Total Cost</strong></td>
             <td><strong>${escapeHtml(totalCostDisplay)}</strong></td>
           </tr>`
       : ''
 
-    const printDocument = `
-      <!doctype html>
-      <html>
-        <head>
-          <meta charset="utf-8" />
-          <title>${escapeHtml(parNo)}</title>
-          <style>
-            ${getPrintCommonStyles()}
-            .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; margin-bottom: 16px; }
-            .meta p { margin: 0; font-size: 14px; }
-            .signatures { grid-template-columns: 1fr 1fr; gap: 40px; }
-            .signatures > div { width: 220px; }
-            .sign-line { width: 100%; }
-            .sign-role { width: 100%; }
-          </style>
-        </head>
-        <body>
+    return `<section class="par-print-section${pageBreakAfter ? ' par-print-page-break' : ''}">
           ${buildPrintReportHeader('PROPERTY ACKNOWLEDGMENT RECEIPT')}
           <div class="meta">
             <p><strong>Employee Name:</strong> ${escapeHtml(receiver?.full_name ?? staffId)}</p>
@@ -2688,19 +2618,18 @@ function DashboardPage() {
                 <th>QTY</th>
                 <th>Unit</th>
                 <th>Description</th>
-                <th>Property No.</th>
-                <th>Issue Date</th>
+                <th>Property ID</th>
                 <th>Date Acquired</th>
                 <th>Unit Cost</th>
               </tr>
             </thead>
             <tbody>
-              ${rowsMarkup || '<tr><td colspan="7">No PAR items found.</td></tr>'}
+              ${rowsMarkup || '<tr><td colspan="6">No PAR items found.</td></tr>'}
               ${totalRowMarkup}
             </tbody>
           </table>
 
-          <div class="signatures">
+          <div class="signatures par-print-signatures">
             <div>
               <div class="sign-line"><span class="sign-name">${escapeHtml(receiver?.full_name ?? staffId)}</span></div>
               <div class="sign-role">Received by</div>
@@ -2710,238 +2639,57 @@ function DashboardPage() {
               <div class="sign-role">Issued by</div>
             </div>
           </div>
+        </section>`
+  }
+
+  const buildParPrintDocument = (staffIds: string[]) => {
+    const sections = staffIds
+      .map((staffId, index) => buildParPrintSection(staffId, index < staffIds.length - 1))
+      .join('')
+    const documentTitle =
+      staffIds.length === 1
+        ? resolveStaffParNumber(findStaffUserById(staffIds[0])) || `PAR-${staffIds[0].slice(0, 8)}`
+        : 'Property Acknowledgment Receipts'
+
+    return `
+      <!doctype html>
+      <html>
+        <head>
+          <meta charset="utf-8" />
+          <title>${escapeHtml(documentTitle)}</title>
+          <style>
+            ${getPrintCommonStyles()}
+            .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; margin-bottom: 16px; }
+            .meta p { margin: 0; font-size: 14px; }
+            .par-print-section { margin-bottom: 24px; }
+            .par-print-page-break { page-break-after: always; break-after: page; }
+            .par-print-signatures { grid-template-columns: 1fr 1fr; gap: 40px; }
+            .par-print-signatures > div { width: 220px; }
+            .par-print-signatures .sign-line { width: 100%; }
+            .par-print-signatures .sign-role { width: 100%; }
+          </style>
+        </head>
+        <body>
+          ${sections}
         </body>
       </html>
     `
-
-    printHtmlViaIframe(printDocument, setParError)
   }
 
-  const handlePrintPar = () => {
-    if (!activeParStaffId) return
-    handlePrintParForStaff(activeParStaffId)
+  const handlePrintParForStaff = (staffId: string) => {
+    if (!staffId) return
+    printHtmlViaIframe(buildParPrintDocument([staffId]), setParError)
   }
 
-  const handleCreateParRecord = async () => {
-    if (!parItemId || !parIssuedToId) {
-      setParError('Item and issued-to staff are required for PAR.')
+  const handlePrintParReport = () => {
+    if (selectedParReportStaffId === PAR_REPORT_SELECT_ALL) {
+      const staffIds = filteredReportParOptions.map((option) => option.staffId)
+      if (staffIds.length === 0) return
+      printHtmlViaIframe(buildParPrintDocument(staffIds), setParError)
       return
     }
 
-    const quantityValue = Number(parQuantityIssued)
-
-    if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
-      setParError('Quantity issued must be greater than zero.')
-      return
-    }
-
-    const selectedItem = inventoryItems.find((item) => item.item_id === Number(parItemId))
-    const selectedUser = parUsers.find((user) => user.id === parIssuedToId)
-
-    if (!selectedItem) {
-      setParError('Selected item was not found in inventory.')
-      return
-    }
-
-    if (!isLoanableParItem(selectedItem)) {
-      setParError('Only equipment, hand tools, power tools, and gadgets can be issued through PAR.')
-      return
-    }
-
-    if (selectedItem.quantity !== null && quantityValue > selectedItem.quantity) {
-      setParError('Quantity issued cannot be greater than the available quantity.')
-      return
-    }
-
-    const parsedCost = parCostInput.trim() ? Number(parCostInput) : null
-    const costSnapshot = Number.isFinite(parsedCost) ? parsedCost : null
-
-    setParSaving(true)
-    setParError(null)
-
-    const existingStaffItemRecord = parRecords.find(
-      (record) => record.issued_to_id === parIssuedToId && record.item_id === selectedItem.item_id,
-    )
-
-    if (existingStaffItemRecord) {
-      const nextQuantity = (existingStaffItemRecord.quantity_issued ?? 0) + quantityValue
-
-      const { data, error: updateError } = await supabase
-        .from('par_records')
-        .update(
-          normalizeParRecord({
-            quantity_issued: nextQuantity,
-            issue_date: parIssueDate || existingStaffItemRecord.issue_date || null,
-            contact_snapshot: selectedUser?.contact_info ?? existingStaffItemRecord.contact_snapshot ?? null,
-            unit_snapshot: parUnitInput || existingStaffItemRecord.unit_snapshot || null,
-            description_snapshot: parDescriptionInput || existingStaffItemRecord.description_snapshot || selectedItem.item_name,
-            property_no_snapshot: parPropertyNoInput || existingStaffItemRecord.property_no_snapshot || null,
-            date_acquired_snapshot: parDateAcquiredInput || existingStaffItemRecord.date_acquired_snapshot || null,
-            cost_snapshot: costSnapshot ?? existingStaffItemRecord.cost_snapshot ?? null,
-          }),
-        )
-        .eq('par_id', existingStaffItemRecord.par_id)
-        .select('*')
-
-      if (updateError) {
-        setParError(updateError.message)
-        setParSaving(false)
-        return
-      }
-
-      const updatedRecord = (data?.[0] ?? null) as ParRecordRow | null
-
-      if (updatedRecord) {
-        setParRecords((prev) => prev.map((record) => (record.par_id === updatedRecord.par_id ? updatedRecord : record)))
-      }
-    } else {
-      const { data, error: insertError } = await supabase
-        .from('par_records')
-        .insert([
-          normalizeParRecord({
-            item_id: selectedItem.item_id,
-            issued_to_id: parIssuedToId,
-            quantity_issued: quantityValue,
-            issue_date: parIssueDate || null,
-            contact_snapshot: selectedUser?.contact_info ?? null,
-            unit_snapshot: parUnitInput || selectedItem.unit_of_measure || null,
-            description_snapshot: parDescriptionInput || selectedItem.item_name,
-            property_no_snapshot:
-              parPropertyNoInput ||
-              selectedItem.property_no ||
-              formatInventoryItemId(selectedItem),
-            date_acquired_snapshot: parDateAcquiredInput || selectedItem.date_acquired,
-            cost_snapshot: costSnapshot ?? selectedItem.unit_cost ?? null,
-          }),
-        ])
-        .select('*')
-
-      if (insertError) {
-        setParError(insertError.message)
-        setParSaving(false)
-        return
-      }
-
-      const createdRecord = (data?.[0] ?? null) as ParRecordRow | null
-
-      if (createdRecord) {
-        setParRecords((prev) => [createdRecord, ...prev])
-      }
-    }
-
-    setParItemId('')
-    setParIssuedToId('')
-    setParQuantityIssued('1')
-    setParIssueDate(new Date().toISOString().slice(0, 10))
-    setParUnitInput('')
-    setParDescriptionInput('')
-    setParPropertyNoInput('')
-    setParDateAcquiredInput('')
-    setParCostInput('')
-    setParSaving(false)
-  }
-
-  const handleCreateParRecordsBatch = async (draftItems: ParDraftItem[], issuedToId: string, issueDate: string) => {
-    if (!issuedToId) {
-      setParError('Issued To is required.')
-      return
-    }
-    const validItems = draftItems.filter((row) => row.itemId !== '')
-    if (validItems.length === 0) {
-      setParError('At least one item must be selected.')
-      return
-    }
-
-    setParSaving(true)
-    setParError(null)
-
-    const selectedUser = parUsers.find((user) => user.id === issuedToId)
-
-    for (const row of validItems) {
-      const selectedItem = inventoryItems.find((item) => String(item.item_id) === row.itemId)
-      if (!selectedItem) continue
-
-      if (!isLoanableParItem(selectedItem)) {
-        setParError('Only equipment, hand tools, power tools, and gadgets can be issued through PAR.')
-        setParSaving(false)
-        return
-      }
-
-      const quantityValue = Number(row.quantity)
-      if (!Number.isFinite(quantityValue) || quantityValue <= 0) continue
-
-      const existingRecord = parRecords.find(
-        (record) => record.issued_to_id === issuedToId && record.item_id === selectedItem.item_id,
-      )
-
-      if (existingRecord) {
-        const nextQuantity = (existingRecord.quantity_issued ?? 0) + quantityValue
-        const { data, error: updateError } = await supabase
-          .from('par_records')
-          .update(
-            normalizeParRecord({
-              quantity_issued: nextQuantity,
-              issue_date: issueDate || existingRecord.issue_date || null,
-              contact_snapshot: selectedUser?.contact_info ?? existingRecord.contact_snapshot ?? null,
-              unit_snapshot: row.unit || existingRecord.unit_snapshot || null,
-              description_snapshot: row.description || existingRecord.description_snapshot || selectedItem.item_name,
-              property_no_snapshot:
-                row.propertyId.trim() ||
-                existingRecord.property_no_snapshot ||
-                selectedItem.property_no ||
-                formatInventoryItemId(selectedItem),
-              cost_snapshot: row.costSnapshot ?? existingRecord.cost_snapshot ?? null,
-            }),
-          )
-          .eq('par_id', existingRecord.par_id)
-          .select('*')
-
-        if (updateError) {
-          setParError(updateError.message)
-          setParSaving(false)
-          return
-        }
-
-        const updatedRecord = (data?.[0] ?? null) as ParRecordRow | null
-        if (updatedRecord) {
-          setParRecords((prev) => prev.map((r) => (r.par_id === updatedRecord.par_id ? updatedRecord : r)))
-        }
-      } else {
-        const { data, error: insertError } = await supabase
-          .from('par_records')
-          .insert([
-            normalizeParRecord({
-              item_id: selectedItem.item_id,
-              issued_to_id: issuedToId,
-              quantity_issued: quantityValue,
-              issue_date: issueDate || null,
-              contact_snapshot: selectedUser?.contact_info ?? null,
-              unit_snapshot: row.unit || selectedItem.unit_of_measure || null,
-              description_snapshot: row.description || selectedItem.item_name,
-              property_no_snapshot:
-                row.propertyId.trim() ||
-                selectedItem.property_no ||
-                formatInventoryItemId(selectedItem),
-              date_acquired_snapshot: selectedItem.date_acquired,
-              cost_snapshot: row.costSnapshot ?? selectedItem.unit_cost ?? null,
-            }),
-          ])
-          .select('*')
-
-        if (insertError) {
-          setParError(insertError.message)
-          setParSaving(false)
-          return
-        }
-
-        const createdRecord = (data?.[0] ?? null) as ParRecordRow | null
-        if (createdRecord) {
-          setParRecords((prev) => [createdRecord, ...prev])
-        }
-      }
-    }
-
-    setParSaving(false)
+    handlePrintParForStaff(selectedParReportStaffId)
   }
 
   // [HANDLERS] Vehicle actions
@@ -4494,6 +4242,7 @@ function DashboardPage() {
 
     setInventoryLoading(false)
     setAddingItem(false)
+    setRealtimeTick((tick) => tick + 1)
   }
 
   const handleQrButtonClick = async (item: InventoryRow) => {
@@ -4524,6 +4273,62 @@ function DashboardPage() {
     setInventoryItems((prev) => prev.map((row) => (row.item_id === updatedItem.item_id ? updatedItem : row)))
     setViewQrItem(updatedItem)
     setQrGeneratingId(null)
+  }
+
+  const handlePrintInventoryQrPdf = async (itemIds: number[]): Promise<boolean> => {
+    if (itemIds.length === 0) {
+      setInventoryError('Select at least one item to print QR codes.')
+      return false
+    }
+
+    setQrPdfGenerating(true)
+    setInventoryError(null)
+
+    try {
+      const itemsById = new Map(inventoryItems.map((item) => [item.item_id, item]))
+      const pdfItems: Array<{ item_name: string; qr_code: string }> = []
+
+      for (const itemId of itemIds) {
+        let item = itemsById.get(itemId)
+        if (!item) continue
+
+        let qrCode = item.qr_code
+        if (!qrCode) {
+          const qrValue = item.uid ?? formatInventoryItemId(item)
+          const { data, error: qrError } = await supabase
+            .from('inventory')
+            .update({ qr_code: qrValue })
+            .eq('item_id', item.item_id)
+            .select('*')
+            .single()
+
+          if (qrError) throw qrError
+
+          item = (data ?? item) as InventoryRow
+          qrCode = item.qr_code ?? qrValue
+          setInventoryItems((prev) => prev.map((row) => (row.item_id === item.item_id ? item : row)))
+        }
+
+        pdfItems.push({
+          item_name: item.item_name,
+          qr_code: qrCode,
+        })
+      }
+
+      if (pdfItems.length === 0) {
+        setInventoryError('No valid items selected for QR printing.')
+        return false
+      }
+
+      pdfItems.sort((a, b) => a.item_name.localeCompare(b.item_name))
+      await downloadInventoryQrPdf(pdfItems)
+      return true
+    } catch (err) {
+      setInventoryError(err instanceof Error ? err.message : 'Failed to generate QR PDF.')
+      return false
+    } finally {
+      setQrPdfGenerating(false)
+    }
   }
 
   const closeStockpileReleasePage = () => {
@@ -4742,20 +4547,16 @@ function DashboardPage() {
       return
     }
 
-    const [{ data: reloadedStockpiles, error: reloadStockpileError }, { data: reloadedLogs, error: reloadLogsError }] =
+    const [{ data: reloadedInventory, error: reloadInventoryError }, { data: reloadedLogs, error: reloadLogsError }] =
       await Promise.all([
-        supabase
-          .from('inventory')
-          .select('*')
-          .or('inventory_kind.eq.stockpile,item_type.ilike.stockpile')
-          .order('item_id', { ascending: false }),
+        supabase.from('inventory').select('*').order('item_id', { ascending: false }),
         supabase.from('distribution_logs').select('*').order('log_id', { ascending: false }),
       ])
 
-    if (reloadStockpileError) {
-      setStockpileError(reloadStockpileError.message)
+    if (reloadInventoryError) {
+      setStockpileError(reloadInventoryError.message)
     } else {
-      setStockpileItems((reloadedStockpiles ?? []).map(mapInventoryItemToStockpileRow))
+      setInventoryItems(reloadedInventory ?? [])
     }
 
     if (reloadLogsError) {
@@ -4764,6 +4565,7 @@ function DashboardPage() {
       setStockpileReleaseLogs(reloadedLogs ?? [])
     }
 
+    setRealtimeTick((tick) => tick + 1)
     setReleasingStockpile(false)
     setStockpileMode('logs')
     setStockpileReleaseItems([{ stockpileId: '', quantity: '' }])
@@ -4920,16 +4722,15 @@ function DashboardPage() {
         return
       }
 
-      const { data: reloadedStockpiles, error: reloadStockpileError } = await supabase
+      const { data: reloadedInventory, error: reloadInventoryError } = await supabase
         .from('inventory')
         .select('*')
-        .or('inventory_kind.eq.stockpile,item_type.ilike.stockpile')
         .order('item_id', { ascending: false })
 
-      if (reloadStockpileError) {
-        setStockpileError(reloadStockpileError.message)
+      if (reloadInventoryError) {
+        setStockpileError(reloadInventoryError.message)
       } else {
-        setStockpileItems((reloadedStockpiles ?? []).map(mapInventoryItemToStockpileRow))
+        setInventoryItems(reloadedInventory ?? [])
       }
 
       setRealtimeTick((tick) => tick + 1)
@@ -4950,7 +4751,7 @@ function DashboardPage() {
     const rangeEnd = endDate ?? reportEndDate
     const reportSignerName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
 
-    const rows = parsedStockpileReleaseLogs
+    const filteredReleaseLogs = parsedStockpileReleaseLogs
       .filter((entry) => {
         if (isArchivedRow(entry.log)) {
           return false
@@ -4959,14 +4760,15 @@ function DashboardPage() {
       })
       .slice()
       .sort((a, b) => b.log.log_id - a.log.log_id)
-      .map((entry) => ({
-        date: formatInventoryDate(entry.log.operation_date),
-        item: entry.itemName || '—',
-        quantity: String(entry.quantity),
-        unit: entry.unit || '—',
-        issuedTo: entry.log.recipient_info ?? '—',
-        reason: entry.log.calamity_name ?? '—',
-      }))
+
+    const rows = filteredReleaseLogs.map((entry) => ({
+      date: formatInventoryDate(entry.log.operation_date),
+      item: entry.itemName || '—',
+      quantity: String(entry.quantity),
+      unit: entry.unit || '—',
+      issuedTo: entry.log.recipient_info ?? '—',
+      reason: entry.log.calamity_name ?? '—',
+    }))
 
     const rowsMarkup = rows
       .map(
@@ -4980,6 +4782,58 @@ function DashboardPage() {
             <td>${escapeHtml(row.reason)}</td>
           </tr>`,
       )
+      .join('')
+
+    type ReleaseAttachmentPrintGroup = {
+      logId: number
+      date: string
+      issuedTo: string
+      reason: string
+      items: string[]
+      url: string
+    }
+
+    const attachmentGroups = new Map<string, ReleaseAttachmentPrintGroup>()
+    const logAttachmentCounters = new Map<number, number>()
+
+    filteredReleaseLogs.forEach((entry) => {
+      entry.attachmentUrls.forEach((url) => {
+        const groupKey = `${entry.log.log_id}::${url}`
+        const itemLabel = `${entry.itemName || '—'} (${entry.quantity} ${entry.unit || '—'})`
+        const existingGroup = attachmentGroups.get(groupKey)
+
+        if (existingGroup) {
+          if (!existingGroup.items.includes(itemLabel)) {
+            existingGroup.items.push(itemLabel)
+          }
+          return
+        }
+
+        attachmentGroups.set(groupKey, {
+          logId: entry.log.log_id,
+          date: formatInventoryDate(entry.log.operation_date),
+          issuedTo: entry.log.recipient_info ?? '—',
+          reason: entry.log.calamity_name ?? '—',
+          items: [itemLabel],
+          url,
+        })
+      })
+    })
+
+    const attachmentsMarkup = Array.from(attachmentGroups.values())
+      .sort((a, b) => b.logId - a.logId || a.url.localeCompare(b.url))
+      .map((group) => {
+        const photoNumber = (logAttachmentCounters.get(group.logId) ?? 0) + 1
+        logAttachmentCounters.set(group.logId, photoNumber)
+
+        const itemLabels = group.items.join('; ')
+        const label = `Date: ${group.date} | Issued To: ${group.issuedTo} | Reason: ${group.reason} | Item(s): ${itemLabels} | Photo ${photoNumber}`
+
+        return `<figure class="print-attachment">
+          <p class="print-attachment-label">${escapeHtml(label)}</p>
+          <img src="${escapeHtml(group.url)}" alt="${escapeHtml(label)}" />
+        </figure>`
+      })
       .join('')
 
     const printDocument = `
@@ -5013,6 +4867,15 @@ function DashboardPage() {
             </tbody>
           </table>
 
+          ${
+            attachmentsMarkup
+              ? `<section class="print-attachments" aria-label="Release log attachments">
+            <h2>Attachments</h2>
+            ${attachmentsMarkup}
+          </section>`
+              : ''
+          }
+
           <div class="signatures">
             <div>
               <div class="sign-line"><span class="sign-name">${escapeHtml(reportSignerName)}</span></div>
@@ -5030,6 +4893,10 @@ function DashboardPage() {
     const rangeStart = startDate ?? reportStartDate
     const rangeEnd = endDate ?? reportEndDate
     const reportSignerName = currentAdminName.trim() || settingsNameInput.trim() || 'Super Admin'
+    const itemTypeLabel = getReportInventoryTypeFilterLabel(
+      selectedInventoryReportTypeFilter,
+      reportInventoryTypeOptionGroups,
+    )
 
     const inventoryRows = inventoryItems
       .filter((item) => {
@@ -5037,7 +4904,11 @@ function DashboardPage() {
           return false
         }
 
-        return isDateWithinReportRange(item.date_acquired ?? item.created_at, rangeStart, rangeEnd)
+        if (!isDateWithinReportRange(item.date_acquired ?? item.created_at, rangeStart, rangeEnd)) {
+          return false
+        }
+
+        return matchesReportInventoryTypeFilter(item, selectedInventoryReportTypeFilter)
       })
       .slice()
       .sort((a, b) => a.item_id - b.item_id)
@@ -5094,6 +4965,7 @@ function DashboardPage() {
           <p>Printed on ${escapeHtml(new Date().toLocaleString('en-PH'))}</p>
           ${period ? `<p><strong>Period:</strong> ${escapeHtml(getReportPeriodLabel(period))}</p>` : ''}
           <p><strong>Date Range:</strong> ${escapeHtml(getReportDateRangeLabel(rangeStart, rangeEnd))}</p>
+          <p><strong>Item Type:</strong> ${escapeHtml(itemTypeLabel)}</p>
 
           <div class="section">
             <h2>Inventory Items</h2>
@@ -5755,13 +5627,21 @@ function DashboardPage() {
     })
   }).sort((a, b) => b.log.log_id - a.log.log_id)
 
+  const reportInventoryTypeOptionGroups: ReportInventoryTypeOptionGroup[] = buildReportInventoryTypeOptionGroups(
+    inventoryItems.map((item) => item.item_type),
+  )
+
   const reportInventoryCount =
     inventoryItems.filter((item) => {
       if (isArchivedRow(item) || getInventoryStatus(item) === 'ARCHIVED') {
         return false
       }
 
-      return isDateWithinReportRange(item.date_acquired ?? item.created_at, reportStartDate, reportEndDate)
+      if (!isDateWithinReportRange(item.date_acquired ?? item.created_at, reportStartDate, reportEndDate)) {
+        return false
+      }
+
+      return matchesReportInventoryTypeFilter(item, selectedInventoryReportTypeFilter)
     }).length
 
   const reportWmrCount = wmrReports.filter((report) => {
@@ -5840,9 +5720,6 @@ function DashboardPage() {
     return editItemQuantityValue != null && editItemQuantityValue <= 10 ? 'LOW' : 'FULL STOCK'
   })()
 
-  const parQuantityValue = parseNumericInput(parQuantityIssued)
-  const parUnitCostValue = parseNumericInput(parCostInput)
-  const parLineTotal = calculateTotalCost(parQuantityValue, parUnitCostValue)
 
   // [RENDER] Main layout and section tabs
   return (
@@ -5874,7 +5751,7 @@ function DashboardPage() {
                 </header>
                 <div className="metric-group-grid metric-group-grid-3">
                   <article
-                    className="metric-card metric-card-clickable"
+                    className="metric-card metric-card-tone-blue metric-card-clickable"
                     role="button"
                     tabIndex={0}
                     onClick={() => setDashboardMetricDrilldown('total')}
@@ -5968,35 +5845,6 @@ function DashboardPage() {
                 </header>
                 <div className="metric-group-grid metric-group-grid-3">
                   <article
-                    className="metric-card metric-card-low-stock metric-card-clickable"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setDashboardMetricDrilldown('stockpileLow')}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        setDashboardMetricDrilldown('stockpileLow')
-                      }
-                    }}
-                  >
-                    <div className="metric-text">
-                      <div className="metric-label">Low Stock</div>
-                      <div className="metric-value">{formatValue(stockpileStatusCountMap.get('Low Stock') ?? 0)}</div>
-                    </div>
-                    <div className="metric-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                        <path
-                          d="M12 4v10m0 0-3.2-3.2M12 14l3.2-3.2M5 20h14"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.4"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        />
-                      </svg>
-                    </div>
-                  </article>
-                  <article
                     className="metric-card metric-card-full-stock metric-card-clickable"
                     role="button"
                     tabIndex={0}
@@ -6019,6 +5867,35 @@ function DashboardPage() {
                           fill="none"
                           stroke="currentColor"
                           strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                      </svg>
+                    </div>
+                  </article>
+                  <article
+                    className="metric-card metric-card-low-stock metric-card-clickable"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setDashboardMetricDrilldown('stockpileLow')}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        setDashboardMetricDrilldown('stockpileLow')
+                      }
+                    }}
+                  >
+                    <div className="metric-text">
+                      <div className="metric-label">Low Stock</div>
+                      <div className="metric-value">{formatValue(stockpileStatusCountMap.get('Low Stock') ?? 0)}</div>
+                    </div>
+                    <div className="metric-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path
+                          d="M12 4v10m0 0-3.2-3.2M12 14l3.2-3.2M5 20h14"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.4"
                           strokeLinecap="round"
                           strokeLinejoin="round"
                         />
@@ -6065,7 +5942,7 @@ function DashboardPage() {
                 </header>
                 <div className="metric-group-grid metric-group-grid-3">
                   <article
-                    className="metric-card metric-card-clickable"
+                    className="metric-card metric-card-tone-indigo metric-card-clickable"
                     role="button"
                     tabIndex={0}
                     onClick={() => setDashboardMetricDrilldown('vehicleTotal')}
@@ -6155,7 +6032,7 @@ function DashboardPage() {
                 </header>
                 <div className="metric-group-grid metric-group-grid-3">
                   <article
-                    className="metric-card metric-card-clickable"
+                    className="metric-card metric-card-tone-teal metric-card-clickable"
                     role="button"
                     tabIndex={0}
                     onClick={() => setDashboardMetricDrilldown('borrowedActive')}
@@ -6349,9 +6226,9 @@ function DashboardPage() {
                               </td>
                               <td>{entry.borrower_name}</td>
                               <td>{formatDisplayDateTime(entry.date_borrowed)}</td>
-                              <td>{formatDisplayDate(entry.return_date)}</td>
+                              <td>{formatDisplayDateTime(entry.return_date)}</td>
                               <td>
-                                <span className={`borrowed-items-dashboard-status borrowed-items-dashboard-status-${borrowedStatus.toLowerCase()}`}>
+                                <span className={`badge ${getStatusBadgeClass(borrowedStatus)}`}>
                                   {borrowedStatus}
                                 </span>
                               </td>
@@ -6396,13 +6273,13 @@ function DashboardPage() {
             inventoryLoading={inventoryLoading}
             filteredInventoryItems={filteredInventoryItems}
             inventoryItems={inventoryItems}
-            getItemStatus={getInventoryStatus}
+            getItemStatus={getInventoryDisplayStatus}
             getItemPhotoUrls={getItemPhotoUrls}
             formatInventoryDate={formatInventoryDate}
             officeSuppliesAssignee={officeSuppliesAssignee}
             officeSuppliesLocationLabel={officeSuppliesLocationLabel}
             openEditItem={openEditItem}
-            openViewItem={setViewInventoryItem}
+            openViewItem={handleInventoryRowClick}
             setViewImageItem={setViewImageItem}
             setViewImageIndex={setViewImageIndex}
             handleQrButtonClick={handleQrButtonClick}
@@ -6455,6 +6332,8 @@ function DashboardPage() {
             acquisitionModeOptions={acquisitionModeOptions}
             newItemTotalCost={newItemTotalCost}
             onExportCsv={handleExportInventoryCsv}
+            onPrintQrPdf={handlePrintInventoryQrPdf}
+            qrPdfGenerating={qrPdfGenerating}
             existingPropertyNumbers={inventoryItems}
           />
         )}
@@ -6697,7 +6576,7 @@ function DashboardPage() {
                         <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived inventory items.</p>
                       ) : (
                         <div style={{ overflowX: 'auto' }}>
-                          <table className="inventory-table">
+                          <table className="inventory-table inventory-list-table">
                             <thead>
                               <tr>
                                 <th scope="col">ID</th>
@@ -6716,7 +6595,7 @@ function DashboardPage() {
                                   <td>{item.item_type}</td>
                                   <td>{item.quantity ?? '—'}</td>
                                   <td>{formatDisplayDate(item.date_acquired)}</td>
-                                  <td><span className="badge">Archived</span></td>
+                                  <td><span className={`badge ${getStatusBadgeClass('archived')}`}>Archived</span></td>
                                 </tr>
                               ))}
                             </tbody>
@@ -6737,7 +6616,7 @@ function DashboardPage() {
                         <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived WMR reports.</p>
                       ) : (
                         <div style={{ overflowX: 'auto' }}>
-                          <table className="inventory-table">
+                          <table className="inventory-table inventory-list-table">
                             <thead>
                               <tr>
                                 <th scope="col">Report ID</th>
@@ -6764,7 +6643,7 @@ function DashboardPage() {
                                     <td>{report.item_id == null ? 'Vehicle' : mappedItem?.item_type ?? 'Inventory Item'}</td>
                                     <td>{report.location ?? '—'}</td>
                                     <td>{formatDisplayDate(report.date_reported)}</td>
-                                    <td><span className="badge">Archived</span></td>
+                                    <td><span className={`badge ${getStatusBadgeClass('archived')}`}>Archived</span></td>
                                   </tr>
                                 )
                               })}
@@ -6786,7 +6665,7 @@ function DashboardPage() {
                         <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived PAR records.</p>
                       ) : (
                         <div style={{ overflowX: 'auto' }}>
-                          <table className="inventory-table">
+                          <table className="inventory-table inventory-list-table">
                             <thead>
                               <tr>
                                 <th scope="col">PAR ID</th>
@@ -6809,7 +6688,7 @@ function DashboardPage() {
                                     <td>{record.description_snapshot ?? mappedItem?.item_name ?? '—'}</td>
                                     <td>{record.quantity_issued ?? 0}</td>
                                     <td>{formatDisplayDate(record.issue_date)}</td>
-                                    <td><span className="badge">Archived</span></td>
+                                    <td><span className={`badge ${getStatusBadgeClass('archived')}`}>Archived</span></td>
                                   </tr>
                                 )
                               })}
@@ -6831,7 +6710,7 @@ function DashboardPage() {
                         <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived vehicles.</p>
                       ) : (
                         <div style={{ overflowX: 'auto' }}>
-                          <table className="inventory-table">
+                          <table className="inventory-table inventory-list-table">
                             <thead>
                               <tr>
                                 <th scope="col">Vehicle ID</th>
@@ -6850,7 +6729,7 @@ function DashboardPage() {
                                   <td>{vehicle.year_model ?? '—'}</td>
                                   <td>{vehicle.cr_number ?? '—'}</td>
                                   <td>{vehicle.engine_number ?? '—'}</td>
-                                  <td><span className="badge">Archived</span></td>
+                                  <td><span className={`badge ${getStatusBadgeClass('archived')}`}>Archived</span></td>
                                 </tr>
                               ))}
                             </tbody>
@@ -6871,7 +6750,7 @@ function DashboardPage() {
                         <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived staff records.</p>
                       ) : (
                         <div style={{ overflowX: 'auto' }}>
-                          <table className="inventory-table">
+                          <table className="inventory-table inventory-list-table">
                             <thead>
                               <tr>
                                 <th scope="col">Staff ID</th>
@@ -6892,7 +6771,7 @@ function DashboardPage() {
                                   <td>{staff.email}</td>
                                   <td>{departments.find((dept) => dept.id === staff.department_id)?.name ?? 'Unassigned'}</td>
                                   <td>{staff.position ?? '—'}</td>
-                                  <td><span className="badge">Archived</span></td>
+                                  <td><span className={`badge ${getStatusBadgeClass('archived')}`}>Archived</span></td>
                                 </tr>
                               ))}
                             </tbody>
@@ -6913,7 +6792,7 @@ function DashboardPage() {
                         <p style={{ margin: 0, color: '#6b7280', fontSize: 13, padding: '0 16px 16px' }}>No archived departments.</p>
                       ) : (
                         <div style={{ overflowX: 'auto' }}>
-                          <table className="inventory-table">
+                          <table className="inventory-table inventory-list-table">
                             <thead>
                               <tr>
                                 <th scope="col">Department Code</th>
@@ -6932,7 +6811,7 @@ function DashboardPage() {
                                   <td>{formatValue(dept.totalItems)}</td>
                                   <td>{formatValue(dept.serviceable)}</td>
                                   <td>{formatValue(dept.unserviceable)}</td>
-                                  <td><span className="badge">Archived</span></td>
+                                  <td><span className={`badge ${getStatusBadgeClass('archived')}`}>Archived</span></td>
                                 </tr>
                               ))}
                             </tbody>
@@ -7230,7 +7109,7 @@ function DashboardPage() {
                       ))}
                     </select>
                   </div>
-                  <table className="inventory-table staff-table">
+                  <table className="inventory-table inventory-list-table staff-table">
                     <thead>
                       <tr>
                         <th scope="col">Staff ID</th>
@@ -7440,7 +7319,7 @@ function DashboardPage() {
                   <div className="inventory-table-title">
                     <h4 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>Department Information</h4>
                   </div>
-                  <table className="inventory-table">
+                  <table className="inventory-table inventory-list-table">
                     <thead>
                       <tr>
                         <th scope="col">Department Code</th>
@@ -7604,7 +7483,7 @@ function DashboardPage() {
             stockpileMode={stockpileMode}
             setStockpileMode={setStockpileMode}
             openReleasePage={openStockpileReleasePage}
-            stockpileLoading={stockpileLoading || stockpileReleaseLoading}
+            stockpileLoading={inventoryLoading || stockpileReleaseLoading}
             filteredStockpileItems={filteredStockpileItems}
             filteredExpiredStockpileItems={filteredExpiredStockpileItems}
             stockpileReleaseLogs={parsedStockpileReleaseLogs}
@@ -7748,34 +7627,6 @@ function DashboardPage() {
         {activeSection === 'par' && (
           <ParSection
             parError={parError}
-            parMode={parMode}
-            setParMode={setParMode}
-            parItemId={parItemId}
-            setParItemId={setParItemId}
-            inventoryItems={loanableParItems}
-            parIssuedToId={parIssuedToId}
-            setParIssuedToId={setParIssuedToId}
-            parUsers={parUsers}
-            parQuantityIssued={parQuantityIssued}
-            setParQuantityIssued={setParQuantityIssued}
-            parIssueDate={parIssueDate}
-            setParIssueDate={setParIssueDate}
-            parUnitInput={parUnitInput}
-            setParUnitInput={setParUnitInput}
-            unitOfMeasureOptions={unitOfMeasureOptions}
-            parPropertyNoInput={parPropertyNoInput}
-            setParPropertyNoInput={setParPropertyNoInput}
-            parDateAcquiredInput={parDateAcquiredInput}
-            setParDateAcquiredInput={setParDateAcquiredInput}
-            parCostInput={parCostInput}
-            setParCostInput={setParCostInput}
-            parLineTotal={parLineTotal}
-            formatCurrency={formatCurrency}
-            parDescriptionInput={parDescriptionInput}
-            setParDescriptionInput={setParDescriptionInput}
-            handleCreateParRecord={handleCreateParRecord}
-            handleCreateParRecordsBatch={handleCreateParRecordsBatch}
-            parSaving={parSaving}
             parSearchQuery={parSearchQuery}
             setParSearchQuery={setParSearchQuery}
             parLoading={parLoading}
@@ -7795,7 +7646,11 @@ function DashboardPage() {
         )}
 
         {activeSection === 'borrowed-items' && (
-          <BorrowedItemsSection />
+          <BorrowedItemsSection
+            focusItemId={borrowedItemsFocus?.itemId ?? null}
+            focusBorrowedId={borrowedItemsFocus?.borrowedId ?? null}
+            onFocusHandled={() => setBorrowedItemsFocus(null)}
+          />
         )}
 
         {activeSection === 'reports' && (
@@ -7808,16 +7663,16 @@ function DashboardPage() {
             reportEndDate={reportEndDate}
             setReportEndDate={setReportEndDate}
             disablePrintActions={reportDateRangeInvalid}
-            parOptions={reportParOptions}
+            parDepartmentOptions={reportParDepartmentOptions}
+            selectedParDepartmentId={selectedParReportDepartmentId}
+            setSelectedParDepartmentId={setSelectedParReportDepartmentId}
+            parOptions={filteredReportParOptions}
             selectedParStaffId={selectedParReportStaffId}
             setSelectedParStaffId={setSelectedParReportStaffId}
-            onPrintPar={() =>
-              handlePrintParForStaff(
-                selectedParReportStaffId,
-                reportStartDate,
-                reportEndDate,
-              )
-            }
+            onPrintPar={handlePrintParReport}
+            inventoryTypeOptionGroups={reportInventoryTypeOptionGroups}
+            selectedInventoryTypeFilter={selectedInventoryReportTypeFilter}
+            setSelectedInventoryTypeFilter={setSelectedInventoryReportTypeFilter}
             onPrintInventoryReport={() =>
               handlePrintInventoryReport(selectedReportPeriod, reportStartDate, reportEndDate)
             }
@@ -7828,7 +7683,7 @@ function DashboardPage() {
             onPrintStockpileReleaseLogs={() =>
               handlePrintStockpileReleaseLogs(selectedReportPeriod, reportStartDate, reportEndDate)
             }
-            parReportCount={reportParOptions.length}
+            parReportCount={filteredReportParOptions.length}
             inventoryReportCount={reportInventoryCount}
             wmrReportCount={reportWmrCount}
             repairLogCount={reportVehicleRepairCount}
@@ -7899,41 +7754,6 @@ function DashboardPage() {
             </div>
 
             <div className="wmr-modal-actions">
-              <button
-                type="button"
-                className="wmr-modal-button-save"
-                onClick={handlePrintPar}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
-              >
-                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true" focusable="false">
-                  <path
-                    d="M7 9V4h10v5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                  <rect
-                    x="5"
-                    y="10"
-                    width="14"
-                    height="7"
-                    rx="1.5"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.6"
-                  />
-                  <path
-                    d="M8 14h8M8 17h8"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.4"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                <span>Print</span>
-              </button>
               <button
                 type="button"
                 className="wmr-modal-button-secondary"
@@ -8723,7 +8543,7 @@ function DashboardPage() {
                               <td>{itemName}</td>
                               <td>{entry.borrower_name}</td>
                               <td>{formatDisplayDateTime(entry.date_borrowed)}</td>
-                              <td>{formatDisplayDate(entry.return_date)}</td>
+                              <td>{formatDisplayDateTime(entry.return_date)}</td>
                               <td>{borrowedStatus}</td>
                             </tr>
                           )
@@ -8832,10 +8652,10 @@ function DashboardPage() {
               {inventoryImportError && <p className="dashboard-error">{inventoryImportError}</p>}
 
               <div className="dashboard-drilldown-table-wrap">
-                <table className="inventory-table">
+                <table className="inventory-table inventory-list-table">
                   <thead>
                     <tr>
-                      <th scope="col">#</th>
+                      <th scope="col" className="inventory-rowno-column">#</th>
                       {inventoryImportHeaders.map((header) => (
                         <th key={`inventory-import-header-${header}`} scope="col">{header}</th>
                       ))}
@@ -9352,21 +9172,7 @@ function DashboardPage() {
                 <div className="inventory-field">
                   <label style={{ fontSize: 12, color: '#6b7280' }}>Status</label>
                   <div>
-                    <span
-                      className={`badge ${
-                        wmrStatusInput === 'Pending'
-                          ? 'badge-status-pending'
-                          : wmrStatusInput === 'For Disposal'
-                            ? 'badge-status-disposal'
-                            : wmrStatusInput === 'Disposed'
-                              ? 'badge-status-disposed'
-                            : wmrStatusInput === 'For Repair'
-                              ? 'badge-status-repair'
-                              : wmrStatusInput === 'Repaired'
-                                ? 'badge-status-repaired'
-                                : ''
-                      }`}
-                    >
+                    <span className={`badge ${getStatusBadgeClass(wmrStatusInput)}`}>
                       {wmrStatusInput}
                     </span>
                   </div>

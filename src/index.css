@@ -1,24 +1,99 @@
 @import url('https://fonts.googleapis.com/css2?family=Arimo:wght@400;500&family=Inter:wght@400&family=Montserrat:wght@700&family=Poppins:wght@400;500;700&display=swap');
 
 :root {
-  --text: #6b6375;
-  --text-h: #08060d;
-  --bg: #f4f4f4;
-  --border: #e5e4e7;
+  /* Brand */
+  --kaban-green: #059669;
+  --kaban-green-dark: #047857;
+  --kaban-green-light: #16a34a;
+  --kaban-green-soft: rgba(5, 150, 105, 0.12);
+  --kaban-green-focus: rgba(5, 150, 105, 0.22);
+
+  /* Surfaces */
+  --kaban-bg: #f4f4f4;
+  --kaban-sidebar-bg: #fffef2;
+  --kaban-surface: #ffffff;
+  --kaban-toolbar-bg: #eef2f6;
+  --kaban-table-head-bg: #f8fafc;
+  --kaban-table-stripe: #f9fafb;
+
+  /* Borders */
+  --kaban-border: #e5e7eb;
+  --kaban-border-strong: #d1d5db;
+  --kaban-border-sidebar: #e4e4d6;
+
+  /* Text */
+  --kaban-text: #111827;
+  --kaban-text-secondary: #374151;
+  --kaban-text-muted: #6b7280;
+  --kaban-text-subtle: #64748b;
+
+  /* Semantic */
+  --kaban-danger: #b91c1c;
+  --kaban-danger-bg: #fef2f2;
+  --kaban-danger-border: #fecaca;
+
+  /* Typography scale */
+  --kaban-text-xs: 12px;
+  --kaban-text-sm: 13px;
+  --kaban-text-md: 14px;
+  --kaban-text-lg: 16px;
+  --kaban-text-xl: 22px;
+
+  /* Spacing */
+  --kaban-space-sm: 10px;
+  --kaban-space-md: 14px;
+  --kaban-space-lg: 20px;
+
+  /* Shape */
+  --kaban-radius-sm: 8px;
+  --kaban-radius-md: 10px;
+  --kaban-radius-lg: 14px;
+
+  /* Effects */
+  --kaban-shadow-card: 0 2px 8px rgba(15, 23, 42, 0.06);
+  --kaban-shadow-float: 0 10px 30px rgba(15, 23, 42, 0.12);
+  --kaban-shadow-modal: 0 16px 40px rgba(15, 23, 42, 0.18);
+  --kaban-focus-ring: 0 0 0 3px var(--kaban-green-focus);
+  --kaban-backdrop: rgba(15, 23, 42, 0.4);
+
+  /* Dashboard metric tones (soft, eye-friendly) */
+  --metric-blue-from: #5b8ec9;
+  --metric-blue-to: #4678b3;
+  --metric-green-from: #3da876;
+  --metric-green-to: #2d8f62;
+  --metric-amber-from: #d4a24a;
+  --metric-amber-to: #b8862f;
+  --metric-rose-from: #dc8080;
+  --metric-rose-to: #c05656;
+  --metric-teal-from: #3da8a6;
+  --metric-teal-to: #2f8583;
+  --metric-indigo-from: #7c83db;
+  --metric-indigo-to: #6366c7;
+
+  /* Z-index scale */
+  --kaban-z-pagination: 100;
+  --kaban-z-dropdown: 200;
+  --kaban-z-modal: 1500;
+  --kaban-z-toast: 3000;
+
+  /* Legacy aliases (Vite template + older rules) */
+  --text: var(--kaban-text-muted);
+  --text-h: var(--kaban-text);
+  --bg: var(--kaban-bg);
+  --border: var(--kaban-border);
   --code-bg: #f4f3ec;
-  --accent: #aa3bff;
-  --accent-bg: rgba(170, 59, 255, 0.1);
-  --accent-border: rgba(170, 59, 255, 0.5);
+  --accent: var(--kaban-green);
+  --accent-bg: var(--kaban-green-soft);
+  --accent-border: rgba(5, 150, 105, 0.35);
   --social-bg: rgba(244, 243, 236, 0.5);
-  --shadow:
-    rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
+  --shadow: var(--kaban-shadow-float);
 
   --sans: 'Poppins', system-ui, 'Segoe UI', Roboto, sans-serif;
   --heading: 'Poppins', system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
 
-  font: 18px/145% var(--sans);
-  letter-spacing: 0.18px;
+  font: 16px/145% var(--sans);
+  letter-spacing: 0.01em;
   color-scheme: light;
   color: var(--text);
   background: var(--bg);
@@ -28,7 +103,7 @@
   -moz-osx-font-smoothing: grayscale;
 
   @media (max-width: 1024px) {
-    font-size: 16px;
+    font-size: 15px;
   }
 }
 
