@@ -1,9 +1,15 @@
-import { formatStockpileRowId, isPackedStockpileItem, type StockpileListKind } from '../utils/itemUtils'
+import { formatRepackContentsDisplay, formatStockpileRowId, isPackedStockpileItem, parseRepackContents, type StockpileListKind } from '../utils/itemUtils'
+import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFilesSelection } from '../utils/photoUtils'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 
-type StockpileRow = Tables<'stockpile'> & { status?: string | null; kind_item_no?: number | null; property_no?: string | null }
+type StockpileRow = Tables<'stockpile'> & {
+  status?: string | null
+  kind_item_no?: number | null
+  property_no?: string | null
+  item_description?: string | null
+}
 type DistributionLogRow = Tables<'distribution_logs'>
 
 type StockpileReleaseLog = {
@@ -114,6 +120,8 @@ function StockpileSection({
   const releaseItemPickerModalRef = useRef<HTMLDivElement | null>(null)
   const releaseAttachmentInputRef = useRef<HTMLInputElement | null>(null)
   const [stockpileListKind, setStockpileListKind] = useState<StockpileListKind>('individual')
+  const [selectedPackedItem, setSelectedPackedItem] = useState<StockpileRow | null>(null)
+  const [releasePhotoFileError, setReleasePhotoFileError] = useState<string | null>(null)
 
   const individualStockpileItems = useMemo(
     () => filteredStockpileItems.filter((item) => !isPackedStockpileItem(item)),
@@ -529,9 +537,16 @@ function StockpileSection({
                       const paddedId = formatStockpileRowId(item)
                       const isExpired =
                         item.expiration_date && new Date(item.expiration_date) < new Date()
+                      const repackContents = parseRepackContents(item.item_description)
+                      const isClickablePacked = stockpileListKind === 'packed' && repackContents != null
 
                       return (
-                        <tr key={item.stockpile_id}>
+                        <tr
+                          key={item.stockpile_id}
+                          onClick={isClickablePacked ? () => setSelectedPackedItem(item) : undefined}
+                          style={isClickablePacked ? { cursor: 'pointer' } : undefined}
+                          title={isClickablePacked ? 'Click to view pack contents' : undefined}
+                        >
                           <td>{paddedId}</td>
                           <td>{item.item_name ?? '—'}</td>
                           <td>{item.category ?? '—'}</td>
@@ -658,6 +673,7 @@ function StockpileSection({
 
                 <div className="inventory-field" style={{ gridColumn: '1 / -1' }}>
                   <label htmlFor="stockpile-release-attachments">Attachments</label>
+                  <p className="inventory-help-text">Maximum file size: {MAX_PHOTO_FILE_SIZE_LABEL}</p>
                   <input
                     id="stockpile-release-attachments"
                     ref={releaseAttachmentInputRef}
@@ -666,11 +682,16 @@ function StockpileSection({
                     multiple
                     className="inventory-input"
                     onChange={(e) => {
-                      const files = Array.from(e.target.files ?? [])
+                      const { files, error } = validatePhotoFilesSelection(Array.from(e.target.files ?? []))
+                      setReleasePhotoFileError(error)
                       setStockpileReleaseAttachmentFiles(files)
+                      if (error && releaseAttachmentInputRef.current) {
+                        releaseAttachmentInputRef.current.value = ''
+                      }
                     }}
                     disabled={releasingStockpile}
                   />
+                  {releasePhotoFileError && <p className="dashboard-error">{releasePhotoFileError}</p>}
                   {stockpileReleaseAttachmentFiles.length > 0 && (
                     <p className="inventory-help-text" style={{ marginTop: 8 }}>
                       {stockpileReleaseAttachmentFiles.length} photo(s) selected
@@ -1375,6 +1396,57 @@ function StockpileSection({
                   </button>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedPackedItem && (
+        <div
+          className="dashboard-drilldown-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="packed-item-contents-title"
+          onClick={() => setSelectedPackedItem(null)}
+        >
+          <div
+            className="dashboard-drilldown-modal"
+            tabIndex={-1}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="packed-item-contents-title">
+                {selectedPackedItem.item_name ?? 'Relief Pack'} Contents
+              </h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={() => setSelectedPackedItem(null)}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </header>
+            <div className="panel-body">
+              <p className="wmr-modal-text">
+                <strong>Pack ID:</strong> {formatStockpileRowId(selectedPackedItem)}
+              </p>
+              <p className="wmr-modal-text">
+                <strong>Contents:</strong>{' '}
+                {(() => {
+                  const contents = parseRepackContents(selectedPackedItem.item_description)
+                  return contents ? formatRepackContentsDisplay(contents) : 'No contents recorded for this pack.'
+                })()}
+              </p>
+            </div>
+            <div style={{ borderTop: '1px solid #e5e7eb', padding: '12px 18px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                className="wmr-modal-button-secondary"
+                onClick={() => setSelectedPackedItem(null)}
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>

@@ -203,8 +203,9 @@ function App() {
 			}
 
 			if (normalizedRole === 'staff') {
+				if (data.is_locked) return null
+
 				if (!data.department_id) {
-					if (data.is_locked) return null
 					return { kind: 'department' as const, departmentName: 'Department', departmentId: null, isReadOnly: false, mustChangePassword: Boolean(data.must_change_password) }
 				}
 
@@ -215,17 +216,13 @@ function App() {
 					.maybeSingle()
 
 				const departmentCode = department?.dept_code?.trim() || ''
-				const isNebruStaff = departmentCode.toUpperCase() === 'NEBRU'
-				const isLocked = Boolean(data.is_locked)
-
-				if (isLocked && !isNebruStaff) return null
 
 				return {
 					kind: 'department' as const,
 					departmentName: department?.dept_name?.trim() || 'Department',
 					departmentCode,
 					departmentId: data.department_id,
-					isReadOnly: isLocked && isNebruStaff,
+					isReadOnly: false,
 					mustChangePassword: Boolean(data.must_change_password),
 				}
 			}

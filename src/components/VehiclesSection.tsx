@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
+import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFileSelection } from '../utils/photoUtils'
 
 type VehicleRow = Tables<'vehicles'> & {
   vehicle_name?: string | null
   color?: string | null
+  photo_url?: string | null
 }
 type VehicleRepairRow = Tables<'vehicle_repairs'>
 type UserRow = Tables<'users'>
@@ -35,6 +37,8 @@ type VehiclesSectionProps = {
   setNewVehicleServiceable: (value: string) => void
   newVehicleRepairHistory: string
   setNewVehicleRepairHistory: (value: string) => void
+  newVehiclePhotoFile: File | null
+  setNewVehiclePhotoFile: (file: File | null) => void
   handleAddVehicle: () => void
   vehicleSaving: boolean
   newRepairVehicleId: string
@@ -83,6 +87,8 @@ function VehiclesSection({
   setNewVehicleServiceable,
   newVehicleRepairHistory,
   setNewVehicleRepairHistory,
+  newVehiclePhotoFile,
+  setNewVehiclePhotoFile,
   handleAddVehicle,
   vehicleSaving,
   newRepairVehicleId,
@@ -106,6 +112,7 @@ function VehiclesSection({
 }: VehiclesSectionProps) {
   const vehiclesPageSize = useResponsivePageSize(8)
   const [vehiclePage, setVehiclePage] = useState(1)
+  const [vehiclePhotoFileError, setVehiclePhotoFileError] = useState<string | null>(null)
 
   const vehicleTotalPages = Math.max(1, Math.ceil(vehicles.length / vehiclesPageSize))
 
@@ -238,6 +245,7 @@ function VehiclesSection({
                     <th scope="col">Year</th>
                     <th scope="col">CR Number</th>
                     <th scope="col">Engine Number</th>
+                    <th scope="col">Photo</th>
                     <th scope="col">Status</th>
                     <th scope="col">Repair Logs</th>
                     <th scope="col">Actions</th>
@@ -246,11 +254,11 @@ function VehiclesSection({
                 <tbody>
                   {vehicleLoading ? (
                     <tr>
-                      <td colSpan={10}>Loading vehicles…</td>
+                      <td colSpan={11}>Loading vehicles…</td>
                     </tr>
                   ) : vehicles.length === 0 ? (
                     <tr>
-                      <td colSpan={10}>No vehicles found.</td>
+                      <td colSpan={11}>No vehicles found.</td>
                     </tr>
                   ) : (
                     paginatedVehicles.map((vehicle) => (
@@ -262,6 +270,15 @@ function VehiclesSection({
                         <td>{vehicle.year_model ?? '—'}</td>
                         <td>{vehicle.cr_number || '—'}</td>
                         <td>{vehicle.engine_number || '—'}</td>
+                        <td>
+                          {vehicle.photo_url ? (
+                            <a href={vehicle.photo_url} target="_blank" rel="noreferrer" className="wmr-remarks-button">
+                              View Photo
+                            </a>
+                          ) : (
+                            '—'
+                          )}
+                        </td>
                         <td>
                           <span className={`badge ${vehicle.is_serviceable ? 'badge-status-repaired' : 'badge-status-disposal'}`}>
                             {vehicle.is_serviceable ? 'Serviceable' : 'Needs Repair'}
@@ -500,6 +517,27 @@ function VehiclesSection({
                   onChange={(e) => setNewVehicleRepairHistory(e.target.value)}
                   placeholder="Optional summary of past repairs"
                 />
+              </div>
+
+              <div className="inventory-field inventory-field-full">
+                <label htmlFor="vehicle-photo">Attachment Photo</label>
+                <p className="inventory-help-text">Maximum file size: {MAX_PHOTO_FILE_SIZE_LABEL}</p>
+                <input
+                  id="vehicle-photo"
+                  type="file"
+                  accept="image/*"
+                  className="inventory-input"
+                  onChange={(e) => {
+                    const { file, error } = validatePhotoFileSelection(e.target.files?.[0] ?? null)
+                    setVehiclePhotoFileError(error)
+                    setNewVehiclePhotoFile(file)
+                    if (error) e.target.value = ''
+                  }}
+                />
+                {vehiclePhotoFileError && <p className="dashboard-error">{vehiclePhotoFileError}</p>}
+                {newVehiclePhotoFile && (
+                  <p className="inventory-help-text">{newVehiclePhotoFile.name}</p>
+                )}
               </div>
             </div>
 

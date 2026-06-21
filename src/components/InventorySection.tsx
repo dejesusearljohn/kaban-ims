@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type MutableRefObject } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 import { formatInventoryItemId, generateParPropertyNumber, getCategoryOptionsForInventoryKind, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryTypeColumnDisplay, getInventoryUnitDisplay, getMaxKindItemNo, inferCategoryFromItemName, INVENTORY_KIND_FILTER_OPTIONS, OFFICE_SUPPLY_CATEGORY_OPTIONS, PAR_CATEGORY_OPTIONS, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, previewAutoItemId, STOCKPILE_CATEGORY_OPTIONS, type InventoryKind, type InventoryKindFilter } from '../utils/itemUtils'
+import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFilesSelection } from '../utils/photoUtils'
 
 type InventoryRow = Tables<'inventory'>
 
@@ -246,7 +247,7 @@ function InventorySection({
       return generateParPropertyNumber(
         newItemType,
         newItemName,
-        newDateAcquired || new Date().toISOString().split('T')[0],
+        newDateAcquired.trim() || '',
         existingPropertyNumbers,
       )
     }
@@ -263,6 +264,7 @@ function InventorySection({
   ])
 
   const inventoryTotalPages = Math.max(1, Math.ceil(filteredInventoryItems.length / inventoryPageSize))
+  const [photoFileError, setPhotoFileError] = useState<string | null>(null)
 
   useEffect(() => {
     setInventoryPage(1)
@@ -1173,6 +1175,7 @@ function InventorySection({
 
               <div className="inventory-field inventory-field-full">
                 <span className="inventory-photo-label">Photo</span>
+                <p className="inventory-help-text">Maximum file size: {MAX_PHOTO_FILE_SIZE_LABEL}</p>
                 <input
                   ref={addPhotoInputRef}
                   id="add-photo-input"
@@ -1182,8 +1185,10 @@ function InventorySection({
                   capture="environment"
                   style={{ display: 'none' }}
                   onChange={(e) => {
-                    const files = Array.from(e.target.files ?? [])
+                    const { files, error } = validatePhotoFilesSelection(Array.from(e.target.files ?? []))
+                    setPhotoFileError(error)
                     setNewPhotoFiles(files)
+                    if (error && addPhotoInputRef.current) addPhotoInputRef.current.value = ''
                   }}
                 />
                 <button
@@ -1197,6 +1202,7 @@ function InventorySection({
                       : 'Click to capture / upload'}
                   </span>
                 </button>
+                {photoFileError && <p className="dashboard-error">{photoFileError}</p>}
                 {newPhotoFiles.length > 0 && (
                   <div className="inventory-photo-list">
                     {newPhotoFiles.map((file) => (

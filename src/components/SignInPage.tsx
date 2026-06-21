@@ -250,13 +250,20 @@ function SignInPage({ onSignInSuccess, initialView = 'signin', onPasswordResetCo
 
       const { data: userRow, error: roleError } = await supabase
         .from('users')
-        .select('role')
+        .select('role, is_locked')
         .eq('id', userId)
         .maybeSingle()
 
       if (roleError || !userRow) {
         await supabase.auth.signOut()
         setError('Unable to validate account access. Please try again.')
+        setLoading(false)
+        return
+      }
+
+      if (userRow.is_locked) {
+        await supabase.auth.signOut()
+        setError('Your account is locked. Please contact your supervisor for assistance.')
         setLoading(false)
         return
       }

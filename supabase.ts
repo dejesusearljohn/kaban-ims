@@ -330,6 +330,7 @@ export type Database = {
           quantity: number
           remarks: string | null
           return_date: string
+          return_remarks: string | null
           status: string | null
           uid: string | null
         }
@@ -347,6 +348,7 @@ export type Database = {
           quantity: number
           remarks?: string | null
           return_date: string
+          return_remarks?: string | null
           status?: string | null
           uid?: string | null
         }
@@ -364,6 +366,7 @@ export type Database = {
           quantity?: number
           remarks?: string | null
           return_date?: string
+          return_remarks?: string | null
           status?: string | null
           uid?: string | null
         }
@@ -540,7 +543,7 @@ export type Database = {
           assigned_to_name: string | null
           condition: string | null
           created_at: string | null
-          date_acquired: string
+          date_acquired: string | null
           date_last_restocked: string | null
           department_id: number | null
           donor_identification: string | null
@@ -570,7 +573,7 @@ export type Database = {
           assigned_to_name?: string | null
           condition?: string | null
           created_at?: string | null
-          date_acquired: string
+          date_acquired?: string | null
           date_last_restocked?: string | null
           department_id?: number | null
           donor_identification?: string | null
@@ -600,7 +603,7 @@ export type Database = {
           assigned_to_name?: string | null
           condition?: string | null
           created_at?: string | null
-          date_acquired?: string
+          date_acquired?: string | null
           date_last_restocked?: string | null
           department_id?: number | null
           donor_identification?: string | null
@@ -969,6 +972,7 @@ export type Database = {
           is_archived: boolean
           is_serviceable: boolean | null
           make_model: string | null
+          photo_url: string | null
           plate_number: string | null
           property_number: string | null
           repair_history_log: string | null
@@ -990,6 +994,7 @@ export type Database = {
           is_archived?: boolean
           is_serviceable?: boolean | null
           make_model?: string | null
+          photo_url?: string | null
           plate_number?: string | null
           property_number?: string | null
           repair_history_log?: string | null
@@ -1011,6 +1016,7 @@ export type Database = {
           is_archived?: boolean
           is_serviceable?: boolean | null
           make_model?: string | null
+          photo_url?: string | null
           plate_number?: string | null
           property_number?: string | null
           repair_history_log?: string | null

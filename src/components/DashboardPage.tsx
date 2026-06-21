@@ -33,7 +33,8 @@ import '../styles/Par.css'
 import '../styles/Dashboard.css'
 import '../styles/Reports.css'
 import { downloadExcel, downloadVehicleLedgerExcel } from '../utils/excel'
-import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, isPackedStockpileItem, isParInventoryItem, equalsDbText, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, type InventoryKind, type InventoryKindFilter, type StockpileListKind } from '../utils/itemUtils'
+import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, isPackedStockpileItem, isParInventoryItem, equalsDbText, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, serializeRepackContents, type InventoryKind, type InventoryKindFilter, type RepackContentEntry, type StockpileListKind } from '../utils/itemUtils'
+import { getPhotoFileSizeLimitError, isPhotoFileWithinSizeLimit, validatePhotoFilesSelection } from '../utils/photoUtils'
 
 type SummaryMetrics = {
   totalItems: number
@@ -59,6 +60,7 @@ type StockpileRow = Tables<'stockpile'> & {
   status?: string | null
   kind_item_no?: number | null
   property_no?: string | null
+  item_description?: string | null
 }
 type DistributionLogRow = Tables<'distribution_logs'>
 type WmrReportRow = Tables<'wmr_reports'>
@@ -122,6 +124,7 @@ const mapInventoryItemToStockpileRow = (item: InventoryRow): StockpileRow => ({
   unit_of_measure: item.unit_of_measure,
   packed_date: item.date_acquired,
   expiration_date: item.expiration_date,
+  item_description: item.item_description,
   archived_at: null,
   is_archived: false,
   status: item.status,
@@ -528,6 +531,7 @@ function DashboardPage() {
   const [newVehicleEngineNumber, setNewVehicleEngineNumber] = useState('')
   const [newVehicleServiceable, setNewVehicleServiceable] = useState('true')
   const [newVehicleRepairHistory, setNewVehicleRepairHistory] = useState('')
+  const [newVehiclePhotoFile, setNewVehiclePhotoFile] = useState<File | null>(null)
   const [editingVehicle, setEditingVehicle] = useState<VehicleRow | null>(null)
   const [editVehicleServiceable, setEditVehicleServiceable] = useState('true')
   const [editVehicleRemarks, setEditVehicleRemarks] = useState('')
@@ -1220,6 +1224,24 @@ function DashboardPage() {
       month: 'short',
       day: '2-digit',
     })
+  }
+  const formatDisplayDateTime = (value: string | null | undefined) => {
+    if (!value) return '—'
+
+    const parsedDate = new Date(value)
+    if (Number.isNaN(parsedDate.getTime())) return value
+
+    const date = parsedDate.toLocaleDateString('en-PH', {
+      year: 'numeric',
+      month: 'short',
+      day: '2-digit',
+    })
+    const time = parsedDate.toLocaleTimeString('en-PH', {
+      hour: 'numeric',
+      minute: '2-digit',
+    })
+
+    return `${date} ${time}`
   }
   const formatInventoryDate = (value: string | null | undefined) => {
     if (!value) return '—'
@@ -2253,7 +2275,7 @@ function DashboardPage() {
         ...records
           .map((record) => record.issue_date)
           .filter((value): value is string => Boolean(value)),
-        ...assignedInventory.map((item) => item.date_acquired).filter(Boolean),
+        ...assignedInventory.map((item) => item.date_acquired).filter((value): value is string => Boolean(value)),
       ]
         .sort((a, b) => b.localeCompare(a))[0] ?? null
 
@@ -2933,6 +2955,12 @@ function DashboardPage() {
     setVehicleSaving(true)
     setVehicleError(null)
 
+    if (newVehiclePhotoFile && !isPhotoFileWithinSizeLimit(newVehiclePhotoFile)) {
+      setVehicleError(getPhotoFileSizeLimitError(newVehiclePhotoFile.name))
+      setVehicleSaving(false)
+      return
+    }
+
     const trimmedMakeModel = newVehicleMakeModel.trim()
     const trimmedColor = newVehicleColor.trim()
     const yearValue = newVehicleYearModel ? Number(newVehicleYearModel) : null
@@ -2961,6 +2989,51 @@ function DashboardPage() {
 
     const insertedVehicle = (data?.[0] ?? null) as VehicleRow | null
 
+    if (insertedVehicle && newVehiclePhotoFile) {
+      const fileExt = newVehiclePhotoFile.name.split('.').pop() || 'jpg'
+      const fileName = `vehicle-${insertedVehicle.id}-${Date.now()}.${fileExt}`
+      const filePath = `vehicles/${insertedVehicle.uid ?? insertedVehicle.id}/${fileName}`
+
+      const { error: uploadError } = await supabase.storage
+        .from(INVENTORY_PHOTO_BUCKET)
+        .upload(filePath, newVehiclePhotoFile, {
+          contentType: newVehiclePhotoFile.type || 'image/jpeg',
+          upsert: false,
+        })
+
+      if (uploadError) {
+        setVehicleError(
+          `Vehicle added, but photo upload failed: ${uploadError.message}. Check storage policies for '${INVENTORY_PHOTO_BUCKET}'.`,
+        )
+      } else {
+        const { data: publicUrlData } = supabase.storage.from(INVENTORY_PHOTO_BUCKET).getPublicUrl(filePath)
+        const { data: updatedVehicle, error: photoUpdateError } = await supabase
+          .from('vehicles')
+          .update({ photo_url: publicUrlData.publicUrl } as never)
+          .eq('id', insertedVehicle.id)
+          .select('*')
+          .maybeSingle()
+
+        if (photoUpdateError) {
+          setVehicleError((prev) => prev ?? photoUpdateError.message)
+        } else if (updatedVehicle) {
+          setVehicles((prev) => [...prev, updatedVehicle as VehicleRow].sort((a, b) => b.id - a.id))
+          setNewVehicleName('')
+          setNewVehicleMakeModel('')
+          setNewVehicleColor('')
+          setNewVehicleYearModel('')
+          setNewVehicleCrNumber('')
+          setNewVehicleEngineNumber('')
+          setNewVehicleServiceable('true')
+          setNewVehicleRepairHistory('')
+          setNewVehiclePhotoFile(null)
+          setVehicleSaving(false)
+          setVehicleMode('manage')
+          return
+        }
+      }
+    }
+
     if (insertedVehicle) {
       setVehicles((prev) => [...prev, insertedVehicle].sort((a, b) => b.id - a.id))
     }
@@ -2973,6 +3046,7 @@ function DashboardPage() {
     setNewVehicleEngineNumber('')
     setNewVehicleServiceable('true')
     setNewVehicleRepairHistory('')
+    setNewVehiclePhotoFile(null)
     setVehicleSaving(false)
     setVehicleMode('manage')
   }
@@ -3297,7 +3371,7 @@ function DashboardPage() {
     setEditQuantity(item.quantity != null ? item.quantity.toString() : '')
     setEditUnitOfMeasure(item.unit_of_measure ?? '')
     setEditUnitCost(item.unit_cost != null ? item.unit_cost.toString() : '')
-    setEditDateAcquired(item.date_acquired)
+    setEditDateAcquired(item.date_acquired ?? '')
     setEditExpirationDate(item.expiration_date ?? '')
     setEditSource(item.acquisition_mode ?? '')
     setEditStatus(item.item_type.trim().toLowerCase() === 'stockpile' ? getInventoryStatus(item) ?? '' : item.status?.trim() ?? '')
@@ -3355,7 +3429,7 @@ function DashboardPage() {
           quantity: Number.isNaN(quantityNumber) ? null : quantityNumber,
           unit_of_measure: editUnitOfMeasure || null,
           unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
-          date_acquired: editDateAcquired ? editDateAcquired : new Date().toISOString().split('T')[0],
+          date_acquired: editDateAcquired.trim() || null,
           expiration_date: isStockpileType ? editExpirationDate || null : null,
           acquisition_mode: editSource || null,
           status: isStockpileType ? stockpileStatusToSave : sanitizedEditStatus,
@@ -4239,7 +4313,7 @@ function DashboardPage() {
           : null
     const usefulLifeNumber = newEstimatedUsefulLife.trim() ? Number(newEstimatedUsefulLife) : null
     const itemUid = crypto.randomUUID()
-    const acquiredDate = newDateAcquired || new Date().toISOString().split('T')[0]
+    const acquiredDate = newDateAcquired.trim() || null
 
     const resolvedItemType = isStockpileKind
       ? 'Stockpile'
@@ -4253,7 +4327,7 @@ function DashboardPage() {
     const inventoryParNo = isParKind ? assignedStaff?.par_no?.trim() || null : null
 
     const propertyNo = isParKind
-      ? generateParPropertyNumber(newItemType, newItemName, acquiredDate, inventoryItems)
+      ? generateParPropertyNumber(newItemType, newItemName, acquiredDate ?? '', inventoryItems)
       : null
 
     const nextKindItemNo =
@@ -4281,7 +4355,7 @@ function DashboardPage() {
         unit_of_measure: isParKind ? PAR_DEFAULT_UNIT : newUnitOfMeasure || null,
         unit_cost: Number.isNaN(unitCostNumber) ? null : unitCostNumber,
         date_acquired: isOfficeKind
-          ? newDateLastRestocked || acquiredDate
+          ? newDateLastRestocked.trim() || null
           : acquiredDate,
         expiration_date: isStockpileKind ? newExpirationDate || null : null,
         date_last_restocked: isOfficeKind ? newDateLastRestocked || null : null,
@@ -4326,8 +4400,15 @@ function DashboardPage() {
     }
 
     const uploadedPhotoUrls: string[] = []
+    const { files: validNewPhotoFiles, error: photoSizeError } = validatePhotoFilesSelection(newPhotoFiles)
 
-    for (const file of newPhotoFiles) {
+    if (photoSizeError) {
+      setInventoryError(photoSizeError)
+      setAddingItem(false)
+      return
+    }
+
+    for (const file of validNewPhotoFiles) {
       const fileExt = file.name.split('.').pop() || 'jpg'
       const fileName = `item-${insertedItem.item_id}-${Date.now()}-${Math.random().toString(36).slice(2)}.${fileExt}`
       const filePath = `items/${insertedItem.uid ?? insertedItem.item_id}/${fileName}`
@@ -4577,8 +4658,17 @@ function DashboardPage() {
     setReleasingStockpile(true)
     setStockpileError(null)
 
+    const { files: validReleasePhotos, error: releasePhotoSizeError } =
+      validatePhotoFilesSelection(stockpileReleaseAttachmentFiles)
+
+    if (releasePhotoSizeError) {
+      setStockpileError(releasePhotoSizeError)
+      setReleasingStockpile(false)
+      return
+    }
+
     const uploadedAttachmentUrls: string[] = []
-    for (const file of stockpileReleaseAttachmentFiles) {
+    for (const file of validReleasePhotos) {
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
       const filePath = `stockpile-releases/${Date.now()}-${crypto.randomUUID()}-${safeName}`
       const { error: uploadError } = await supabase.storage
@@ -4795,6 +4885,12 @@ function DashboardPage() {
 
       const reliefGoodsId = getNextReliefGoodsId(inventoryItems)
 
+      const repackContents: RepackContentEntry[] = repackEntries.map((entry) => ({
+        name: entry.row.item_name?.trim() || 'Unknown item',
+        quantity: entry.perPackQuantity,
+        unit: entry.row.unit_of_measure?.trim() || '',
+      }))
+
       const { error: insertError } = await supabase.from('inventory').insert([
         normalizeInventoryRecord({
           item_name: repackResultName.trim(),
@@ -4805,6 +4901,7 @@ function DashboardPage() {
           quantity: resultQty,
           unit_of_measure: repackUnit,
           date_acquired: new Date().toISOString().slice(0, 10),
+          item_description: serializeRepackContents(repackContents),
           status: null,
         }),
       ])
@@ -5394,7 +5491,7 @@ function DashboardPage() {
         quantity: parseNumericInput(row.quantity ?? '') ?? 0,
         unit_of_measure: (row.unit_of_measure ?? '').trim() || null,
         unit_cost: parseNumericInput(row.unit_cost ?? ''),
-        date_acquired: (row.date_acquired ?? '').trim() || new Date().toISOString().slice(0, 10),
+        date_acquired: (row.date_acquired ?? '').trim() || null,
         expiration_date: isStockpileType ? expirationDate : null,
         acquisition_mode: (row.acquisition_mode ?? row.source ?? '').trim() || null,
         status: isStockpileType ? (isExpired || equalsDbText(csvStatus, 'EXPIRED') ? 'EXPIRED' : null) : csvStatus,
@@ -6251,7 +6348,7 @@ function DashboardPage() {
                                 {propertyNo ? <span className="borrowed-items-dashboard-meta">{propertyNo}</span> : null}
                               </td>
                               <td>{entry.borrower_name}</td>
-                              <td>{formatDisplayDate(entry.date_borrowed)}</td>
+                              <td>{formatDisplayDateTime(entry.date_borrowed)}</td>
                               <td>{formatDisplayDate(entry.return_date)}</td>
                               <td>
                                 <span className={`borrowed-items-dashboard-status borrowed-items-dashboard-status-${borrowedStatus.toLowerCase()}`}>
@@ -7590,6 +7687,7 @@ function DashboardPage() {
               openArchiveVehicleWmrConfirmation(report)
             }}
             onExportCsv={handleExportWmrCsv}
+            getReportedByName={(userId) => parUsers.find((user) => user.id === userId)?.full_name ?? null}
           />
         )}
 
@@ -7620,6 +7718,8 @@ function DashboardPage() {
             setNewVehicleServiceable={setNewVehicleServiceable}
             newVehicleRepairHistory={newVehicleRepairHistory}
             setNewVehicleRepairHistory={setNewVehicleRepairHistory}
+            newVehiclePhotoFile={newVehiclePhotoFile}
+            setNewVehiclePhotoFile={setNewVehiclePhotoFile}
             handleAddVehicle={handleAddVehicle}
             vehicleSaving={vehicleSaving}
             newRepairVehicleId={newRepairVehicleId}
@@ -8622,7 +8722,7 @@ function DashboardPage() {
                             <tr key={`drilldown-borrowed-${entry.borrowed_id}`}>
                               <td>{itemName}</td>
                               <td>{entry.borrower_name}</td>
-                              <td>{formatDisplayDate(entry.date_borrowed)}</td>
+                              <td>{formatDisplayDateTime(entry.date_borrowed)}</td>
                               <td>{formatDisplayDate(entry.return_date)}</td>
                               <td>{borrowedStatus}</td>
                             </tr>

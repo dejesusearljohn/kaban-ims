@@ -617,6 +617,11 @@
   background: #fee2e2;
 }
 
+.borrowed-items-time {
+  color: #6b7280;
+  font-size: 0.85em;
+}
+
 .borrowed-return-button {
   min-height: 30px;
   min-width: 96px;

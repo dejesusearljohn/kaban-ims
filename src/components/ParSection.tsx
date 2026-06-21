@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 import { resolveStaffParNumber } from '../utils/itemUtils'
+import { MAX_PHOTO_FILE_SIZE_LABEL, validatePhotoFileSelection } from '../utils/photoUtils'
 
 type InventoryRow = Tables<'inventory'>
 type UserRow = Tables<'users'>
@@ -105,6 +106,7 @@ function ParSection({
   const [itemPickerRowIndex, setItemPickerRowIndex] = useState<number | null>(null)
   const [itemPickerSearch, setItemPickerSearch] = useState('')
   const [itemPickerCategory, setItemPickerCategory] = useState('all')
+  const [draftPhotoError, setDraftPhotoError] = useState<string | null>(null)
   const [itemPickerSelectedIds, setItemPickerSelectedIds] = useState<string[]>([])
   const [itemPickerPage, setItemPickerPage] = useState(1)
   const itemPickerModalRef = useRef<HTMLDivElement | null>(null)
@@ -138,8 +140,11 @@ function ParSection({
 
   const handleDraftPhoto = (index: number, file: File | null) => {
     if (!file) return
-    const url = URL.createObjectURL(file)
-    updateDraftRow(index, { photo: file, photoPreview: url })
+    const { file: acceptedFile, error } = validatePhotoFileSelection(file)
+    setDraftPhotoError(error)
+    if (!acceptedFile) return
+    const url = URL.createObjectURL(acceptedFile)
+    updateDraftRow(index, { photo: acceptedFile, photoPreview: url })
   }
 
   const addDraftRow = () => setParDraftItems((prev) => [...prev, emptyDraftItem()])
@@ -472,6 +477,8 @@ function ParSection({
           {/* Items table card */}
           <section className="inventory-table-section-compact" aria-label="PAR draft items">
             <div className="inventory-table-card">
+              <p className="inventory-help-text">Photo maximum file size: {MAX_PHOTO_FILE_SIZE_LABEL}</p>
+              {draftPhotoError && <p className="dashboard-error">{draftPhotoError}</p>}
               <div className="par-draft-table-wrap">
                 <table className="inventory-table par-draft-table">
                   <thead>
@@ -554,7 +561,12 @@ function ParSection({
                             accept="image/*"
                             style={{ display: 'none' }}
                             ref={(el) => { fileInputRefs.current[index] = el }}
-                            onChange={(e) => handleDraftPhoto(index, e.target.files?.[0] ?? null)}
+                            onChange={(e) => {
+                              handleDraftPhoto(index, e.target.files?.[0] ?? null)
+                              if (e.target.files?.[0] && !validatePhotoFileSelection(e.target.files[0]).file) {
+                                e.target.value = ''
+                              }
+                            }}
                           />
                           {row.photoPreview ? (
                             <img

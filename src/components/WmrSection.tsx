@@ -41,6 +41,7 @@ type WmrSectionProps = {
   onArchiveStaffWmrReport: (report: WmrReportRow) => void
   onArchiveVehicleReport: (report: WmrReportRow) => void
   onExportCsv: () => void
+  getReportedByName: (userId: string | null | undefined) => string | null
 }
 
 function WmrSection({
@@ -74,6 +75,7 @@ function WmrSection({
   onArchiveStaffWmrReport,
   onArchiveVehicleReport,
   onExportCsv,
+  getReportedByName,
 }: WmrSectionProps) {
   const wmrPageSize = useResponsivePageSize(8)
   const [wmrPage, setWmrPage] = useState(1)
@@ -103,6 +105,7 @@ function WmrSection({
           (item.department_id != null ? departments.find((dept) => dept.id === item.department_id)?.name ?? '' : '')
         const dateReported = report?.date_reported ?? item.created_at ?? item.date_acquired
         const hasRemarks = !!(report && report.admin_remarks && report.admin_remarks.trim().length > 0)
+        const reportedBy = getReportedByName(report?.last_user_id)
 
           return {
             key: `waste-${item.item_id}`,
@@ -113,6 +116,7 @@ function WmrSection({
             status,
             location,
             dateReported,
+            reportedBy,
             hasRemarks,
             rowType: 'waste' as const,
             item,
@@ -125,6 +129,7 @@ function WmrSection({
         const reason = report.reason_damage?.trim() || ''
         const location = report.location?.trim() || 'Staff Report'
         const hasRemarks = !!(report.admin_remarks && report.admin_remarks.trim().length > 0)
+        const reportedBy = getReportedByName(report.last_user_id)
         // Look up the actual item from inventory for this staff report
         const linkedItem = report.item_id ? inventoryItems.find((i) => i.item_id === report.item_id) : null
         const itemName = linkedItem?.item_name || `Item (ID: ${report.item_id || '—'})`
@@ -138,6 +143,7 @@ function WmrSection({
             status,
             location,
             dateReported: report.date_reported,
+            reportedBy,
             hasRemarks,
             rowType: 'staff' as const,
             item: linkedItem || null,
@@ -153,6 +159,7 @@ function WmrSection({
           ? report.location.slice('Vehicle Registry - '.length)
           : 'Vehicle'
         const hasRemarks = !!(report.admin_remarks && report.admin_remarks.trim().length > 0)
+        const reportedBy = getReportedByName(report.last_user_id)
 
           return {
             key: `vehicle-wmr-${report.report_id}`,
@@ -163,6 +170,7 @@ function WmrSection({
             status,
             location,
             dateReported: report.date_reported,
+            reportedBy,
             hasRemarks,
             rowType: 'vehicle' as const,
             item: null as InventoryRow | null,
@@ -180,7 +188,7 @@ function WmrSection({
 
         return bTime - aTime
       }),
-    [filteredWasteItems, filteredStaffWmrReports, filteredVehicleWmrReports, wmrReports, departments, inventoryItems],
+    [filteredWasteItems, filteredStaffWmrReports, filteredVehicleWmrReports, wmrReports, departments, inventoryItems, getReportedByName],
   )
 
   const wmrTotalPages = Math.max(1, Math.ceil(combinedWmrRows.length / wmrPageSize))
@@ -309,6 +317,7 @@ function WmrSection({
                 <th scope="col">Status</th>
                 <th scope="col">Location</th>
                 <th scope="col">Date Reported</th>
+                <th scope="col">Reported By</th>
                 <th scope="col">Remarks</th>
                 <th scope="col">Action</th>
               </tr>
@@ -316,11 +325,11 @@ function WmrSection({
             <tbody>
               {inventoryLoading ? (
                 <tr>
-                  <td colSpan={9}>Loading waste materials…</td>
+                  <td colSpan={10}>Loading waste materials…</td>
                 </tr>
               ) : combinedFilteredWmrCount === 0 ? (
                 <tr>
-                  <td colSpan={9}>No waste materials reported.</td>
+                  <td colSpan={10}>No waste materials reported.</td>
                 </tr>
               ) : (
                 <>
@@ -339,6 +348,7 @@ function WmrSection({
                       </td>
                       <td>{row.location || '—'}</td>
                       <td>{formatDisplayDate(row.dateReported)}</td>
+                      <td>{row.reportedBy || '—'}</td>
                       <td>
                         <button
                           type="button"

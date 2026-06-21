@@ -806,3 +806,33 @@ export const normalizeParRecord = <T extends Record<string, unknown>>(record: T)
 
 export const equalsDbText = (left: string | null | undefined, right: string | null | undefined): boolean =>
   (left ?? '').trim().toUpperCase() === (right ?? '').trim().toUpperCase()
+
+export type RepackContentEntry = {
+  name: string
+  quantity: number
+  unit: string
+}
+
+const REPACK_CONTENTS_PREFIX = '__REPACK__:'
+
+export const serializeRepackContents = (entries: RepackContentEntry[]): string =>
+  `${REPACK_CONTENTS_PREFIX}${JSON.stringify(entries)}`
+
+export const parseRepackContents = (description: string | null | undefined): RepackContentEntry[] | null => {
+  if (!description?.startsWith(REPACK_CONTENTS_PREFIX)) return null
+
+  try {
+    const parsed = JSON.parse(description.slice(REPACK_CONTENTS_PREFIX.length)) as RepackContentEntry[]
+    return Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+export const formatRepackContentsDisplay = (entries: RepackContentEntry[]): string =>
+  entries
+    .map((entry) => {
+      const unitSuffix = entry.unit?.trim() ? ` ${entry.unit.trim()}` : ''
+      return `${entry.quantity}${unitSuffix} ${entry.name}`.trim()
+    })
+    .join(', ')

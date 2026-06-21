@@ -1,9 +1,21 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import type { Tables } from '../../supabase'
 import useResponsivePageSize from './useResponsivePageSize'
 import { supabase } from '../supabaseClient'
 
 type InventoryRow = Tables<'inventory'>
+type AccountabilityRow = Tables<'accountability_reports'>
+
+const DEFAULT_BORROW_DAYS = 14
+
+const getDefaultReturnDateFromIssue = (issueDate: string): string => {
+  const date = new Date(`${issueDate}T12:00:00`)
+  date.setDate(date.getDate() + DEFAULT_BORROW_DAYS)
+  return date.toISOString().slice(0, 10)
+}
+
+const buildBorrowedDedupeKey = (itemId: number | null, quantity: number, dateKey: string, borrowerName: string) =>
+  `${itemId ?? 'none'}-${quantity}-${dateKey}-${borrowerName.trim().toLowerCase()}`
 
 type BorrowedItem = {
   borrowed_id: number
@@ -19,7 +31,7 @@ type BorrowedItem = {
   date_returned: string | null
   location: string | null
   remarks: string | null
-  item_remarks: string | null
+  return_remarks: string | null
   status: string | null
 }
 
@@ -32,6 +44,8 @@ function BorrowedItemsSection() {
   const [selectedItem, setSelectedItem] = useState<BorrowedItem | null>(null)
   const [adding, setAdding] = useState(false)
   const [returningId, setReturningId] = useState<number | null>(null)
+  const [returnRemarksModalItem, setReturnRemarksModalItem] = useState<BorrowedItem | null>(null)
+  const [returnRemarksInput, setReturnRemarksInput] = useState('')
   const [mode, setMode] = useState<'list' | 'add'>('list')
   
   // Item picker modal state
@@ -48,10 +62,9 @@ function BorrowedItemsSection() {
   const [addDateBorrowed, setAddDateBorrowed] = useState('')
   const [addReturnDate, setAddReturnDate] = useState('')
   const [addQuantity, setAddQuantity] = useState('1')
-  const [addAmount, setAddAmount] = useState('')
   const [addLocation, setAddLocation] = useState('')
   const [addRemarks, setAddRemarks] = useState('')
-  const [addItemRemarks, setAddItemRemarks] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'Borrowed' | 'Overdue' | 'Returned'>('all')
   
   const [inventoryItems, setInventoryItems] = useState<InventoryRow[]>([])
   
@@ -60,18 +73,57 @@ function BorrowedItemsSection() {
 
   useEffect(() => {
     void fetchBorrowedItems()
+
+    const channel = supabase
+      .channel('borrowed-items-live')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'borrowed_items' }, () => {
+        void fetchBorrowedItems()
+      })
+      .subscribe()
+
+    return () => {
+      void supabase.removeChannel(channel)
+    }
   }, [])
+
+  const getDefaultDateTimeLocal = () => {
+    const now = new Date()
+    const offsetMs = now.getTimezoneOffset() * 60_000
+    return new Date(now.getTime() - offsetMs).toISOString().slice(0, 16)
+  }
+
+  const openAddMode = () => {
+    setAddDateBorrowed(getDefaultDateTimeLocal())
+    setMode('add')
+  }
+
+  const getBorrowedItemStatus = (item: BorrowedItem): 'Returned' | 'Overdue' | 'Borrowed' => {
+    if ((item.status ?? '').trim().toLowerCase() === 'returned') return 'Returned'
+
+    const returnDate = new Date(item.return_date)
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
+    returnDate.setHours(0, 0, 0, 0)
+
+    if (!Number.isNaN(returnDate.getTime()) && returnDate < now) {
+      return 'Overdue'
+    }
+
+    return 'Borrowed'
+  }
 
   const filteredItems = useMemo(() => {
     return borrowedItems.filter((item) => {
+      const status = getBorrowedItemStatus(item)
+      const matchesStatus = statusFilter === 'all' || status === statusFilter
       const matchesSearch =
         item.item_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         item.borrower_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
         (item.property_no && item.property_no.toLowerCase().includes(searchQuery.toLowerCase()))
 
-      return matchesSearch
+      return matchesStatus && matchesSearch
     })
-  }, [borrowedItems, searchQuery])
+  }, [borrowedItems, searchQuery, statusFilter])
 
   // Item picker logic
   const itemPickerPageSize = 8
@@ -149,36 +201,55 @@ function BorrowedItemsSection() {
     }
   }
 
+  const formatTime = (dateString: string) => {
+    try {
+      return new Date(dateString).toLocaleTimeString('en-PH', {
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    } catch {
+      return ''
+    }
+  }
+
+  const formatDateWithTime = (dateString: string) => {
+    const date = formatDate(dateString)
+    const time = formatTime(dateString)
+    if (!time) return date
+    return (
+      <>
+        {date}
+        <br />
+        <span className="borrowed-items-time">{time}</span>
+      </>
+    )
+  }
+
+  const getInventoryAmount = (itemId: string): number | null => {
+    const inventoryItem = inventoryItems.find((item) => item.item_id.toString() === itemId)
+    if (!inventoryItem || inventoryItem.unit_cost == null) return null
+    return Number(inventoryItem.unit_cost)
+  }
+
   const formatCurrency = (value: number | null) => {
     if (value === null) return '—'
     return `₱${value.toFixed(2)}`
   }
 
-  const getBorrowedItemStatus = (item: BorrowedItem): 'Returned' | 'Overdue' | 'Borrowed' => {
-    if ((item.status ?? '').trim().toLowerCase() === 'returned') return 'Returned'
-
-    const returnDate = new Date(item.return_date)
-    const now = new Date()
-    now.setHours(0, 0, 0, 0)
-    returnDate.setHours(0, 0, 0, 0)
-
-    if (!Number.isNaN(returnDate.getTime()) && returnDate < now) {
-      return 'Overdue'
-    }
-
-    return 'Borrowed'
-  }
-
-  const handleMarkReturned = async (item: BorrowedItem) => {
+  const handleMarkReturned = async (item: BorrowedItem, returnRemarks: string) => {
     try {
       setReturningId(item.borrowed_id)
       setError(null)
 
-      const returnedDate = new Date().toISOString().slice(0, 10)
+      const returnedAt = new Date().toISOString()
 
       const { error: updateError } = await supabase
         .from('borrowed_items')
-        .update({ status: 'returned', date_returned: returnedDate } as never)
+        .update({
+          status: 'returned',
+          date_returned: returnedAt,
+          return_remarks: returnRemarks.trim() || null,
+        } as never)
         .eq('borrowed_id', item.borrowed_id)
 
       if (updateError) throw updateError
@@ -186,16 +257,31 @@ function BorrowedItemsSection() {
       setBorrowedItems((prev) =>
         prev.map((current) =>
           current.borrowed_id === item.borrowed_id
-            ? { ...current, status: 'returned', date_returned: returnedDate }
+            ? {
+                ...current,
+                status: 'returned',
+                date_returned: returnedAt,
+                return_remarks: returnRemarks.trim() || null,
+              }
             : current,
         ),
       )
 
       if (selectedItem?.borrowed_id === item.borrowed_id) {
         setSelectedItem((prev) =>
-          prev ? { ...prev, status: 'returned', date_returned: returnedDate } : prev,
+          prev
+            ? {
+                ...prev,
+                status: 'returned',
+                date_returned: returnedAt,
+                return_remarks: returnRemarks.trim() || null,
+              }
+            : prev,
         )
       }
+
+      setReturnRemarksModalItem(null)
+      setReturnRemarksInput('')
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to mark as returned')
     } finally {
@@ -203,26 +289,69 @@ function BorrowedItemsSection() {
     }
   }
 
+  const openReturnRemarksModal = (item: BorrowedItem, event?: MouseEvent) => {
+    event?.stopPropagation()
+    setShowDetailModal(false)
+    setReturnRemarksModalItem(item)
+    setReturnRemarksInput('')
+  }
+
+  const confirmReturnWithRemarks = () => {
+    if (!returnRemarksModalItem) return
+    void handleMarkReturned(returnRemarksModalItem, returnRemarksInput)
+  }
+
   const handleAddBorrowedItem = async () => {
+    if (!addItemId) {
+      setError('Please select an item from inventory.')
+      return
+    }
+    if (!addBorrowerName.trim()) {
+      setError('Borrower name is required.')
+      return
+    }
+    if (!addDateBorrowed) {
+      setError('Date borrowed is required.')
+      return
+    }
+    if (!addReturnDate) {
+      setError('Return date is required.')
+      return
+    }
+
+    const quantityValue = parseInt(addQuantity, 10)
+    if (!Number.isFinite(quantityValue) || quantityValue <= 0) {
+      setError('Quantity must be a positive number.')
+      return
+    }
+
+    const inventoryItem = inventoryItems.find((item) => item.item_id.toString() === addItemId)
+    const availableQty = inventoryItem?.quantity ?? null
+    if (availableQty != null && quantityValue > availableQty) {
+      setError(`Only ${availableQty} ${inventoryItem?.unit_of_measure ?? 'unit(s)'} available in inventory.`)
+      return
+    }
+
     try {
       setAdding(true)
       setError(null)
 
-      const { error } = await supabase.from('borrowed_items').insert({
-        item_id: addItemId ? parseInt(addItemId) : null,
-        borrower_name: addBorrowerName,
-        contact_number: addContactNumber,
-        date_borrowed: addDateBorrowed,
+      const inventoryAmount = getInventoryAmount(addItemId)
+
+      const { error: insertError } = await supabase.from('borrowed_items').insert({
+        item_id: parseInt(addItemId, 10),
+        borrower_name: addBorrowerName.trim(),
+        contact_number: addContactNumber.trim() || null,
+        date_borrowed: new Date(addDateBorrowed).toISOString(),
         return_date: addReturnDate,
-        quantity: parseInt(addQuantity),
-        amount: addAmount ? parseFloat(addAmount) : null,
-        location: addLocation,
-        remarks: addRemarks,
-        item_remarks: addItemRemarks,
+        quantity: quantityValue,
+        amount: inventoryAmount,
+        location: addLocation.trim() || null,
+        remarks: addRemarks.trim() || null,
         status: 'borrowed',
       })
 
-      if (error) throw error
+      if (insertError) throw insertError
 
       // Reset form
       setAddItemId('')
@@ -231,10 +360,8 @@ function BorrowedItemsSection() {
       setAddDateBorrowed('')
       setAddReturnDate('')
       setAddQuantity('1')
-      setAddAmount('')
       setAddLocation('')
       setAddRemarks('')
-      setAddItemRemarks('')
       setMode('list')
 
       // Refresh data
@@ -272,27 +399,28 @@ function BorrowedItemsSection() {
       setLoading(true)
       setError(null)
 
-      // Fetch borrowed items
-      const { data: borrowedData, error: borrowedError } = await supabase
-        .from('borrowed_items')
-        .select('*')
-        .order('date_borrowed', { ascending: false })
+      const [borrowedResult, inventoryResult, scannerResult] = await Promise.all([
+        supabase.from('borrowed_items').select('*').order('date_borrowed', { ascending: false }),
+        supabase.from('inventory').select('*').is('archived_at', null).order('item_name', { ascending: true }),
+        supabase
+          .from('accountability_reports')
+          .select('*')
+          .eq('reference_type', 'scanner_requisition')
+          .eq('is_archived', false)
+          .order('created_at', { ascending: false }),
+      ])
 
-      if (borrowedError) throw borrowedError
+      if (borrowedResult.error) throw borrowedResult.error
+      if (inventoryResult.error) throw inventoryResult.error
+      if (scannerResult.error) throw scannerResult.error
 
-      // Fetch inventory items for the add form and to get item details
-      const { data: inventoryData, error: inventoryError } = await supabase
-        .from('inventory')
-        .select('*')
-        .is('archived_at', null)
-        .order('item_name', { ascending: true })
+      const borrowedData = borrowedResult.data
+      const inventoryData = inventoryResult.data
+      const scannerLogs = scannerResult.data
 
-      if (inventoryError) throw inventoryError
-
-      // Create a map of inventory items for quick lookup
       const inventoryMap = new Map(inventoryData?.map((item) => [item.item_id, item]) || [])
 
-      const transformedItems: BorrowedItem[] = (borrowedData || []).map((item: any) => {
+      const transformedItems: BorrowedItem[] = (borrowedData || []).map((item: Tables<'borrowed_items'>) => {
         const inventoryItem = item.item_id ? inventoryMap.get(item.item_id) : null
         return {
           borrowed_id: item.borrowed_id,
@@ -300,7 +428,7 @@ function BorrowedItemsSection() {
           item_name: inventoryItem?.item_name || 'Unknown',
           property_no: inventoryItem?.property_no || null,
           quantity: item.quantity,
-          amount: item.amount,
+          amount: inventoryItem?.unit_cost != null ? Number(inventoryItem.unit_cost) : item.amount,
           borrower_name: item.borrower_name,
           contact_number: item.contact_number,
           date_borrowed: item.date_borrowed,
@@ -308,12 +436,58 @@ function BorrowedItemsSection() {
           date_returned: item.date_returned ?? null,
           location: item.location,
           remarks: item.remarks,
-          item_remarks: item.item_remarks,
+          return_remarks: item.return_remarks ?? null,
           status: item.status,
         }
       })
 
-      setBorrowedItems(transformedItems)
+      const borrowedKeys = new Set(
+        (borrowedData || []).map((item) =>
+          buildBorrowedDedupeKey(
+            item.item_id,
+            item.quantity,
+            item.date_borrowed?.slice(0, 10) ?? '',
+            item.borrower_name,
+          ),
+        ),
+      )
+
+      const scannerLegacyItems: BorrowedItem[] = (scannerLogs || [])
+        .filter((log: AccountabilityRow) => {
+          const key = buildBorrowedDedupeKey(
+            log.item_id,
+            log.quantity_logged,
+            log.issue_date,
+            log.contact_snapshot || 'Staff',
+          )
+          return !borrowedKeys.has(key)
+        })
+        .map((log: AccountabilityRow) => {
+          const inventoryItem = inventoryMap.get(log.item_id)
+          return {
+            borrowed_id: -log.accountability_id,
+            item_id: log.item_id,
+            item_name: inventoryItem?.item_name || log.description_snapshot || 'Unknown',
+            property_no: inventoryItem?.property_no || log.property_no_snapshot || null,
+            quantity: log.quantity_logged,
+            amount: inventoryItem?.unit_cost != null ? Number(inventoryItem.unit_cost) : null,
+            borrower_name: log.contact_snapshot?.trim() || 'Staff',
+            contact_number: null,
+            date_borrowed: log.created_at || `${log.issue_date}T00:00:00.000Z`,
+            return_date: getDefaultReturnDateFromIssue(log.issue_date),
+            date_returned: null,
+            location: null,
+            remarks: log.remarks || 'Borrowed via QR scanner',
+            return_remarks: null,
+            status: 'borrowed',
+          }
+        })
+
+      const mergedItems = [...transformedItems, ...scannerLegacyItems].sort(
+        (a, b) => new Date(b.date_borrowed).getTime() - new Date(a.date_borrowed).getTime(),
+      )
+
+      setBorrowedItems(mergedItems)
       setInventoryItems(inventoryData || [])
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch borrowed items')
@@ -322,7 +496,7 @@ function BorrowedItemsSection() {
     }
   }
 
-  if (loading) {
+  if (loading && borrowedItems.length === 0) {
     return (
       <div className="inventory-layout" aria-label="Borrowed Items">
         <header className="dashboard-header">
@@ -332,20 +506,6 @@ function BorrowedItemsSection() {
           </div>
         </header>
         <div className="inventory-loading">Loading borrowed items...</div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="inventory-layout" aria-label="Borrowed Items">
-        <header className="dashboard-header">
-          <div>
-            <h2>Borrowed Items</h2>
-            <p>Track items currently borrowed by staff and departments</p>
-          </div>
-        </header>
-        <div className="inventory-error">{error}</div>
       </div>
     )
   }
@@ -373,7 +533,7 @@ function BorrowedItemsSection() {
           <button
             type="button"
             className={mode === 'add' ? 'inventory-primary-button' : 'inventory-secondary-button'}
-            onClick={() => setMode('add')}
+            onClick={openAddMode}
           >
             Add Item
           </button>
@@ -392,6 +552,20 @@ function BorrowedItemsSection() {
                 onChange={(e) => setSearchQuery(e.target.value)}
               />
             </div>
+            <div className="inventory-filter-selects">
+              <select
+                id="borrowed-status-filter"
+                className="inventory-filter-select"
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
+                aria-label="Filter by status"
+              >
+                <option value="all">All Statuses</option>
+                <option value="Borrowed">Borrowed</option>
+                <option value="Overdue">Overdue</option>
+                <option value="Returned">Returned</option>
+              </select>
+            </div>
           </section>
 
           <section className="inventory-table-section inventory-table-section-compact" aria-label="Borrowed items table">
@@ -402,6 +576,7 @@ function BorrowedItemsSection() {
                 <th scope="col">No.</th>
                 <th scope="col">Item Name</th>
                 <th scope="col">Qty</th>
+                <th scope="col">Amount</th>
                 <th scope="col">Borrower</th>
                 <th scope="col">Contact No.</th>
                 <th scope="col">Date Borrowed</th>
@@ -413,11 +588,11 @@ function BorrowedItemsSection() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={9}>Loading borrowed items…</td>
+                  <td colSpan={10}>Loading borrowed items…</td>
                 </tr>
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={9}>No borrowed items found.</td>
+                  <td colSpan={10}>No borrowed items found.</td>
                 </tr>
               ) : (
                 paginatedItems.map((item, index) => (
@@ -429,9 +604,10 @@ function BorrowedItemsSection() {
                     <td>{(page - 1) * pageSize + index + 1}</td>
                     <td>{item.item_name}</td>
                     <td>{item.quantity}</td>
+                    <td>{formatCurrency(item.amount)}</td>
                     <td>{item.borrower_name}</td>
                     <td>{item.contact_number || '—'}</td>
-                    <td>{formatDate(item.date_borrowed)}</td>
+                    <td>{formatDateWithTime(item.date_borrowed)}</td>
                     <td>{formatDate(item.return_date)}</td>
                     <td>
                       {(() => {
@@ -449,13 +625,14 @@ function BorrowedItemsSection() {
                       <button
                         type="button"
                         className="borrowed-return-button"
-                        title="Mark as returned"
+                        title={item.borrowed_id < 0 ? 'Legacy scanner record' : 'Mark as returned'}
                         aria-label="Mark as returned"
-                        disabled={getBorrowedItemStatus(item) === 'Returned' || returningId === item.borrowed_id}
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleMarkReturned(item)
-                        }}
+                        disabled={
+                          item.borrowed_id < 0 ||
+                          getBorrowedItemStatus(item) === 'Returned' ||
+                          returningId === item.borrowed_id
+                        }
+                        onClick={(event) => openReturnRemarksModal(item, event)}
                       >
                         {returningId === item.borrowed_id ? '...' : 'Returned'}
                       </button>
@@ -545,7 +722,7 @@ function BorrowedItemsSection() {
                 </label>
                 <input
                   id="add-date-borrowed"
-                  type="date"
+                  type="datetime-local"
                   className="inventory-input"
                   value={addDateBorrowed}
                   onChange={(e) => setAddDateBorrowed(e.target.value)}
@@ -575,18 +752,32 @@ function BorrowedItemsSection() {
                   onChange={(e) => setAddQuantity(e.target.value)}
                 />
               </div>
-              <div className="inventory-field">
-                <label htmlFor="add-amount">Amount</label>
-                <input
-                  id="add-amount"
-                  type="number"
-                  step="0.01"
-                  className="inventory-input"
-                  placeholder="0.00 (optional)"
-                  value={addAmount}
-                  onChange={(e) => setAddAmount(e.target.value)}
-                />
-              </div>
+              {addItemId && (
+                <div className="inventory-field">
+                  <label>Amount (from inventory)</label>
+                  <input
+                    className="inventory-input"
+                    value={formatCurrency(getInventoryAmount(addItemId))}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                </div>
+              )}
+              {addItemId && (
+                <div className="inventory-field">
+                  <label>Available in Inventory</label>
+                  <input
+                    className="inventory-input"
+                    value={(() => {
+                      const item = inventoryItems.find((entry) => entry.item_id.toString() === addItemId)
+                      if (!item) return '—'
+                      return `${item.quantity ?? 0} ${item.unit_of_measure ?? 'unit(s)'}`
+                    })()}
+                    readOnly
+                    aria-readonly="true"
+                  />
+                </div>
+              )}
               <div className="inventory-field">
                 <label htmlFor="add-location">Location</label>
                 <input
@@ -605,17 +796,6 @@ function BorrowedItemsSection() {
                   placeholder="Enter remarks (optional)"
                   value={addRemarks}
                   onChange={(e) => setAddRemarks(e.target.value)}
-                  rows={3}
-                />
-              </div>
-              <div className="inventory-field inventory-field-full">
-                <label htmlFor="add-item-remarks">Item Remarks</label>
-                <textarea
-                  id="add-item-remarks"
-                  className="inventory-input"
-                  placeholder="Enter item remarks (optional)"
-                  value={addItemRemarks}
-                  onChange={(e) => setAddItemRemarks(e.target.value)}
                   rows={3}
                 />
               </div>
@@ -689,13 +869,14 @@ function BorrowedItemsSection() {
                       <th scope="col">Type</th>
                       <th scope="col">Unit</th>
                       <th scope="col">Qty</th>
+                      <th scope="col">Amount</th>
                       <th scope="col">Select</th>
                     </tr>
                   </thead>
                   <tbody>
                     {paginatedItemPickerItems.length === 0 ? (
                       <tr>
-                        <td colSpan={6}>No items match your search.</td>
+                        <td colSpan={7}>No items match your search.</td>
                       </tr>
                     ) : (
                       paginatedItemPickerItems.map((item) => (
@@ -708,7 +889,8 @@ function BorrowedItemsSection() {
                           <td>{item.property_no || '—'}</td>
                           <td>{item.item_type || '—'}</td>
                           <td>{item.unit_of_measure || '—'}</td>
-                          <td>{item.quantity || 0}</td>
+                          <td>{item.quantity ?? 0}</td>
+                          <td>{item.unit_cost != null ? formatCurrency(Number(item.unit_cost)) : '—'}</td>
                           <td>
                             <input
                               type="checkbox"
@@ -826,20 +1008,24 @@ function BorrowedItemsSection() {
                 <p className="wmr-modal-text"><strong>Property No.:</strong> {selectedItem.property_no || '—'}</p>
                 <p className="wmr-modal-text"><strong>Quantity:</strong> {selectedItem.quantity}</p>
                 <p className="wmr-modal-text"><strong>Amount:</strong> {formatCurrency(selectedItem.amount)}</p>
-                <p className="wmr-modal-text"><strong>Date Borrowed:</strong> {formatDate(selectedItem.date_borrowed)}</p>
+                <p className="wmr-modal-text"><strong>Date Borrowed:</strong> {formatDateWithTime(selectedItem.date_borrowed)}</p>
                 <p className="wmr-modal-text"><strong>Return Date:</strong> {formatDate(selectedItem.return_date)}</p>
-                <p className="wmr-modal-text"><strong>Date Returned:</strong> {selectedItem.date_returned ? formatDate(selectedItem.date_returned) : '—'}</p>
+                <p className="wmr-modal-text"><strong>Date Returned:</strong> {selectedItem.date_returned ? formatDateWithTime(selectedItem.date_returned) : '—'}</p>
                 <p className="wmr-modal-text"><strong>Status:</strong> {getBorrowedItemStatus(selectedItem)}</p>
                 <p className="wmr-modal-text inventory-field-full"><strong>Remarks:</strong> {selectedItem.remarks || '—'}</p>
-                <p className="wmr-modal-text inventory-field-full"><strong>Item Remarks:</strong> {selectedItem.item_remarks || '—'}</p>
+                <p className="wmr-modal-text inventory-field-full"><strong>Return Remarks:</strong> {selectedItem.return_remarks || '—'}</p>
               </div>
             </div>
             <div style={{ borderTop: '1px solid #e5e7eb', padding: '12px 18px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
                 className="wmr-modal-button-save"
-                disabled={getBorrowedItemStatus(selectedItem) === 'Returned' || returningId === selectedItem.borrowed_id}
-                onClick={() => void handleMarkReturned(selectedItem)}
+                disabled={
+                  selectedItem.borrowed_id < 0 ||
+                  getBorrowedItemStatus(selectedItem) === 'Returned' ||
+                  returningId === selectedItem.borrowed_id
+                }
+                onClick={() => openReturnRemarksModal(selectedItem)}
               >
                 {returningId === selectedItem.borrowed_id ? 'Saving...' : 'Returned'}
               </button>
@@ -849,6 +1035,68 @@ function BorrowedItemsSection() {
                 onClick={() => setShowDetailModal(false)}
               >
                 Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {returnRemarksModalItem && (
+        <div
+          className="dashboard-drilldown-modal-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="return-remarks-title"
+          onClick={() => setReturnRemarksModalItem(null)}
+        >
+          <div
+            className="dashboard-drilldown-modal"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header className="panel-header dashboard-drilldown-header">
+              <h3 id="return-remarks-title">Mark Item as Returned</h3>
+              <button
+                type="button"
+                className="dashboard-drilldown-close-button"
+                onClick={() => setReturnRemarksModalItem(null)}
+                aria-label="Close"
+              >
+                x
+              </button>
+            </header>
+            <div className="panel-body">
+              <p className="wmr-modal-text">
+                <strong>Item:</strong> {returnRemarksModalItem.item_name}
+              </p>
+              <div className="inventory-field inventory-field-full">
+                <label htmlFor="return-remarks-input">Return Remarks</label>
+                <textarea
+                  id="return-remarks-input"
+                  className="inventory-input"
+                  placeholder="Enter remarks about the condition or receipt of the returned item (optional)"
+                  value={returnRemarksInput}
+                  onChange={(e) => setReturnRemarksInput(e.target.value)}
+                  rows={4}
+                />
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid #e5e7eb', padding: '12px 18px', display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+              <button
+                type="button"
+                className="wmr-modal-button-secondary"
+                onClick={() => setReturnRemarksModalItem(null)}
+                disabled={returningId === returnRemarksModalItem.borrowed_id}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="wmr-modal-button-save"
+                disabled={returningId === returnRemarksModalItem.borrowed_id}
+                onClick={confirmReturnWithRemarks}
+              >
+                {returningId === returnRemarksModalItem.borrowed_id ? 'Saving...' : 'Confirm Returned'}
               </button>
             </div>
           </div>

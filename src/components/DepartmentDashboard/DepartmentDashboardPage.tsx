@@ -77,7 +77,15 @@ function DepartmentDashboardPage({
           />
         )
       case 'scanner':
-        return <DepartmentScannerSection userId={userId} departmentId={departmentId} isReadOnly={isReadOnly} isActive={activeSection === 'scanner'} />
+        return (
+          <DepartmentScannerSection
+            userId={userId}
+            departmentId={departmentId}
+            departmentName={departmentName}
+            isReadOnly={isReadOnly}
+            isActive={activeSection === 'scanner'}
+          />
+        )
       case 'requests':
         return <DepartmentRequestsSection departmentId={departmentId} departmentName={departmentName} userId={userId} isReadOnly={isReadOnly} />
       case 'reports':
