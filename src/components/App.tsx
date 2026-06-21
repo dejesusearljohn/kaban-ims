@@ -76,9 +76,9 @@ function ForcePasswordChange({ userId, onComplete }: { userId: string; onComplet
 
 	return (
 		<main className="signin-page">
-			<div className="signin-shell">
-				<section className="signin-card" aria-label="Change initial password">
-					<div className="signin-right" style={{ margin: '0 auto' }}>
+			<div className="signin-shell signin-shell-compact">
+				<section className="signin-card signin-card-compact" aria-label="Change initial password">
+					<div className="signin-compact-content">
 						<h2 className="signin-heading">CHANGE PASSWORD</h2>
 						<p className="signin-forgot-desc">
 							For account security, set a new password before using KABAN.
