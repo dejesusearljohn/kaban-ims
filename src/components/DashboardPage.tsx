@@ -35,7 +35,7 @@ import '../styles/Reports.css'
 import '../styles/shared.css'
 import { downloadExcel, downloadVehicleLedgerExcel } from '../utils/excel'
 import { downloadInventoryQrPdf } from '../utils/inventoryQrPdf'
-import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getBorrowedItemStatus, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, getReportInventoryTypeFilterLabel, isActiveBorrowedItem, isPackedStockpileItem, isParInventoryItem, isStockpileInventoryItem, buildReportInventoryTypeOptionGroups, equalsDbText, matchesReportInventoryTypeFilter, normalizeInventoryRecord, normalizeParRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, serializeRepackContents, type InventoryKind, type InventoryKindFilter, type RepackContentEntry, type ReportInventoryTypeOptionGroup, type StockpileListKind } from '../utils/itemUtils'
+import { formatInventoryItemId, formatStockpileRowId, findPbOfficeDepartment, findStaffByParNumber, formatOfficeSuppliesAssignee, formatStaffParNumber, generateParPropertyNumber, getBorrowedItemStatus, getInventoryItemCategoryValue, getInventoryKindLabel, getInventoryLocationDisplay, getInventoryQuantityDisplay, getInventoryUnitDisplay, getMaxKindItemNo, getNextKindItemNo, getNextReliefGoodsId, getReportInventoryTypeFilterLabel, isActiveBorrowedItem, isPackedStockpileItem, isParInventoryItem, isStockpileInventoryItem, buildReportInventoryTypeOptionGroups, equalsDbText, matchesReportInventoryTypeFilter, normalizeInventoryRecord, normalizeUserRecord, OFFICE_SUPPLIES_LOCATION_LABEL, PAR_DEFAULT_QUANTITY, PAR_DEFAULT_UNIT, resolveInventoryKind, resolveStaffParNumber, serializeRepackContents, type InventoryKind, type InventoryKindFilter, type RepackContentEntry, type ReportInventoryTypeOptionGroup, type StockpileListKind } from '../utils/itemUtils'
 import { getStatusBadgeClass } from '../utils/statusBadge'
 import { getPhotoFileSizeLimitError, isPhotoFileWithinSizeLimit, validatePhotoFilesSelection } from '../utils/photoUtils'
 import { useSupabaseRealtime } from '../hooks/useSupabaseRealtime'
@@ -169,8 +169,6 @@ const DEFAULT_ITEM_TYPES = [
   'Office Supplies',
   'Stockpile',
 ]
-
-const isLoanableParItem = (item: InventoryRow) => isParInventoryItem(item)
 
 const DEFAULT_UNITS_OF_MEASURE = [
   'Piece(s)',
@@ -1331,8 +1329,11 @@ function DashboardPage() {
 
     return dateValue >= start && dateValue <= end
   }
-  const calculateTotalCost = (quantity: number | null, unitCost: number | null) =>
-    quantity != null && unitCost != null ? quantity * unitCost : null
+  const calculateTotalCost = (quantity: number | string | null, unitCost: number | null) => {
+    if (quantity == null || unitCost == null) return null
+    const quantityValue = Number(quantity)
+    return Number.isFinite(quantityValue) ? quantityValue * unitCost : null
+  }
 
   const getVehicleDisplayLabel = (vehicle: VehicleRow) => {
     const vehicleName = vehicle.vehicle_name?.trim()
@@ -4304,9 +4305,12 @@ function DashboardPage() {
 
           if (qrError) throw qrError
 
-          item = (data ?? item) as InventoryRow
-          qrCode = item.qr_code ?? qrValue
-          setInventoryItems((prev) => prev.map((row) => (row.item_id === item.item_id ? item : row)))
+          const updatedItem = (data ?? item) as InventoryRow
+          item = updatedItem
+          qrCode = updatedItem.qr_code ?? qrValue
+          setInventoryItems((prev) =>
+            prev.map((row) => (row.item_id === updatedItem.item_id ? updatedItem : row)),
+          )
         }
 
         pdfItems.push({

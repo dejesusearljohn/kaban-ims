@@ -465,7 +465,7 @@ export default function DepartmentShiftTurnoverSection({ userId, departmentId, i
 
     let { error: checkItemsError } = await supabase
       .from('daily_check_items')
-      .insert(checkItems)
+      .insert(checkItems as never)
 
     if (checkItemsError && isMissingColumnError(checkItemsError, 'quantity_checked')) {
       const fallbackCheckItems = checkItems.map(({ quantity_checked, remarks, ...row }) => ({
